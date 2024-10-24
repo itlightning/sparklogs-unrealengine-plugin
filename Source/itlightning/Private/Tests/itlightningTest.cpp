@@ -83,7 +83,7 @@ bool ITLComparePayloads(FAutomationTestBase* T, const TArray<FString>& Actual, c
     }
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestSkipByteMarker, "itlightning.UnitTests.SkipByteMarker", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestSkipByteMarker, "itlightning.UnitTests.SkipByteMarker", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
 bool FitlightningPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
@@ -118,7 +118,59 @@ bool FitlightningPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestUnicode, "itlightning.UnitTests.Unicode", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestMultiline, "itlightning.UnitTests.Multiline", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+bool FitlightningPluginUnitTestMultiline::RunTest(const FString& Parameters)
+{
+    FTempDirectory TempDir(ITLGetTestDir());
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+
+    TArray<FString> ExpectedPayloads;
+
+    TSharedRef<IFileHandle> LogWriter(FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*TestLogFile, true, true));
+    ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nSecond line is longer\r\n3\r\n   fourth line    \t\r\n"));
+    LogWriter->Flush();
+
+    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    Settings->IncludeCommonMetadata = false;
+    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
+    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024);
+    ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Second line is longer\"},{\"message\":\"3\"},{\"message\":\"   fourth line    \\t\"}]"));
+    bool FlushedEverything = false;
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, true, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
+    TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
+
+    Streamer.Reset();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestNewlines, "itlightning.UnitTests.Newlines", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+bool FitlightningPluginUnitTestNewlines::RunTest(const FString& Parameters)
+{
+    FTempDirectory TempDir(ITLGetTestDir());
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+
+    TArray<FString> ExpectedPayloads;
+
+    TSharedRef<IFileHandle> LogWriter(FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*TestLogFile, true, true));
+    ITLWriteStringToFile(LogWriter, TEXT("\t\n\n\r\n\nlinux\nskip\rslash\rR\n \r\n \n"));
+    LogWriter->Flush();
+
+    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    Settings->IncludeCommonMetadata = false;
+    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
+    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024);
+    ExpectedPayloads.Add(TEXT("[{\"message\":\"\\t\"},{\"message\":\"linux\"},{\"message\":\"skip\\rslash\\rR\"},{\"message\":\" \"},{\"message\":\" \"}]"));
+    bool FlushedEverything = false;
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, true, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
+    TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
+
+    Streamer.Reset();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestUnicode, "itlightning.UnitTests.Unicode", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
 bool FitlightningPluginUnitTestUnicode::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
@@ -145,7 +197,7 @@ bool FitlightningPluginUnitTestUnicode::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestMaxLineSize, "itlightning.UnitTests.MaxLineSize", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestMaxLineSize, "itlightning.UnitTests.MaxLineSize", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
 bool FitlightningPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
@@ -176,6 +228,45 @@ bool FitlightningPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
     TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, true, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestFalse(TEXT("FlushAndWait[FINAL] should NOT capture everything"), FlushedEverything);
+
+    Streamer.Reset();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestMaxLineSizeUnicode, "itlightning.UnitTests.MaxLineSizeUnicode", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+bool FitlightningPluginUnitTestMaxLineSizeUnicode::RunTest(const FString& Parameters)
+{
+    FTempDirectory TempDir(ITLGetTestDir());
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+
+    TArray<FString> ExpectedPayloads;
+    // IMPORTANT: this is in *bytes* and we do not split a line in the middle of a Unicode character
+    constexpr int MaxLineSize = 8;
+
+    TSharedRef<IFileHandle> LogWriter(FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*TestLogFile, true, true));
+    // One line that is 2x size of max line, then an unfinished line that is 1/2x size of max line
+    // NOTE: π requires 2 bytes to encode in UTF-8
+    ITLWriteStringToFile(LogWriter, TEXT("1234ππ5678π34\r\n1π4"));
+    LogWriter->Flush();
+
+    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    Settings->IncludeCommonMetadata = false;
+    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
+    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, MaxLineSize);
+    ExpectedPayloads.Add(TEXT("[{\"message\":\"1234\"},{\"message\":\"ππ5678\"},{\"message\":\"π34\"}]"));
+    bool FlushedEverything = false;
+    TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[1] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
+    TestFalse(TEXT("FlushAndWait[1] should NOT capture everything"), FlushedEverything);
+
+    // Finish the line that is 1/2x the max line size, then 1x that is exactly the same, then another line that is a little over, then end with an incomplete line
+    // NOTE: Ω takes 3 bytes to encode in UTF-8
+    ITLWriteStringToFile(LogWriter, TEXT("\r\n123Ω78\r\n12345Ωπ\r\nΩ\r\n"));
+    LogWriter->Flush();
+    ExpectedPayloads.Add(TEXT("[{\"message\":\"1π4\"},{\"message\":\"123Ω78\"},{\"message\":\"12345\"},{\"message\":\"Ωπ\"},{\"message\":\"Ω\"}]"));
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, true, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
+    TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
 
     Streamer.Reset();
     return true;
