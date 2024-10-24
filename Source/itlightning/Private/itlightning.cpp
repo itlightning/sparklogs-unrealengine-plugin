@@ -13,6 +13,12 @@ constexpr int GMaxLineLength = 16 * 1024;
 
 static uint8 UTF8ByteOrderMark[3] = {0xEF, 0xBB, 0xBF};
 
+FString ITLConvertUTF8(const void* Data, int Len)
+{
+	FUTF8ToTCHAR Converter((const ANSICHAR*)(Data), Len);
+	return FString(Converter.Length(), Converter.Get());
+}
+
 const TCHAR* GetITLGameMode(bool ForINISection)
 {
 	if (GIsEditor)
@@ -101,6 +107,7 @@ FitlightningSettings::FitlightningSettings()
 	, BytesPerRequest(DefaultBytesPerRequest)
 	, ProcessIntervalSec(DefaultProcessIntervalSec)
 	, RetryIntervalSec(DefaultRetryIntervalSec)
+	, IncludeCommonMetadata(DefaultIncludeCommonMetadata)
 {
 }
 
@@ -137,6 +144,11 @@ void FitlightningSettings::LoadSettings()
 	if (!GConfig->GetDouble(*Section, TEXT("RetryIntervalSec"), RetryIntervalSec, GEngineIni))
 	{
 		RetryIntervalSec = DefaultRetryIntervalSec;
+	}
+
+	if (!GConfig->GetBool(*Section, TEXT("IncludeCommonMetadata"), IncludeCommonMetadata, GEngineIni))
+	{
+		IncludeCommonMetadata = DefaultIncludeCommonMetadata;
 	}
 
 	EnforceConstraints();
@@ -210,10 +222,14 @@ FitlightningReadAndStreamToCloud::FitlightningReadAndStreamToCloud(const TCHAR* 
 	, WorkerMinNextFlushPlatformTime(0)
 {
 	ProgressMarkerPath = FPaths::Combine(FPaths::GetPath(InSourceLogFile), GetITLPluginStateFilename());
-	ComputeCommonEventJSON();
+	if (Settings->IncludeCommonMetadata)
+	{
+		ComputeCommonEventJSON();
+	}
 
 	WorkerBuffer.AddUninitialized(Settings->BytesPerRequest);
 	WorkerNextPayload.AddUninitialized(Settings->BytesPerRequest + 4096 + (Settings->BytesPerRequest / 10));
+	check(MaxLineLength > 0);
 	check(FPlatformProcess::SupportsMultithreading());
 	FString ThreadName = FString::Printf(TEXT("ITLightning_Reader_%s"), *FPaths::GetBaseFilename(InSourceLogFile));
 	FPlatformAtomics::InterlockedExchangePtr((void**)&Thread, FRunnableThread::Create(this, *ThreadName, 0, TPri_BelowNormal));
@@ -412,19 +428,20 @@ void AppendUTF8AsEscapedJsonString(TITLJSONStringBuilder& Builder, const ANSICHA
 	Builder.Append('\"');
 }
 
-bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int& OutCapturedOffset)
+bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int& OutCapturedOffset, int& OutNumCapturedLines)
 {
 	OutCapturedOffset = 0;
 	const uint8* BufferData = WorkerBuffer.GetData();
+	OutNumCapturedLines = 0;
 	WorkerNextPayload.Reset();
 	WorkerNextPayload.Append('[');
-	int NumCapturedLines = 0;
 	int NextOffset = 0;
 	while (NextOffset < NumToRead)
 	{
 		// Skip the UTF-8 byte order marker (always at the start of the file)
 		if (0 == std::memcmp(BufferData + NextOffset, UTF8ByteOrderMark, sizeof(UTF8ByteOrderMark)))
 		{
+			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: skipping UTF8 BOM: offset_before=%d, offset_after=%d"), NextOffset, NextOffset + sizeof(UTF8ByteOrderMark));
 			NextOffset += sizeof(UTF8ByteOrderMark);
 			OutCapturedOffset = NextOffset;
 			continue;
@@ -435,12 +452,14 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 		int FoundIndex = 0;
 		int ExtraToSkip = 1; // skip over the \n char
 		bool HaveLine = FindFirstByte(BufferData + NextOffset, static_cast<uint8>('\n'), NumToSearch, FoundIndex);
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: after newline search: NextOffset=%d, HaveLine=%d, NumToSearch=%d, FoundIndex=%d"), NextOffset, (int)HaveLine, NumToSearch, FoundIndex);
 		if (!HaveLine && NumToSearch == MaxLineLength && RemainingBytes > NumToSearch)
 		{
 			// Even though we didn't find a line, break the line at the max length and process it
 			// It's unsafe to break a line in the middle of a multi-byte UTF-8, so find a safe break point...
 			ExtraToSkip = 0;
-			FoundIndex = MaxLineLength;
+			FoundIndex = MaxLineLength - 1;
+			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: no newline found, search for safe breakpoint: NextOffset=%d, FoundIndex=%d"), NextOffset, FoundIndex);
 			while (FoundIndex > 0)
 			{
 				if (*(BufferData + NextOffset + FoundIndex) >= 0x80)
@@ -455,20 +474,23 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 				}
 			}
 			HaveLine = true;
+			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: found safe breakpoint: NextOffset=%d, FoundIndex=%d, ExtraToSkip=%d"), NextOffset, FoundIndex, ExtraToSkip);
 		}
 		if (!HaveLine)
 		{
 			// No more complete lines to process, this is enough for now
+			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: no more lines to process, break"));
 			break;
 		}
 		// Trim newlines control characters of any kind at the end
 		while (FoundIndex > 0)
 		{
-			// We expect the FoundIndex to be the *first* non-newline character.
+			// We expect the FoundIndex to be the *first* non-newline character, and ExtraToSkip set to the number of newline chars to skip.
 			// Check if the previous character is a newline character, and if so, skip capturing it.
 			uint8 c = *(BufferData + NextOffset + FoundIndex - 1);
 			if (c == '\n' || c == '\r')
 			{
+				ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: character at NextOffset=%d, FoundIndex=%d is newline, will skip it"), NextOffset, FoundIndex);
 				ExtraToSkip++;
 				FoundIndex--;
 			}
@@ -477,9 +499,11 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 				break;
 			}
 		}
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: line summary: NextOffset=%d, FoundIndex=%d, ExtraToSkip=%d"), NextOffset, FoundIndex, ExtraToSkip);
 		// Skip blank lines without capturing anything
 		if (FoundIndex <= 0)
 		{
+			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: skipping blank line..."));
 			if (ExtraToSkip <= 0)
 			{
 				ExtraToSkip = 1;
@@ -490,7 +514,7 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 		}
 		// Capture the data from (BufferData + NextOffset) to (BufferData + NextOffset + FoundIndex)
 		// NOTE: the data in the logfile was already written in UTF-8 format
-		if (NumCapturedLines > 0)
+		if (OutNumCapturedLines > 0)
 		{
 			WorkerNextPayload.Append(',');
 		}
@@ -502,8 +526,9 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 		}
 		WorkerNextPayload.Append("\"message\":", 10 /* length of `"message":` */);
 		AppendUTF8AsEscapedJsonString(WorkerNextPayload, (const ANSICHAR*)(BufferData + NextOffset), FoundIndex);
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: adding message to payload: %s"), *ITLConvertUTF8(BufferData + NextOffset, FoundIndex));
 		WorkerNextPayload.Append('}');
-		NumCapturedLines++;
+		OutNumCapturedLines++;
 		NextOffset += FoundIndex + ExtraToSkip;
 		OutCapturedOffset = NextOffset;
 	}
@@ -549,18 +574,25 @@ bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippe
 		UE_LOG(LogPluginITLightning, Warning, TEXT("STREAMER: Failed to read data: offset=%ld, bytes=%ld, logfile='%s'"), EffectiveShippedLogOffset, NumToRead, *SourceLogFile);
 		return false;
 	}
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: read data into buffer: offset=%ld, data_len=%d, data=%s, logfile='%s'"), EffectiveShippedLogOffset, NumToRead, *ITLConvertUTF8(BufferData, NumToRead), *SourceLogFile);
 	
 	int CapturedOffset = 0;
-	if (!WorkerBuildNextPayload(NumToRead, CapturedOffset))
+	int NumCapturedLines = 0;
+	if (!WorkerBuildNextPayload(NumToRead, CapturedOffset, NumCapturedLines))
 	{
 		UE_LOG(LogPluginITLightning, Warning, TEXT("STREAMER: Failed to build payload: offset=%ld, captured_offset=%d, logfile='%s'"), EffectiveShippedLogOffset, CapturedOffset, *SourceLogFile);
 		return false;
 	}
 
-	if (!PayloadProcessor->ProcessPayload((const uint8*)WorkerNextPayload.GetData(), WorkerNextPayload.Len()))
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: payload is ready to process: offset=%ld, captured_offset=%d, captured_lines=%d, data_len=%d, data=%s, logfile='%s'"),
+		EffectiveShippedLogOffset, CapturedOffset, NumCapturedLines, WorkerNextPayload.Len(), *ITLConvertUTF8(WorkerNextPayload.GetData(), WorkerNextPayload.Len()), *SourceLogFile);
+	if (NumCapturedLines > 0)
 	{
-		UE_LOG(LogPluginITLightning, Warning, TEXT("STREAMER: Failed to process payload: offset=%ld, captured_offset=%d, logfile='%s'"), EffectiveShippedLogOffset, CapturedOffset, *SourceLogFile);
-		return false;
+		if (!PayloadProcessor->ProcessPayload((const uint8*)WorkerNextPayload.GetData(), WorkerNextPayload.Len()))
+		{
+			UE_LOG(LogPluginITLightning, Warning, TEXT("STREAMER: Failed to process payload: offset=%ld, captured_offset=%d, logfile='%s'"), EffectiveShippedLogOffset, CapturedOffset, *SourceLogFile);
+			return false;
+		}
 	}
 	int ProcessedOffset = CapturedOffset;
 

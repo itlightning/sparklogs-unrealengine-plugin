@@ -11,6 +11,18 @@
 
 DECLARE_LOG_CATEGORY_EXTERN(LogPluginITLightning, Log, All);
 
+#define ITL_INTERNAL_DEBUG_LOGGING 1
+#if ITL_INTERNAL_DEBUG_LOGGING == 1
+#define ITL_DBG_UE_LOG(LogCategory, Verbosity, Format, ...) \
+	UE_LOG(LogCategory, Verbosity, TEXT("DEBUGDEBUGDEBUG: " Format), ##__VA_ARGS__)
+#else
+#define ITL_DBG_UE_LOG(LogCategory, Verbosity, Format, ...) \
+	do { } while (0);
+#endif
+
+/** Convenience function to convert UTF8 data to an FString. Can incur allocations so use sparingly or only on debug paths. */
+FString ITLConvertUTF8(const void* Data, int Len);
+
 /**
  * Manages plugin settings.
  */
@@ -27,6 +39,7 @@ public:
 	static constexpr double DefaultRetryIntervalSec = 10.0;
 	static constexpr double MinRetryIntervalSec = 1.0;
 	static constexpr double WaitForFlushToCloudOnShutdown = 15.0;
+	static constexpr bool DefaultIncludeCommonMetadata = true;
 
 	/** ID of the agent when pushing logs to the cloud */
 	FString AgentID;
@@ -40,6 +53,8 @@ public:
 	double ProcessIntervalSec;
 	/** The amount of time to wait after a failed request before retrying. */
 	double RetryIntervalSec;
+	/** Whether or not to include common metadata in each log event. */
+	bool IncludeCommonMetadata;
 
 	FitlightningSettings();
 
@@ -138,7 +153,7 @@ public:
 
 protected:
 	/** [WORKER] Build the JSON payload from as much of the data in WorkerBuffer as possible, up to NumToRead bytes. Sets OutCapturedOffset to the number of bytes captured into the payload. Returns false on failure. Do not call directly. */
-	virtual bool WorkerBuildNextPayload(int NumToRead, int& OutCapturedOffset);
+	virtual bool WorkerBuildNextPayload(int NumToRead, int& OutCapturedOffset, int& OutNumCapturedLines);
 	/** [WORKER] Does the actual work for the flush operation, returns true on success. Does not update progress marker or thread state. Do not call directly. */
 	virtual bool WorkerInternalDoFlush(int64& OutNewShippedLogOffset, bool& OutFlushProcessedEverything);
 	/** [WORKER] Attempts to flush any newly available logs to the cloud. Response for updating flush op counters, LastFlushProcessedEverything, and MinNextFlushPlatformTime state. Returns false on failure. Only call from worker thread. */
