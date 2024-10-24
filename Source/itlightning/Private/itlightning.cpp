@@ -256,13 +256,19 @@ uint32 FitlightningReadAndStreamToCloud::Run()
 	// A pending flush will be processed before stopping
 	while (StopRequestCounter.GetValue() == 0 || FlushRequestCounter.GetValue() > 0)
 	{
-		if (FlushRequestCounter.GetValue() > 0)
+		// Only allow manual flushes if we are not in a retry delay because the last operation failed.
+		if (WorkerLastFlushFailed == false && FlushRequestCounter.GetValue() > 0)
 		{
 			FlushRequestCounter.Decrement();
 			WorkerDoFlush();
 		}
 		else if (FPlatformTime::Seconds() > WorkerMinNextFlushPlatformTime)
 		{
+			// If we are waiting on a manual flush, and the retry timer finally expired, it's OK to mark this attempt as processing it.
+			if (FlushRequestCounter.GetValue() > 0)
+			{
+				FlushRequestCounter.Decrement();
+			}
 			WorkerDoFlush();
 		}
 		else
@@ -280,10 +286,16 @@ void FitlightningReadAndStreamToCloud::Stop()
 	StopRequestCounter.Increment();
 }
 
-bool FitlightningReadAndStreamToCloud::FlushAndWait(int N, bool InitiateStop, double TimeoutSec, bool& OutLastFlushProcessedEverything)
+bool FitlightningReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer, bool InitiateStop, double TimeoutSec, bool& OutLastFlushProcessedEverything)
 {
 	OutLastFlushProcessedEverything = false;
 	bool WasSuccessful = true;
+
+	if (ClearRetryTimer)
+	{
+		WorkerLastFlushFailed.AtomicSet(false);
+	}
+
 	for (int i = 0; i < N; i++)
 	{
 		int StartFlushSuccessOpCounter = FlushSuccessOpCounter.GetValue();
@@ -552,6 +564,7 @@ bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippe
 		return false;
 	}
 	int64 FileSize = WorkerReader->Size();
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: opened log file: last_offset=%ld, current_file_size=%ld, logfile='%s'"), EffectiveShippedLogOffset, FileSize, *SourceLogFile);
 	if (EffectiveShippedLogOffset > FileSize)
 	{
 		UE_LOG(LogPluginITLightning, Log, TEXT("STREAMER: Logfile reduced size, re-reading from start: new_size=%ld, previously_processed_to=%ld, logfile='%s'"), FileSize, EffectiveShippedLogOffset, *SourceLogFile);
@@ -590,7 +603,7 @@ bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippe
 	{
 		if (!PayloadProcessor->ProcessPayload((const uint8*)WorkerNextPayload.GetData(), WorkerNextPayload.Len()))
 		{
-			UE_LOG(LogPluginITLightning, Warning, TEXT("STREAMER: Failed to process payload: offset=%ld, captured_offset=%d, logfile='%s'"), EffectiveShippedLogOffset, CapturedOffset, *SourceLogFile);
+			UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: Failed to process payload: offset=%ld, captured_offset=%d, logfile='%s'"), EffectiveShippedLogOffset, CapturedOffset, *SourceLogFile);
 			return false;
 		}
 	}
@@ -612,11 +625,13 @@ bool FitlightningReadAndStreamToCloud::WorkerDoFlush()
 	bool Result = WorkerInternalDoFlush(ShippedNewLogOffset, FlushProcessedEverything);
 	if (!Result)
 	{
+		WorkerLastFlushFailed.AtomicSet(true);
 		WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds() + Settings->RetryIntervalSec;
 		LastFlushProcessedEverything.AtomicSet(false);
 	}
 	else
 	{
+		WorkerLastFlushFailed.AtomicSet(false);
 		WorkerShippedLogOffset = ShippedNewLogOffset;
 		WriteProgressMarker(ShippedNewLogOffset);
 		WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds() + Settings->ProcessIntervalSec;
@@ -693,7 +708,7 @@ void FitlightningModule::ShutdownModule()
 		if (CloudStreamer.IsValid())
 		{
 			bool LastFlushProcessedEverything = false;
-			if (CloudStreamer->FlushAndWait(2, true, FitlightningSettings::WaitForFlushToCloudOnShutdown, LastFlushProcessedEverything))
+			if (CloudStreamer->FlushAndWait(2, true, true, FitlightningSettings::WaitForFlushToCloudOnShutdown, LastFlushProcessedEverything))
 			{
 				FString LogFilePath = GetITLInternalGameLog().LogFilePath;
 				UE_LOG(LogPluginITLightning, Log, TEXT("Flushed logs successfully. LastFlushedEverything=%d"), (int)LastFlushProcessedEverything);

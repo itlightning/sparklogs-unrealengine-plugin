@@ -11,10 +11,10 @@
 
 DECLARE_LOG_CATEGORY_EXTERN(LogPluginITLightning, Log, All);
 
-#define ITL_INTERNAL_DEBUG_LOGGING 1
+#define ITL_INTERNAL_DEBUG_LOGGING 0
 #if ITL_INTERNAL_DEBUG_LOGGING == 1
 #define ITL_DBG_UE_LOG(LogCategory, Verbosity, Format, ...) \
-	UE_LOG(LogCategory, Verbosity, TEXT("DEBUGDEBUGDEBUG: " Format), ##__VA_ARGS__)
+	UE_LOG(LogCategory, Verbosity, TEXT("DEBUGDEBUGDEBUG(%.3lf): " Format), FPlatformTime::Seconds(), ##__VA_ARGS__)
 #else
 #define ITL_DBG_UE_LOG(LogCategory, Verbosity, Format, ...) \
 	do { } while (0);
@@ -127,13 +127,15 @@ protected:
 	int64 WorkerShippedLogOffset;
 	/** [WORKER] If non-zero, the minimum time when we can attempt to flush to cloud again automatically. Useful to wait longer to retry after a failure. */
 	double WorkerMinNextFlushPlatformTime;
+	/** Whether or not the next flush platform time is because of a failure. */
+	FThreadSafeBool WorkerLastFlushFailed;
 
 	virtual void ComputeCommonEventJSON();
 
 public:
 
 	FitlightningReadAndStreamToCloud(const TCHAR* SourceLogFile, TSharedRef<FitlightningSettings> InSettings, TSharedRef<IitlightningPayloadProcessor> InPayloadProcessor, int InMaxLineLength);
-	virtual ~FitlightningReadAndStreamToCloud();
+	~FitlightningReadAndStreamToCloud();
 
 	//~ Begin FRunnable Interface
 	virtual bool Init();
@@ -141,8 +143,8 @@ public:
 	virtual void Stop();
 	//~ End FRunnable Interface
 
-	/** Initiate Flush up to N times, optionally initiate Stop, and wait up through a timeout for each flush to complete. Returns false on timeout or if the flush failed. */
-	virtual bool FlushAndWait(int N, bool InitiateStop, double TimeoutSec, bool& OutLastFlushProcessedEverything);
+	/** Initiate Flush up to N times, optionally clear retry timer to try again immediately, optionally initiate Stop, and wait up through a timeout for each flush to complete. Returns false on timeout or if the flush failed. */
+	virtual bool FlushAndWait(int N, bool ClearRetryTimer, bool InitiateStop, double TimeoutSec, bool& OutLastFlushProcessedEverything);
 
 	/** Read the progress marker. Returns false on failure. */
 	virtual bool ReadProgressMarker(int64& OutMarker);
