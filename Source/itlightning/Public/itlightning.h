@@ -31,16 +31,23 @@ class FitlightningSettings
 public:
 	static constexpr TCHAR* PluginStateSection = TEXT("PluginState");
 
+	static constexpr double DefaultRequestTimeoutSecs = 30;
+	static constexpr double MinRequestTimeoutSecs = 5;
 	static constexpr int DefaultBytesPerRequest = 1024 * 1024;
 	static constexpr int MinBytesPerRequest = 1024 * 16;
 	static constexpr int MaxBytesPerRequest = 1024 * 1024 * 4;
-	static constexpr double DefaultProcessIntervalSec = 1.0;
-	static constexpr double MinProcessIntervalSec = 0.2;
-	static constexpr double DefaultRetryIntervalSec = 10.0;
-	static constexpr double MinRetryIntervalSec = 1.0;
+	static constexpr double DefaultProcessIntervalSecs = 1.0;
+	static constexpr double MinProcessIntervalSecs = 0.2;
+	static constexpr double DefaultRetryIntervalSecs = 10.0;
+	static constexpr double MinRetryIntervalSecs = 1.0;
 	static constexpr double WaitForFlushToCloudOnShutdown = 15.0;
 	static constexpr bool DefaultIncludeCommonMetadata = true;
+	static constexpr bool DefaultLogRequests = false;
 
+	/** The URI of the endpoint to push log payloads to */
+	FString HttpEndpointURI;
+	/** Request timeout in seconds */
+	double RequestTimeoutSecs;
 	/** ID of the agent when pushing logs to the cloud */
 	FString AgentID;
 	/** Auth token associated with the agent when pushing logs to the cloud */
@@ -50,11 +57,13 @@ public:
 	/** Desired maximum bytes to read and process at one time (one "chunk"). */
 	int32 BytesPerRequest;
 	/** Desired seconds between attempts to read and process a chunk. */
-	double ProcessIntervalSec;
+	double ProcessIntervalSecs;
 	/** The amount of time to wait after a failed request before retrying. */
-	double RetryIntervalSec;
+	double RetryIntervalSecs;
 	/** Whether or not to include common metadata in each log event. */
 	bool IncludeCommonMetadata;
+	/** Whether or not to log requests */
+	bool LogRequests;
 
 	FitlightningSettings();
 
@@ -66,6 +75,8 @@ protected:
 	void EnforceConstraints();
 };
 
+class FitlightningReadAndStreamToCloud;
+
 /**
  * An interface that takes a JSON log payload from the WORKER thread of the streamer, and processes it.
  */
@@ -74,7 +85,7 @@ class IitlightningPayloadProcessor
 public:
 	virtual ~IitlightningPayloadProcessor() = default;
 	/** Processes the JSON payload, and returns true on success or false on failure. */
-	virtual bool ProcessPayload(const uint8* JSONPayloadInUTF8, int PayloadLen) = 0;
+	virtual bool ProcessPayload(const uint8* JSONPayloadInUTF8, int PayloadLen, FitlightningReadAndStreamToCloud* Streamer) = 0;
 };
 
 /** A payload processor that writes the data to a local file (for DEBUG purposes only). */
@@ -84,7 +95,22 @@ protected:
 	FString OutputFilePath;
 public:
 	FitlightningWriteNDJSONPayloadProcessor(FString InOutputFilePath);
-	virtual bool ProcessPayload(const uint8* JSONPayloadInUTF8, int PayloadLen) override;
+	virtual bool ProcessPayload(const uint8* JSONPayloadInUTF8, int PayloadLen, FitlightningReadAndStreamToCloud* Streamer) override;
+};
+
+/** A payload processor that synchronously POSTs the data to an HTTP(S) endpoint. */
+class FitlightningWriteHTTPPayloadProcessor : public IitlightningPayloadProcessor
+{
+protected:
+	FString EndpointURI;
+	FString AuthorizationHeader;
+	FThreadSafeCounter TimeoutMillisec;
+	TArray<uint8> InternalBuffer;
+	bool LogRequests;
+public:
+	FitlightningWriteHTTPPayloadProcessor(const TCHAR* InEndpointURI, const TCHAR* InAuthorizationHeader, double InTimeoutSecs, bool InLogRequests);
+	virtual bool ProcessPayload(const uint8* JSONPayloadInUTF8, int PayloadLen, FitlightningReadAndStreamToCloud* Streamer) override;
+	void SetTimeoutSecs(double InTimeoutSecs);
 };
 
 using TITLJSONStringBuilder = TAnsiStringBuilder<4 * 1024>;
@@ -181,4 +207,6 @@ private:
 	bool LoggingActive;
 	TSharedRef<FitlightningSettings> Settings;
 	TUniquePtr<FitlightningReadAndStreamToCloud> CloudStreamer;
+	/** The payload processor that sends data to the cloud */
+	TSharedPtr<FitlightningWriteHTTPPayloadProcessor> CloudPayloadProcessor;
 };

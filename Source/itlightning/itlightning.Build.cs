@@ -1,6 +1,7 @@
 // Copyright (C) 2024 IT Lightning, LLC. All rights reserved.
 // Licensed software - see LICENSE
 
+using System.IO;
 using UnrealBuildTool;
 
 public class itlightning : ModuleRules
@@ -11,23 +12,25 @@ public class itlightning : ModuleRules
 		
 		PublicIncludePaths.AddRange(
 			new string[] {
-				"itlightning/Public"
-			}
+                Path.Combine(ModuleDirectory, "Public")
+            }
 			);
 
 
         PrivateIncludePaths.AddRange(
 			new string[] {
-                "itlightning/Private"
+                Path.Combine(ModuleDirectory, "Private"),
+                Path.Combine(EngineDirectory, "Source/Runtime/Tracelog/Private")
             }
 			);
-			
+
+		//AddEngineThirdPartyPrivateStaticDependencies(Target, "zlib");
 		
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
 				"Core",
-				// ... add other public dependencies that you statically link with here ...
+				"HTTP"
 			}
 			);
 

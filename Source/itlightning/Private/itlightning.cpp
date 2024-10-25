@@ -4,6 +4,20 @@
 #include "itlightning.h"
 #include <GenericPlatformOutputDevices.h>
 #include <OutputDeviceFile.h>
+#include <Interfaces/IHttpResponse.h>
+#include <HttpModule.h>
+
+/*
+#if UE_BUILD_SHIPPING
+	#include "Compression/lz4.h"
+#else
+	#include "Trace/LZ4/lz4.c.inl"
+#endif
+*/
+#define LZ4_NAMESPACE ITLLZ4
+#include "Trace/LZ4/lz4.c.inl"
+#undef LZ4_NAMESPACE
+
 
 #define LOCTEXT_NAMESPACE "FitlightningModule"
 
@@ -103,17 +117,26 @@ FITLLogOutputDeviceInitializer& GetITLInternalOpsLog()
 }
 
 FitlightningSettings::FitlightningSettings()
-	: ActivationPercent(100.0)
+	: RequestTimeoutSecs(DefaultRequestTimeoutSecs)
+	, ActivationPercent(100.0)
 	, BytesPerRequest(DefaultBytesPerRequest)
-	, ProcessIntervalSec(DefaultProcessIntervalSec)
-	, RetryIntervalSec(DefaultRetryIntervalSec)
+	, ProcessIntervalSecs(DefaultProcessIntervalSecs)
+	, RetryIntervalSecs(DefaultRetryIntervalSecs)
 	, IncludeCommonMetadata(DefaultIncludeCommonMetadata)
+	, LogRequests(DefaultLogRequests)
 {
 }
 
 void FitlightningSettings::LoadSettings()
 {
 	FString Section = GetITLINISectionName();
+
+	HttpEndpointURI = GConfig->GetStr(*Section, TEXT("HttpEndpointURI"), GEngineIni);
+	if (!GConfig->GetDouble(*Section, TEXT("RequestTimeoutSecs"), RequestTimeoutSecs, GEngineIni))
+	{
+		RequestTimeoutSecs = DefaultRequestTimeoutSecs;
+	}
+
 	AgentID = GConfig->GetStr(*Section, TEXT("AgentID"), GEngineIni);
 	AuthToken = GConfig->GetStr(*Section, TEXT("AuthToken"), GEngineIni);
 	
@@ -137,18 +160,22 @@ void FitlightningSettings::LoadSettings()
 	{
 		BytesPerRequest = DefaultBytesPerRequest;
 	}
-	if (!GConfig->GetDouble(*Section, TEXT("ProcessIntervalSec"), ProcessIntervalSec, GEngineIni))
+	if (!GConfig->GetDouble(*Section, TEXT("ProcessIntervalSecs"), ProcessIntervalSecs, GEngineIni))
 	{
-		ProcessIntervalSec = DefaultProcessIntervalSec;
+		ProcessIntervalSecs = DefaultProcessIntervalSecs;
 	}
-	if (!GConfig->GetDouble(*Section, TEXT("RetryIntervalSec"), RetryIntervalSec, GEngineIni))
+	if (!GConfig->GetDouble(*Section, TEXT("RetryIntervalSecs"), RetryIntervalSecs, GEngineIni))
 	{
-		RetryIntervalSec = DefaultRetryIntervalSec;
+		RetryIntervalSecs = DefaultRetryIntervalSecs;
 	}
 
 	if (!GConfig->GetBool(*Section, TEXT("IncludeCommonMetadata"), IncludeCommonMetadata, GEngineIni))
 	{
 		IncludeCommonMetadata = DefaultIncludeCommonMetadata;
+	}
+	if (!GConfig->GetBool(*Section, TEXT("DebugLogRequests"), LogRequests, GEngineIni))
+	{
+		LogRequests = DefaultLogRequests;
 	}
 
 	EnforceConstraints();
@@ -159,6 +186,10 @@ void FitlightningSettings::EnforceConstraints()
 	AgentID.TrimStartAndEndInline();
 	AuthToken.TrimStartAndEndInline();
 
+	if (RequestTimeoutSecs < MinRequestTimeoutSecs)
+	{
+		RequestTimeoutSecs = MinRequestTimeoutSecs;
+	}
 	if (BytesPerRequest < MinBytesPerRequest)
 	{
 		BytesPerRequest = MinBytesPerRequest;
@@ -167,19 +198,19 @@ void FitlightningSettings::EnforceConstraints()
 	{
 		BytesPerRequest = MaxBytesPerRequest;
 	}
-	if (ProcessIntervalSec < MinProcessIntervalSec)
+	if (ProcessIntervalSecs < MinProcessIntervalSecs)
 	{
-		ProcessIntervalSec = MinProcessIntervalSec;
+		ProcessIntervalSecs = MinProcessIntervalSecs;
 	}
-	if (RetryIntervalSec < MinRetryIntervalSec)
+	if (RetryIntervalSecs < MinRetryIntervalSecs)
 	{
-		RetryIntervalSec = MinRetryIntervalSec;
+		RetryIntervalSecs = MinRetryIntervalSecs;
 	}
 }
 
 FitlightningWriteNDJSONPayloadProcessor::FitlightningWriteNDJSONPayloadProcessor(FString InOutputFilePath) : OutputFilePath(InOutputFilePath) { }
 
-bool FitlightningWriteNDJSONPayloadProcessor::ProcessPayload(const uint8* JSONPayloadInUTF8, int PayloadLen)
+bool FitlightningWriteNDJSONPayloadProcessor::ProcessPayload(const uint8* JSONPayloadInUTF8, int PayloadLen, FitlightningReadAndStreamToCloud* Streamer)
 {
 	TUniquePtr<IFileHandle> DebugJSONWriter;
 	DebugJSONWriter.Reset(FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*OutputFilePath, true, true));
@@ -195,6 +226,133 @@ bool FitlightningWriteNDJSONPayloadProcessor::ProcessPayload(const uint8* JSONPa
 	}
 	DebugJSONWriter.Reset();
 	return true;
+}
+
+FitlightningWriteHTTPPayloadProcessor::FitlightningWriteHTTPPayloadProcessor(const TCHAR* InEndpointURI, const TCHAR* InAuthorizationHeader, double InTimeoutSecs, bool InLogRequests)
+	: EndpointURI(InEndpointURI)
+	, AuthorizationHeader(InAuthorizationHeader)
+	, LogRequests(InLogRequests)
+{
+	SetTimeoutSecs(InTimeoutSecs);
+}
+
+void FitlightningWriteHTTPPayloadProcessor::SetTimeoutSecs(double InTimeoutSecs)
+{
+	TimeoutMillisec.Set((int32)(InTimeoutSecs * 1000.0));
+}
+
+bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(const uint8* JSONPayloadInUTF8, int PayloadLen, FitlightningReadAndStreamToCloud* Streamer)
+{
+	if (LogRequests)
+	{
+		int CompressedBufSize = ITLLZ4::LZ4_compressBound(PayloadLen);
+		UE_LOG(LogPluginITLightning, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: BEGIN: worst_case_compressed_size=%d, len=%d, timeout_millisec=%d"), CompressedBufSize, PayloadLen, (int)(TimeoutMillisec.GetValue()));
+	}
+	
+	FThreadSafeBool RequestEnded(false);
+	FThreadSafeBool RequestSucceeded(false);
+	FThreadSafeBool RetryableFailure(true);
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
+	HttpRequest->SetURL(*EndpointURI);
+	HttpRequest->SetVerb(TEXT("POST"));
+	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json; charset=UTF-8"));
+	HttpRequest->SetHeader(TEXT("Authorization"), *AuthorizationHeader);
+	HttpRequest->SetTimeout((double)(TimeoutMillisec.GetValue()) / 1000.0);
+	InternalBuffer.Reserve(PayloadLen);
+	InternalBuffer.Reset(0);
+	InternalBuffer.Append(JSONPayloadInUTF8, PayloadLen);
+	HttpRequest->SetContent(InternalBuffer);
+
+	HttpRequest->OnProcessRequestComplete().BindLambda([&](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+		{
+			if (LogRequests)
+			{
+				if (Response.IsValid())
+				{
+					UE_LOG(LogPluginITLightning, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: RequestComplete: successful=%d, http_status=%d"), bWasSuccessful ? 1 : 0, (int)(Response->GetResponseCode()));
+				}
+				else
+				{
+					UE_LOG(LogPluginITLightning, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: RequestComplete: successful=%d, null_response_object"), bWasSuccessful ? 1 : 0);
+				}
+			}
+			if (bWasSuccessful && Response.IsValid())
+			{
+				FString ResponseBody = Response->GetContentAsString();
+				int32 ResponseCode = Response->GetResponseCode();
+				if (EHttpResponseCodes::IsOk(ResponseCode))
+				{
+					RequestSucceeded.AtomicSet(true);
+				}
+				else if (EHttpResponseCodes::TooManyRequests == ResponseCode || ResponseCode >= EHttpResponseCodes::ServerError)
+				{
+					UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Retryable HTTP response: status=%d, msg=%s"), (int)ResponseCode, *ResponseBody);
+					RequestSucceeded.AtomicSet(false);
+					RetryableFailure.AtomicSet(true);
+				}
+				else
+				{
+					UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Non-Retryable HTTP response: status=%d, msg=%s"), (int)ResponseCode, *ResponseBody);
+					RequestSucceeded.AtomicSet(false);
+					RetryableFailure.AtomicSet(false);
+				}
+			}
+			else
+			{
+				UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: General HTTP request failure; will retry..."));
+				RequestSucceeded.AtomicSet(false);
+				RetryableFailure.AtomicSet(true);
+			}
+
+			// Signal that the request has finished (success or failure)
+			RequestEnded.AtomicSet(true);
+		});
+
+	// Start the HTTP request
+	double StartTime = FPlatformTime::Seconds();
+	if (!HttpRequest->ProcessRequest())
+	{
+		UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: failed to initiate HttpRequest"));
+		RequestSucceeded.AtomicSet(false);
+		RetryableFailure.AtomicSet(true);
+	}
+	else
+	{
+		// Synchronously wait for the request to complete or fail
+		while (!RequestEnded)
+		{
+			// TODO: support cancellation in the future if we need to
+			double CurrentTime = FPlatformTime::Seconds();
+			double Elapsed = CurrentTime - StartTime;
+			// It's possible the timeout has shortened while we've been waiting, so always use the current timeout value
+			double Timeout = (double)(TimeoutMillisec.GetValue()) / 1000.0;
+			if (Elapsed > Timeout)
+			{
+				UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Timed out after %.3lf seconds; will retry..."), Elapsed);
+				HttpRequest->CancelRequest();
+				RequestSucceeded.AtomicSet(false);
+				RetryableFailure.AtomicSet(true);
+				break;
+			}
+			FPlatformProcess::SleepNoStats(0.1f);
+		}
+	}
+
+	// If we had a non-retryable failure, then trigger this worker to stop
+	if (!RequestSucceeded && !RetryableFailure)
+	{
+		if (Streamer != nullptr)
+		{
+			UE_LOG(LogPluginITLightning, Error, TEXT("HTTPPayloadProcessor::ProcessPayload: stopping log streaming service after non-retryable failure"));
+			Streamer->Stop();
+		}
+	}
+
+	if (LogRequests)
+	{
+		UE_LOG(LogPluginITLightning, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: END: success=%d, can_retry=%d"), RequestSucceeded ? 1 : 0, RetryableFailure ? 1 : 0);
+	}
+	return RequestSucceeded;
 }
 
 void FitlightningReadAndStreamToCloud::ComputeCommonEventJSON()
@@ -290,6 +448,12 @@ bool FitlightningReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer,
 {
 	OutLastFlushProcessedEverything = false;
 	bool WasSuccessful = true;
+
+	// If we've already requested a stop, a flush is impossible
+	if (StopRequestCounter.GetValue() > 0)
+	{
+		return false;
+	}
 
 	if (ClearRetryTimer)
 	{
@@ -601,7 +765,7 @@ bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippe
 		EffectiveShippedLogOffset, CapturedOffset, NumCapturedLines, WorkerNextPayload.Len(), *ITLConvertUTF8(WorkerNextPayload.GetData(), WorkerNextPayload.Len()), *SourceLogFile);
 	if (NumCapturedLines > 0)
 	{
-		if (!PayloadProcessor->ProcessPayload((const uint8*)WorkerNextPayload.GetData(), WorkerNextPayload.Len()))
+		if (!PayloadProcessor->ProcessPayload((const uint8*)WorkerNextPayload.GetData(), WorkerNextPayload.Len(), this))
 		{
 			UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: Failed to process payload: offset=%ld, captured_offset=%d, logfile='%s'"), EffectiveShippedLogOffset, CapturedOffset, *SourceLogFile);
 			return false;
@@ -626,7 +790,7 @@ bool FitlightningReadAndStreamToCloud::WorkerDoFlush()
 	if (!Result)
 	{
 		WorkerLastFlushFailed.AtomicSet(true);
-		WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds() + Settings->RetryIntervalSec;
+		WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds() + Settings->RetryIntervalSecs;
 		LastFlushProcessedEverything.AtomicSet(false);
 	}
 	else
@@ -634,7 +798,7 @@ bool FitlightningReadAndStreamToCloud::WorkerDoFlush()
 		WorkerLastFlushFailed.AtomicSet(false);
 		WorkerShippedLogOffset = ShippedNewLogOffset;
 		WriteProgressMarker(ShippedNewLogOffset);
-		WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds() + Settings->ProcessIntervalSec;
+		WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds() + Settings->ProcessIntervalSecs;
 		LastFlushProcessedEverything.AtomicSet(FlushProcessedEverything);
 		FlushSuccessOpCounter.Increment();
 	}
@@ -672,6 +836,11 @@ void FitlightningModule::StartupModule()
 		UE_LOG(LogPluginITLightning, Log, TEXT("Not yet configured for this game mode. In DefaultEngine.ini section %s configure AgentID and AuthToken to enable. Consider using a different agent for Editor vs Client vs Server mode."), *GetITLINISectionName());
 		return;
 	}
+	if (Settings->HttpEndpointURI.IsEmpty())
+	{
+		UE_LOG(LogPluginITLightning, Log, TEXT("Not yet configured for this game mode. In DefaultEngine.ini section %s configure HttpEndpointURI to the appropriate endpoint, such as https://ingest-<REGION>.engine.itlightning.app/ingest/v1"), *GetITLINISectionName());
+		return;
+	}
 
 	if (!FPlatformProcess::SupportsMultithreading())
 	{
@@ -688,14 +857,14 @@ void FitlightningModule::StartupModule()
 		// Log all engine messages to an internal log just for this plugin, which we will then read from the file as we push log data to the cloud
 		GLog->AddOutputDevice(GetITLInternalGameLog().LogDevice.Get());
 	}
-	UE_LOG(LogPluginITLightning, Log, TEXT("Starting up: GameMode=%s, AgentID=%s, ActivationPercent=%lf, DiceRoll=%f, Activated=%s"), GetITLGameMode(true), *Settings->AgentID, Settings->ActivationPercent, DiceRoll, LoggingActive ? TEXT("yes") : TEXT("no"));
+	UE_LOG(LogPluginITLightning, Log, TEXT("Starting up: GameMode=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercent=%lf, DiceRoll=%f, Activated=%s"), GetITLGameMode(true), *Settings->HttpEndpointURI, *Settings->AgentID, Settings->ActivationPercent, DiceRoll, LoggingActive ? TEXT("yes") : TEXT("no"));
 	if (LoggingActive)
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("Ingestion parameters: BytesPerRequest=%d, ProcessIntervalSec=%lf, RetryIntervalSec=%lf"), Settings->BytesPerRequest, Settings->ProcessIntervalSec, Settings->RetryIntervalSec);
-		// TODO: ship payload to cloud
+		UE_LOG(LogPluginITLightning, Log, TEXT("Ingestion parameters: RequestTimeoutSecs=%lf, BytesPerRequest=%d, ProcessIntervalSecs=%lf, RetryIntervalSecs=%lf"), Settings->RequestTimeoutSecs, Settings->BytesPerRequest, Settings->ProcessIntervalSecs, Settings->RetryIntervalSecs);
 		FString SourceLogFile = GetITLInternalGameLog().LogFilePath;
-		TSharedRef<FitlightningWriteNDJSONPayloadProcessor> DebugPayloadProcessor(new FitlightningWriteNDJSONPayloadProcessor(FPaths::Combine(FPaths::GetPath(SourceLogFile), TEXT("itlightning-debug-payload.ndjson"))));
-		CloudStreamer = MakeUnique<FitlightningReadAndStreamToCloud>(*SourceLogFile, Settings, DebugPayloadProcessor, GMaxLineLength);
+		FString AuthorizationHeader = FString::Format(TEXT("Bearer {0}:{1}"), { *Settings->AgentID, *Settings->AuthToken });
+		CloudPayloadProcessor = TSharedPtr<FitlightningWriteHTTPPayloadProcessor>(new FitlightningWriteHTTPPayloadProcessor(*Settings->HttpEndpointURI, *AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->LogRequests));
+		CloudStreamer = MakeUnique<FitlightningReadAndStreamToCloud>(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength);
 	}
 }
 
@@ -707,6 +876,13 @@ void FitlightningModule::ShutdownModule()
 		GLog->Flush();
 		if (CloudStreamer.IsValid())
 		{
+			if (CloudPayloadProcessor.IsValid())
+			{
+				// Set the retry interval to something short so we don't delay shutting down the game...
+				Settings->RetryIntervalSecs = 0.2;
+				// When the engine is shutting down, wait no more than 6 seconds to flush the final log request
+				CloudPayloadProcessor->SetTimeoutSecs(FMath::Min(Settings->RequestTimeoutSecs, 6.0));
+			}
 			bool LastFlushProcessedEverything = false;
 			if (CloudStreamer->FlushAndWait(2, true, true, FitlightningSettings::WaitForFlushToCloudOnShutdown, LastFlushProcessedEverything))
 			{
@@ -732,6 +908,7 @@ void FitlightningModule::ShutdownModule()
 			}
 			CloudStreamer.Reset();
 		}
+		CloudPayloadProcessor.Reset();
 		UE_LOG(LogPluginITLightning, Log, TEXT("Shutdown."));
 		LoggingActive = false;
 	}
