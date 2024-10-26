@@ -109,7 +109,7 @@ bool FitlightningPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters
     TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16*1024);
     bool FlushedEverything=false;
-    TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[1] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestFalse(TEXT("FlushAndWait[1] should NOT capture everything"), FlushedEverything);
 
@@ -117,7 +117,7 @@ bool FitlightningPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters
     ExpectedPayloads.Add(FString(TEXT("[{\"message\":\"Hello world!!\"}]")));
     ITLWriteStringToFile(LogWriter, TEXT("\r\n"));
     LogWriter->Flush();
-    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
 
@@ -141,31 +141,31 @@ bool FitlightningPluginUnitTestSkipEmptyPayloads::RunTest(const FString& Paramet
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024);
     // Test completely empty file
     bool FlushedEverything = false;
-    TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[1] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestTrue(TEXT("FlushAndWait[1] should capture everything"), FlushedEverything);
 
     // Test one blank line
     ITLWriteStringToFile(LogWriter, TEXT("\n"));
     LogWriter->Flush();
-    TestTrue(TEXT("FlushAndWait[2] should succeed"), Streamer->FlushAndWait(1, false, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[2] should succeed"), Streamer->FlushAndWait(1, false, false, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[2] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestTrue(TEXT("FlushAndWait[2] should capture everything"), FlushedEverything);
 
     // Test additional flushes without changes in log file
-    TestTrue(TEXT("FlushAndWait[3] should succeed"), Streamer->FlushAndWait(5, false, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[3] should succeed"), Streamer->FlushAndWait(5, false, false, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[3] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestTrue(TEXT("FlushAndWait[3] should capture everything"), FlushedEverything);
 
     // Test several blank lines and a partial last line
     ITLWriteStringToFile(LogWriter, TEXT("\r\n\n\n\n\r\n\r\n    "));
     LogWriter->Flush();
-    TestTrue(TEXT("FlushAndWait[4] should succeed"), Streamer->FlushAndWait(2, false, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[4] should succeed"), Streamer->FlushAndWait(2, false, false, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[4] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestFalse(TEXT("FlushAndWait[4] should NOT capture everything"), FlushedEverything);
 
     // Test flush after no change in partial last line
-    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestFalse(TEXT("FlushAndWait[FINAL] should NOT capture everything"), FlushedEverything);
 
@@ -191,7 +191,7 @@ bool FitlightningPluginUnitTestMultiline::RunTest(const FString& Parameters)
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Second line is longer\"},{\"message\":\"3\"},{\"message\":\"   fourth line    \\t\"}]"));
     bool FlushedEverything = false;
-    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
 
@@ -217,7 +217,7 @@ bool FitlightningPluginUnitTestNewlines::RunTest(const FString& Parameters)
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"\\t\"},{\"message\":\"linux\"},{\"message\":\"skip\\rslash\\rR\"},{\"message\":\" \"},{\"message\":\" \"}]"));
     bool FlushedEverything = false;
-    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
 
@@ -244,7 +244,7 @@ bool FitlightningPluginUnitTestUnicode::RunTest(const FString& Parameters)
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024);
     ExpectedPayloads.Add(FString::Format(TEXT("[{\"message\":\"{0}\"}]"), { TestPayload1 }));
     bool FlushedEverything = false;
-    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
 
@@ -272,7 +272,7 @@ bool FitlightningPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, MaxLineSize);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"12345678\"},{\"message\":\"12345678\"}]"));
     bool FlushedEverything = false;
-    TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[1] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestFalse(TEXT("FlushAndWait[1] should NOT capture everything"), FlushedEverything);
 
@@ -280,7 +280,7 @@ bool FitlightningPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("\r\n12345678\r\n1234567812\r\n123"));
     LogWriter->Flush();
     ExpectedPayloads.Add(TEXT("[{\"message\":\"1234\"},{\"message\":\"12345678\"},{\"message\":\"12345678\"},{\"message\":\"12\"}]"));
-    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestFalse(TEXT("FlushAndWait[FINAL] should NOT capture everything"), FlushedEverything);
 
@@ -310,7 +310,7 @@ bool FitlightningPluginUnitTestMaxLineSizeUnicode::RunTest(const FString& Parame
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, MaxLineSize);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"1234\"},{\"message\":\"ππ5678\"},{\"message\":\"π34\"}]"));
     bool FlushedEverything = false;
-    TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[1] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestFalse(TEXT("FlushAndWait[1] should NOT capture everything"), FlushedEverything);
 
@@ -319,7 +319,7 @@ bool FitlightningPluginUnitTestMaxLineSizeUnicode::RunTest(const FString& Parame
     ITLWriteStringToFile(LogWriter, TEXT("\r\n123Ω78\r\n12345Ωπ\r\nΩ\r\n"));
     LogWriter->Flush();
     ExpectedPayloads.Add(TEXT("[{\"message\":\"1π4\"},{\"message\":\"123Ω78\"},{\"message\":\"12345\"},{\"message\":\"Ωπ\"},{\"message\":\"Ω\"}]"));
-    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
 
@@ -345,7 +345,7 @@ bool FitlightningPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
     bool FlushedEverything = false;
-    TestTrue(TEXT("FlushAndWait[1-FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[1-FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[1-FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestFalse(TEXT("FlushAndWait[1-FINAL] should NOT capture everything"), FlushedEverything);
 
@@ -358,7 +358,7 @@ bool FitlightningPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
     TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor2(new FitlightningStoreInMemPayloadProcessor());
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer2 = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor2, 16 * 1024);
     TArray<FString> ExpectedPayloads2;
-    TestTrue(TEXT("FlushAndWait[2-1] should succeed"), Streamer2->FlushAndWait(2, false, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[2-1] should succeed"), Streamer2->FlushAndWait(2, false, false, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[2-1] payloads should match"), ITLComparePayloads(this, PayloadProcessor2->Payloads, ExpectedPayloads2));
     TestFalse(TEXT("FlushAndWait[2-1] should NOT capture everything"), FlushedEverything);
 
@@ -366,7 +366,7 @@ bool FitlightningPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("Line 3\r\nLine 4\r\nlast line\r\n"));
     LogWriter->Flush();
     ExpectedPayloads2.Add(TEXT("[{\"message\":\"1234Line 3\"},{\"message\":\"Line 4\"},{\"message\":\"last line\"}]"));
-    TestTrue(TEXT("FlushAndWait[2-FINAL] should succeed"), Streamer2->FlushAndWait(2, false, true, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[2-FINAL] should succeed"), Streamer2->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[2-FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor2->Payloads, ExpectedPayloads2));
     TestTrue(TEXT("FlushAndWait[2-FINAL] should capture everything"), FlushedEverything);
     
@@ -392,7 +392,7 @@ bool FitlightningPluginUnitTestHandleLogRotation::RunTest(const FString& Paramet
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"123456789012345678901234567890\"}]"));
     bool FlushedEverything = false;
-    TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(2, false, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(2, false, false, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[1] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestTrue(TEXT("FlushAndWait[1] should capture everything"), FlushedEverything);
     int64 ProgressMarker = 0;
@@ -409,7 +409,7 @@ bool FitlightningPluginUnitTestHandleLogRotation::RunTest(const FString& Paramet
     LogWriter->Flush();
 
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 2\"}]"));
-    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(3, false, true, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(3, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
     Streamer->ReadProgressMarker(ProgressMarker);
@@ -442,7 +442,7 @@ bool FitlightningPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
     bool FlushedEverything = false;
-    TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, TestProcessIntervalSecs * 5, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, TestProcessIntervalSecs * 5, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[1] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestFalse(TEXT("FlushAndWait[1] should NOT capture everything"), FlushedEverything);
 
@@ -450,7 +450,7 @@ bool FitlightningPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
     PayloadProcessor->FailProcessing = true;
     ITLWriteStringToFile(LogWriter, TEXT("Line 3\r\nLine 4"));
     LogWriter->Flush();
-    TestFalse(TEXT("FlushAndWait[2] should fail because of failure to process"), Streamer->FlushAndWait(1, false, false, TestProcessIntervalSecs * 5, FlushedEverything));
+    TestFalse(TEXT("FlushAndWait[2] should fail because of failure to process"), Streamer->FlushAndWait(1, false, false, false, TestProcessIntervalSecs * 5, FlushedEverything));
     TestFalse(TEXT("FlushAndWait[2] should NOT capture everything"), FlushedEverything);
 
     // Make sure all manual flush requests have been processed
@@ -458,15 +458,15 @@ bool FitlightningPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
 
     // Even though processing the payload will no longer fail, we have to wait longer before a retry is allowed
     PayloadProcessor->FailProcessing = false;
-    TestFalse(TEXT("FlushAndWait[3] should fail because of timeout waiting for processing to happen again"), Streamer->FlushAndWait(1, false, false, TestProcessIntervalSecs * 5, FlushedEverything));
+    TestFalse(TEXT("FlushAndWait[3] should fail because of timeout waiting for processing to happen again"), Streamer->FlushAndWait(1, false, false, false, TestProcessIntervalSecs * 5, FlushedEverything));
     TestFalse(TEXT("FlushAndWait[3] should NOT capture everything"), FlushedEverything);
     // Waiting longer than the retry interval should succeed
     ExpectedPayloads.Add(TEXT("[{\"message\":\"1234Line 3\"}]"));
-    TestTrue(TEXT("FlushAndWait[4] should succeed because wait period is longer than retry interval"), Streamer->FlushAndWait(1, false, false, TestRetryIntervalSecs * 1.2, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[4] should succeed because wait period is longer than retry interval"), Streamer->FlushAndWait(1, false, false, false, TestRetryIntervalSecs * 1.2, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[4] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestFalse(TEXT("FlushAndWait[4] should NOT capture everything"), FlushedEverything);
 
-    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestFalse(TEXT("FlushAndWait[FINAL] should NOT capture everything"), FlushedEverything);
 
@@ -497,7 +497,7 @@ bool FitlightningPluginUnitTestClearRetryTimer::RunTest(const FString& Parameter
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
     bool FlushedEverything = false;
-    TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, TestProcessIntervalSecs * 5, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, TestProcessIntervalSecs * 5, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[1] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestFalse(TEXT("FlushAndWait[1] should NOT capture everything"), FlushedEverything);
 
@@ -505,7 +505,7 @@ bool FitlightningPluginUnitTestClearRetryTimer::RunTest(const FString& Parameter
     PayloadProcessor->FailProcessing = true;
     ITLWriteStringToFile(LogWriter, TEXT("Line 3\r\nLine 4"));
     LogWriter->Flush();
-    TestFalse(TEXT("FlushAndWait[2] should fail because of failure to process"), Streamer->FlushAndWait(1, false, false, TestProcessIntervalSecs * 5, FlushedEverything));
+    TestFalse(TEXT("FlushAndWait[2] should fail because of failure to process"), Streamer->FlushAndWait(1, false, false, false, TestProcessIntervalSecs * 5, FlushedEverything));
     TestFalse(TEXT("FlushAndWait[2] should NOT capture everything"), FlushedEverything);
 
     // Make sure all manual flush requests have been processed
@@ -515,11 +515,11 @@ bool FitlightningPluginUnitTestClearRetryTimer::RunTest(const FString& Parameter
     // HOWEVER, clear the retry timer in this attempt, so it should succeed immediately!
     PayloadProcessor->FailProcessing = false;
     ExpectedPayloads.Add(TEXT("[{\"message\":\"1234Line 3\"}]"));
-    TestTrue(TEXT("FlushAndWait[3] should succeed because the retry timer was cleared"), Streamer->FlushAndWait(1, true, false, TestProcessIntervalSecs * 5, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[3] should succeed because the retry timer was cleared"), Streamer->FlushAndWait(1, true, false, false, TestProcessIntervalSecs * 5, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[3] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestFalse(TEXT("FlushAndWait[3] should NOT capture everything"), FlushedEverything);
 
-    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestFalse(TEXT("FlushAndWait[FINAL] should NOT capture everything"), FlushedEverything);
 

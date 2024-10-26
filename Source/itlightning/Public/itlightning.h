@@ -11,6 +11,7 @@
 
 DECLARE_LOG_CATEGORY_EXTERN(LogPluginITLightning, Log, All);
 
+#define ITL_INTERNAL_DEBUG_LOG_DATA 0
 #define ITL_INTERNAL_DEBUG_LOGGING 0
 #if ITL_INTERNAL_DEBUG_LOGGING == 1
 #define ITL_DBG_UE_LOG(LogCategory, Verbosity, Format, ...) \
@@ -170,7 +171,7 @@ public:
 	//~ End FRunnable Interface
 
 	/** Initiate Flush up to N times, optionally clear retry timer to try again immediately, optionally initiate Stop, and wait up through a timeout for each flush to complete. Returns false on timeout or if the flush failed. */
-	virtual bool FlushAndWait(int N, bool ClearRetryTimer, bool InitiateStop, double TimeoutSec, bool& OutLastFlushProcessedEverything);
+	virtual bool FlushAndWait(int N, bool ClearRetryTimer, bool InitiateStop, bool OnMainGameThread, double TimeoutSec, bool& OutLastFlushProcessedEverything);
 
 	/** Read the progress marker. Returns false on failure. */
 	virtual bool ReadProgressMarker(int64& OutMarker);
@@ -201,6 +202,13 @@ public:
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
 	//~ End IModuleInterface Interface
+
+	/** Stop the log shipping engine. It will not start again. */
+	virtual void StopShippingEngine();
+
+protected:
+	/** Called by the engine as part of its exit process. */
+	virtual void OnEngineExit();
 
 private:
 

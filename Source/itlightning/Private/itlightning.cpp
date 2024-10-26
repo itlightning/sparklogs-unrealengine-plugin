@@ -6,6 +6,7 @@
 #include <OutputDeviceFile.h>
 #include <Interfaces/IHttpResponse.h>
 #include <HttpModule.h>
+#include <ThreadManager.h>
 
 /*
 #if UE_BUILD_SHIPPING
@@ -243,6 +244,8 @@ void FitlightningWriteHTTPPayloadProcessor::SetTimeoutSecs(double InTimeoutSecs)
 
 bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(const uint8* JSONPayloadInUTF8, int PayloadLen, FitlightningReadAndStreamToCloud* Streamer)
 {
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningWriteHTTPPayloadProcessor_ProcessPayload);
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|BEGIN"));
 	if (LogRequests)
 	{
 		int CompressedBufSize = ITLLZ4::LZ4_compressBound(PayloadLen);
@@ -262,9 +265,11 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(const uint8* JSONPayl
 	InternalBuffer.Reset(0);
 	InternalBuffer.Append(JSONPayloadInUTF8, PayloadLen);
 	HttpRequest->SetContent(InternalBuffer);
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|Headers and data prepared"));
 
 	HttpRequest->OnProcessRequestComplete().BindLambda([&](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 		{
+			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|OnProcessRequestComplete|BEGIN"));
 			if (LogRequests)
 			{
 				if (Response.IsValid())
@@ -306,10 +311,12 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(const uint8* JSONPayl
 
 			// Signal that the request has finished (success or failure)
 			RequestEnded.AtomicSet(true);
+			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|OnProcessRequestComplete|END|RequestEnded=%d"), RequestEnded ? 1 : 0);
 		});
 
 	// Start the HTTP request
 	double StartTime = FPlatformTime::Seconds();
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|Starting to process request at time=%.3lf"), StartTime);
 	if (!HttpRequest->ProcessRequest())
 	{
 		UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: failed to initiate HttpRequest"));
@@ -321,6 +328,7 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(const uint8* JSONPayl
 		// Synchronously wait for the request to complete or fail
 		while (!RequestEnded)
 		{
+			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|In loop waiting for request to end|RequestEnded=%d"), RequestEnded ? 1 : 0);
 			// TODO: support cancellation in the future if we need to
 			double CurrentTime = FPlatformTime::Seconds();
 			double Elapsed = CurrentTime - StartTime;
@@ -339,6 +347,7 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(const uint8* JSONPayl
 	}
 
 	// If we had a non-retryable failure, then trigger this worker to stop
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|After request finished|RequestSucceeded=%d|RetryableFailure=%d"), RequestSucceeded ? 1 : 0, RetryableFailure ? 1 : 0);
 	if (!RequestSucceeded && !RetryableFailure)
 	{
 		if (Streamer != nullptr)
@@ -352,6 +361,7 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(const uint8* JSONPayl
 	{
 		UE_LOG(LogPluginITLightning, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: END: success=%d, can_retry=%d"), RequestSucceeded ? 1 : 0, RetryableFailure ? 1 : 0);
 	}
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|END|RequestSucceeded=%d|RetryableFailure=%d"), RequestSucceeded ? 1 : 0, RetryableFailure ? 1 : 0);
 	return RequestSucceeded;
 }
 
@@ -411,13 +421,16 @@ uint32 FitlightningReadAndStreamToCloud::Run()
 {
 	WorkerFullyCleanedUp.AtomicSet(false);
 	ReadProgressMarker(WorkerShippedLogOffset);
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|Run|BEGIN|WorkerShippedLogOffset=%d"), (int)WorkerShippedLogOffset);
 	// A pending flush will be processed before stopping
 	while (StopRequestCounter.GetValue() == 0 || FlushRequestCounter.GetValue() > 0)
 	{
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|Run|In loop|WorkerLastFlushFailed=%d|FlushRequestCounter=%d"), WorkerLastFlushFailed ? 1 : 0, (int)FlushRequestCounter.GetValue());
 		// Only allow manual flushes if we are not in a retry delay because the last operation failed.
 		if (WorkerLastFlushFailed == false && FlushRequestCounter.GetValue() > 0)
 		{
-			FlushRequestCounter.Decrement();
+			int32 NewValue = FlushRequestCounter.Decrement();
+			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|Run|Manual flush requested|FlushRequestCounter=%d"), (int)NewValue);
 			WorkerDoFlush();
 		}
 		else if (FPlatformTime::Seconds() > WorkerMinNextFlushPlatformTime)
@@ -425,7 +438,12 @@ uint32 FitlightningReadAndStreamToCloud::Run()
 			// If we are waiting on a manual flush, and the retry timer finally expired, it's OK to mark this attempt as processing it.
 			if (FlushRequestCounter.GetValue() > 0)
 			{
-				FlushRequestCounter.Decrement();
+				int32 NewValue = FlushRequestCounter.Decrement();
+				ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|Run|Manual flush requested after retry timer expired|FlushRequestCounter=%d"), (int)NewValue);
+			}
+			else
+			{
+				ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|Run|Periodic flush"));
 			}
 			WorkerDoFlush();
 		}
@@ -436,27 +454,32 @@ uint32 FitlightningReadAndStreamToCloud::Run()
 		}
 	}
 	WorkerFullyCleanedUp.AtomicSet(true);
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|Run|END"));
 	return 0;
 }
 
 void FitlightningReadAndStreamToCloud::Stop()
 {
-	StopRequestCounter.Increment();
+	int32 NewValue = StopRequestCounter.Increment();
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|Stop|StopRequestCounter=%d"), (int)NewValue);
 }
 
-bool FitlightningReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer, bool InitiateStop, double TimeoutSec, bool& OutLastFlushProcessedEverything)
+bool FitlightningReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer, bool InitiateStop, bool OnMainGameThread, double TimeoutSec, bool& OutLastFlushProcessedEverything)
 {
 	OutLastFlushProcessedEverything = false;
 	bool WasSuccessful = true;
 
 	// If we've already requested a stop, a flush is impossible
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|StopRequestCounter=%d"), (int)StopRequestCounter.GetValue());
 	if (StopRequestCounter.GetValue() > 0)
 	{
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|stop already requested, exiting with false"));
 		return false;
 	}
 
 	if (ClearRetryTimer)
 	{
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|Clearing retry timer..."));
 		WorkerLastFlushFailed.AtomicSet(false);
 	}
 
@@ -464,39 +487,61 @@ bool FitlightningReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer,
 	{
 		int StartFlushSuccessOpCounter = FlushSuccessOpCounter.GetValue();
 		int StartFlushOpCounter = FlushOpCounter.GetValue();
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|Starting Loop|i=%d|N=%d|FlushSuccessOpCounter=%d|FlushOpCounter=%d"), (int)i, (int)N, (int)StartFlushSuccessOpCounter, (int)StartFlushOpCounter);
 		FlushRequestCounter.Increment();
 		// Last time around, we might initiate a stop
 		if (InitiateStop && i == N-1)
 		{
+			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|Initiating stop..."));
 			Stop();
 		}
 		double StartTime = FPlatformTime::Seconds();
+		double LastTime = StartTime;
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|Waiting for request to finish...|StartTime=%.3lf"), StartTime);
 		while (FlushOpCounter.GetValue() == StartFlushOpCounter)
 		{
-			if (FPlatformTime::Seconds() - StartTime > TimeoutSec)
+			double Now = FPlatformTime::Seconds();
+			if (Now - StartTime > TimeoutSec)
 			{
+				ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|Timed out, returning false"));
 				return false;
 			}
-			FPlatformProcess::SleepNoStats(0.05f);
+			if (OnMainGameThread)
+			{
+				// HTTP requests and other things won't be processed unless we tick
+				double DeltaTime = Now - LastTime;
+				FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+				FTicker::GetCoreTicker().Tick(DeltaTime);
+				FThreadManager::Get().Tick();
+				// NOTE: the game does not normally progress the frame count during shutdown, follow the same logic here
+				// GFrameCounter++;
+			}
+			FPlatformProcess::SleepNoStats(OnMainGameThread ? 0.01f : 0.05f);
+			LastTime = Now;
 		}
 		WasSuccessful = FlushSuccessOpCounter.GetValue() != StartFlushSuccessOpCounter;
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|Finished waiting for request|WasSuccessful=%d|FlushSuccessOpCounter=%d|FlushOpCounter=%d"), WasSuccessful ? 1 : 0, (int)FlushSuccessOpCounter.GetValue(), (int)FlushOpCounter.GetValue());
 	}
 	if (WasSuccessful)
 	{
 		OutLastFlushProcessedEverything = LastFlushProcessedEverything;
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|LastFlushProcessedEverything=%d"), OutLastFlushProcessedEverything ? 1 : 0);
 	}
 	if (InitiateStop) {
 		// Wait for the worker to fully stop, up to the timeout
 		double StartTime = FPlatformTime::Seconds();
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|Waiting for thread to stop...|StartTime=%.3lf"), StartTime);
 		while (!WorkerFullyCleanedUp)
 		{
 			if (FPlatformTime::Seconds() - StartTime > TimeoutSec)
 			{
+				ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|Timed out waiting for thread to stop"));
 				return false;
 			}
 			FPlatformProcess::SleepNoStats(0.01f);
 		}
 	}
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|END|WasSuccessful=%d"), WasSuccessful ? 1 : 0);
 	return WasSuccessful;
 }
 
@@ -606,6 +651,7 @@ void AppendUTF8AsEscapedJsonString(TITLJSONStringBuilder& Builder, const ANSICHA
 
 bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int& OutCapturedOffset, int& OutNumCapturedLines)
 {
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningReadAndStreamToCloud_WorkerBuildNextPayload);
 	OutCapturedOffset = 0;
 	const uint8* BufferData = WorkerBuffer.GetData();
 	OutNumCapturedLines = 0;
@@ -617,7 +663,7 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 		// Skip the UTF-8 byte order marker (always at the start of the file)
 		if (0 == std::memcmp(BufferData + NextOffset, UTF8ByteOrderMark, sizeof(UTF8ByteOrderMark)))
 		{
-			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: skipping UTF8 BOM: offset_before=%d, offset_after=%d"), NextOffset, NextOffset + sizeof(UTF8ByteOrderMark));
+			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|skipping UTF8 BOM|offset_before=%d|offset_after=%d"), NextOffset, NextOffset + sizeof(UTF8ByteOrderMark));
 			NextOffset += sizeof(UTF8ByteOrderMark);
 			OutCapturedOffset = NextOffset;
 			continue;
@@ -628,14 +674,14 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 		int FoundIndex = 0;
 		int ExtraToSkip = 1; // skip over the \n char
 		bool HaveLine = FindFirstByte(BufferData + NextOffset, static_cast<uint8>('\n'), NumToSearch, FoundIndex);
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: after newline search: NextOffset=%d, HaveLine=%d, NumToSearch=%d, FoundIndex=%d"), NextOffset, (int)HaveLine, NumToSearch, FoundIndex);
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|after newline search|NextOffset=%d|HaveLine=%d|NumToSearch=%d|FoundIndex=%d"), NextOffset, (int)HaveLine, NumToSearch, FoundIndex);
 		if (!HaveLine && NumToSearch == MaxLineLength && RemainingBytes > NumToSearch)
 		{
 			// Even though we didn't find a line, break the line at the max length and process it
 			// It's unsafe to break a line in the middle of a multi-byte UTF-8, so find a safe break point...
 			ExtraToSkip = 0;
 			FoundIndex = MaxLineLength - 1;
-			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: no newline found, search for safe breakpoint: NextOffset=%d, FoundIndex=%d"), NextOffset, FoundIndex);
+			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|no newline found, search for safe breakpoint|NextOffset=%d|FoundIndex=%d"), NextOffset, FoundIndex);
 			while (FoundIndex > 0)
 			{
 				if (*(BufferData + NextOffset + FoundIndex) >= 0x80)
@@ -650,12 +696,12 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 				}
 			}
 			HaveLine = true;
-			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: found safe breakpoint: NextOffset=%d, FoundIndex=%d, ExtraToSkip=%d"), NextOffset, FoundIndex, ExtraToSkip);
+			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|found safe breakpoint|NextOffset=%d|FoundIndex=%d|ExtraToSkip=%d"), NextOffset, FoundIndex, ExtraToSkip);
 		}
 		if (!HaveLine)
 		{
 			// No more complete lines to process, this is enough for now
-			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: no more lines to process, break"));
+			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|no more lines to process, break"));
 			break;
 		}
 		// Trim newlines control characters of any kind at the end
@@ -666,7 +712,7 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 			uint8 c = *(BufferData + NextOffset + FoundIndex - 1);
 			if (c == '\n' || c == '\r')
 			{
-				ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: character at NextOffset=%d, FoundIndex=%d is newline, will skip it"), NextOffset, FoundIndex);
+				ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|character at NextOffset=%d, FoundIndex=%d is newline, will skip it"), NextOffset, FoundIndex);
 				ExtraToSkip++;
 				FoundIndex--;
 			}
@@ -675,11 +721,11 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 				break;
 			}
 		}
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: line summary: NextOffset=%d, FoundIndex=%d, ExtraToSkip=%d"), NextOffset, FoundIndex, ExtraToSkip);
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|line summary|NextOffset=%d|FoundIndex=%d|ExtraToSkip=%d"), NextOffset, FoundIndex, ExtraToSkip);
 		// Skip blank lines without capturing anything
 		if (FoundIndex <= 0)
 		{
-			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: skipping blank line..."));
+			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|skipping blank line..."));
 			if (ExtraToSkip <= 0)
 			{
 				ExtraToSkip = 1;
@@ -702,7 +748,9 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 		}
 		WorkerNextPayload.Append("\"message\":", 10 /* length of `"message":` */);
 		AppendUTF8AsEscapedJsonString(WorkerNextPayload, (const ANSICHAR*)(BufferData + NextOffset), FoundIndex);
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: adding message to payload: %s"), *ITLConvertUTF8(BufferData + NextOffset, FoundIndex));
+#if ITL_INTERNAL_DEBUG_LOG_DATA == 1
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|adding message to payload: %s"), *ITLConvertUTF8(BufferData + NextOffset, FoundIndex));
+#endif
 		WorkerNextPayload.Append('}');
 		OutNumCapturedLines++;
 		NextOffset += FoundIndex + ExtraToSkip;
@@ -714,6 +762,8 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 
 bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippedLogOffset, bool& OutFlushProcessedEverything)
 {
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningReadAndStreamToCloud_WorkerInternalDoFlush);
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|BEGIN"));
 	int64 EffectiveShippedLogOffset = WorkerShippedLogOffset;
 	OutNewShippedLogOffset = EffectiveShippedLogOffset;
 	OutFlushProcessedEverything = false;
@@ -728,7 +778,7 @@ bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippe
 		return false;
 	}
 	int64 FileSize = WorkerReader->Size();
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: opened log file: last_offset=%ld, current_file_size=%ld, logfile='%s'"), EffectiveShippedLogOffset, FileSize, *SourceLogFile);
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|opened log file|last_offset=%ld|current_file_size=%ld|logfile='%s'"), EffectiveShippedLogOffset, FileSize, *SourceLogFile);
 	if (EffectiveShippedLogOffset > FileSize)
 	{
 		UE_LOG(LogPluginITLightning, Log, TEXT("STREAMER: Logfile reduced size, re-reading from start: new_size=%ld, previously_processed_to=%ld, logfile='%s'"), FileSize, EffectiveShippedLogOffset, *SourceLogFile);
@@ -741,6 +791,7 @@ bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippe
 	if (NumToRead <= 0)
 	{
 		// We've read everything we possibly can already
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|Nothing more can be read|FileSize=%ld|EffectiveShippedLogOffset=%ld"), FileSize, EffectiveShippedLogOffset);
 		OutFlushProcessedEverything = true;
 		return true;
 	}
@@ -751,7 +802,11 @@ bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippe
 		UE_LOG(LogPluginITLightning, Warning, TEXT("STREAMER: Failed to read data: offset=%ld, bytes=%ld, logfile='%s'"), EffectiveShippedLogOffset, NumToRead, *SourceLogFile);
 		return false;
 	}
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: read data into buffer: offset=%ld, data_len=%d, data=%s, logfile='%s'"), EffectiveShippedLogOffset, NumToRead, *ITLConvertUTF8(BufferData, NumToRead), *SourceLogFile);
+#if ITL_INTERNAL_DEBUG_LOG_DATA == 1
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|read data into buffer|offset=%ld|data_len=%d|data=%s|logfile='%s'"), EffectiveShippedLogOffset, NumToRead, *ITLConvertUTF8(BufferData, NumToRead), *SourceLogFile);
+#else
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|read data into buffer|offset=%ld|data_len=%d|logfile='%s'"), EffectiveShippedLogOffset, NumToRead, *SourceLogFile);
+#endif
 	
 	int CapturedOffset = 0;
 	int NumCapturedLines = 0;
@@ -761,15 +816,22 @@ bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippe
 		return false;
 	}
 
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: payload is ready to process: offset=%ld, captured_offset=%d, captured_lines=%d, data_len=%d, data=%s, logfile='%s'"),
+#if ITL_INTERNAL_DEBUG_LOG_DATA == 1
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|payload is ready to process|offset=%ld|captured_offset=%d|captured_lines=%d|data_len=%d|data=%s|logfile='%s'"),
 		EffectiveShippedLogOffset, CapturedOffset, NumCapturedLines, WorkerNextPayload.Len(), *ITLConvertUTF8(WorkerNextPayload.GetData(), WorkerNextPayload.Len()), *SourceLogFile);
+#else
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|payload is ready to process|offset=%ld|captured_offset=%d|captured_lines=%d|data_len=%d|logfile='%s'"),
+		EffectiveShippedLogOffset, CapturedOffset, NumCapturedLines, WorkerNextPayload.Len(), *SourceLogFile);
+#endif
 	if (NumCapturedLines > 0)
 	{
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|Begin processing payload"));
 		if (!PayloadProcessor->ProcessPayload((const uint8*)WorkerNextPayload.GetData(), WorkerNextPayload.Len(), this))
 		{
 			UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: Failed to process payload: offset=%ld, captured_offset=%d, logfile='%s'"), EffectiveShippedLogOffset, CapturedOffset, *SourceLogFile);
 			return false;
 		}
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|Finished processing payload|CapturedOffset=%ld"), CapturedOffset);
 	}
 	int ProcessedOffset = CapturedOffset;
 
@@ -779,11 +841,13 @@ bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippe
 	{
 		OutFlushProcessedEverything = true;
 	}
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|END|FlushProcessedEverything=%d"), OutFlushProcessedEverything);
 	return true;
 }
 
 bool FitlightningReadAndStreamToCloud::WorkerDoFlush()
 {
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerDoFlush|BEGIN"));
 	int64 ShippedNewLogOffset = 0;
 	bool FlushProcessedEverything = false;
 	bool Result = WorkerInternalDoFlush(ShippedNewLogOffset, FlushProcessedEverything);
@@ -792,6 +856,7 @@ bool FitlightningReadAndStreamToCloud::WorkerDoFlush()
 		WorkerLastFlushFailed.AtomicSet(true);
 		WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds() + Settings->RetryIntervalSecs;
 		LastFlushProcessedEverything.AtomicSet(false);
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerDoFlush|internal flush failed|WorkerMinNextFlushPlatformTime=%.3lf"), WorkerMinNextFlushPlatformTime);
 	}
 	else
 	{
@@ -801,8 +866,10 @@ bool FitlightningReadAndStreamToCloud::WorkerDoFlush()
 		WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds() + Settings->ProcessIntervalSecs;
 		LastFlushProcessedEverything.AtomicSet(FlushProcessedEverything);
 		FlushSuccessOpCounter.Increment();
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerDoFlush|internal flush succeeded|ShippedNewLogOffset=%d|WorkerMinNextFlushPlatformTime=%.3lf|FlushProcessedEverything=%d"), (int)ShippedNewLogOffset, WorkerMinNextFlushPlatformTime, FlushProcessedEverything ? 1 : 0);
 	}
 	FlushOpCounter.Increment();
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerDoFlush|END|Result=%d"), Result ? 1 : 0);
 	return Result;
 }
 
@@ -865,10 +932,18 @@ void FitlightningModule::StartupModule()
 		FString AuthorizationHeader = FString::Format(TEXT("Bearer {0}:{1}"), { *Settings->AgentID, *Settings->AuthToken });
 		CloudPayloadProcessor = TSharedPtr<FitlightningWriteHTTPPayloadProcessor>(new FitlightningWriteHTTPPayloadProcessor(*Settings->HttpEndpointURI, *AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->LogRequests));
 		CloudStreamer = MakeUnique<FitlightningReadAndStreamToCloud>(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength);
+		FCoreDelegates::OnExit.AddRaw(this, &FitlightningModule::OnEngineExit);
 	}
 }
 
 void FitlightningModule::ShutdownModule()
+{
+	FCoreDelegates::OnExit.RemoveAll(this);
+	// Just in case it was not called earlier...
+	StopShippingEngine();
+}
+
+void FitlightningModule::StopShippingEngine()
 {
 	if (LoggingActive || CloudStreamer.IsValid())
 	{
@@ -884,7 +959,7 @@ void FitlightningModule::ShutdownModule()
 				CloudPayloadProcessor->SetTimeoutSecs(FMath::Min(Settings->RequestTimeoutSecs, 6.0));
 			}
 			bool LastFlushProcessedEverything = false;
-			if (CloudStreamer->FlushAndWait(2, true, true, FitlightningSettings::WaitForFlushToCloudOnShutdown, LastFlushProcessedEverything))
+			if (CloudStreamer->FlushAndWait(2, true, true, true, FitlightningSettings::WaitForFlushToCloudOnShutdown, LastFlushProcessedEverything))
 			{
 				FString LogFilePath = GetITLInternalGameLog().LogFilePath;
 				UE_LOG(LogPluginITLightning, Log, TEXT("Flushed logs successfully. LastFlushedEverything=%d"), (int)LastFlushProcessedEverything);
@@ -912,6 +987,12 @@ void FitlightningModule::ShutdownModule()
 		UE_LOG(LogPluginITLightning, Log, TEXT("Shutdown."));
 		LoggingActive = false;
 	}
+}
+
+void FitlightningModule::OnEngineExit()
+{
+	UE_LOG(LogPluginITLightning, Log, TEXT("OnEngineExit. Will shutdown the log shipping engine..."));
+	StopShippingEngine();
 }
 
 #undef LOCTEXT_NAMESPACE
