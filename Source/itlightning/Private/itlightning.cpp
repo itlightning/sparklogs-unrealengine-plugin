@@ -6,6 +6,7 @@
 #include <OutputDeviceFile.h>
 #include <Interfaces/IHttpResponse.h>
 #include <HttpModule.h>
+#include <ISettingsModule.h>
 #include <ThreadManager.h>
 
 /*
@@ -54,10 +55,10 @@ const TCHAR* GetITLGameMode(bool ForINISection)
 	}
 }
 
-FString GetITLINISectionName()
+FString GetITLINISettingPrefix()
 {
 	const TCHAR* GameMode = GetITLGameMode(true);
-	return FString(ITL_CONFIG_SECTION_NAME).Append(GameMode);
+	return FString(GameMode);
 }
 
 FString GetITLLogFileName(TCHAR* LogTypeName)
@@ -119,64 +120,87 @@ FITLLogOutputDeviceInitializer& GetITLInternalOpsLog()
 
 FitlightningSettings::FitlightningSettings()
 	: RequestTimeoutSecs(DefaultRequestTimeoutSecs)
-	, ActivationPercent(100.0)
+	, ActivationPercentage(DefaultActivationPercentage)
 	, BytesPerRequest(DefaultBytesPerRequest)
-	, ProcessIntervalSecs(DefaultProcessIntervalSecs)
+	, ProcessingIntervalSecs(DefaultProcessingIntervalSecs)
 	, RetryIntervalSecs(DefaultRetryIntervalSecs)
 	, IncludeCommonMetadata(DefaultIncludeCommonMetadata)
-	, LogRequests(DefaultLogRequests)
+	, DebugLogRequests(DefaultDebugLogRequests)
 {
+}
+
+/** Gets the effective HTTP endpoint URI (either using the HttpEndpointURI if configured, or the CloudRegion). Returns empty if not configured. */
+FString FitlightningSettings::GetEffectiveHttpEndpointURI()
+{
+	CloudRegion.TrimStartAndEndInline();
+	HttpEndpointURI.TrimStartAndEndInline();
+	if (HttpEndpointURI.Len() > 0)
+	{
+		return HttpEndpointURI;
+	}
+	FString CloudRegionLower = CloudRegion.ToLower();
+	if (CloudRegionLower == TEXT("local"))
+	{
+		// Send to the local DEBUG container
+		return TEXT("http://localhost:8082/ingest/v1");
+	}
+	else
+	{
+		return FString::Format(TEXT("https://ingest-{0}.engine.itlightning.app/ingest/v1"), { CloudRegionLower });
+	}
 }
 
 void FitlightningSettings::LoadSettings()
 {
-	FString Section = GetITLINISectionName();
+	FString Section = ITL_CONFIG_SECTION_NAME;
+	FString SettingPrefix = GetITLINISettingPrefix();
 
-	HttpEndpointURI = GConfig->GetStr(*Section, TEXT("HttpEndpointURI"), GEngineIni);
-	if (!GConfig->GetDouble(*Section, TEXT("RequestTimeoutSecs"), RequestTimeoutSecs, GEngineIni))
+	CloudRegion = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("CloudRegion")), GEngineIni);
+	HttpEndpointURI = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("HTTPEndpointURI")), GEngineIni);
+	if (!GConfig->GetDouble(*Section, *(SettingPrefix + TEXT("RequestTimeoutSecs")), RequestTimeoutSecs, GEngineIni))
 	{
 		RequestTimeoutSecs = DefaultRequestTimeoutSecs;
 	}
 
-	AgentID = GConfig->GetStr(*Section, TEXT("AgentID"), GEngineIni);
-	AuthToken = GConfig->GetStr(*Section, TEXT("AuthToken"), GEngineIni);
+	AgentID = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("AgentID")), GEngineIni);
+	AgentAuthToken = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("AgentAuthToken")), GEngineIni);
 	
-	FString StringActivationPercent;
-	GConfig->GetString(*Section, TEXT("ActivationPercent"), StringActivationPercent, GEngineIni);
-	StringActivationPercent.TrimStartAndEndInline();
-	if (!GConfig->GetDouble(*Section, TEXT("ActivationPercent"), ActivationPercent, GEngineIni))
+	FString StringActivationPercentage;
+	GConfig->GetString(*Section, *(SettingPrefix + TEXT("ActivationPercentage")), StringActivationPercentage, GEngineIni);
+	StringActivationPercentage.TrimStartAndEndInline();
+	if (!GConfig->GetDouble(*Section, *(SettingPrefix + TEXT("ActivationPercentage")), ActivationPercentage, GEngineIni))
 	{
-		ActivationPercent = 100.0;
+		ActivationPercentage = DefaultActivationPercentage;
 	}
 	else
 	{
-		// If it was an empty string, treat as 100%
-		if (StringActivationPercent.IsEmpty())
+		// If it was an empty string, treat as the default
+		if (StringActivationPercentage.IsEmpty())
 		{
-			ActivationPercent = 100.0;
+			ActivationPercentage = DefaultActivationPercentage;
 		}
 	}
 
-	if (!GConfig->GetInt(*Section, TEXT("BytesPerRequest"), BytesPerRequest, GEngineIni))
+	if (!GConfig->GetInt(*Section, *(SettingPrefix + TEXT("BytesPerRequest")), BytesPerRequest, GEngineIni))
 	{
 		BytesPerRequest = DefaultBytesPerRequest;
 	}
-	if (!GConfig->GetDouble(*Section, TEXT("ProcessIntervalSecs"), ProcessIntervalSecs, GEngineIni))
+	if (!GConfig->GetDouble(*Section, *(SettingPrefix + TEXT("ProcessingIntervalSecs")), ProcessingIntervalSecs, GEngineIni))
 	{
-		ProcessIntervalSecs = DefaultProcessIntervalSecs;
+		ProcessingIntervalSecs = DefaultProcessingIntervalSecs;
 	}
-	if (!GConfig->GetDouble(*Section, TEXT("RetryIntervalSecs"), RetryIntervalSecs, GEngineIni))
+	if (!GConfig->GetDouble(*Section, *(SettingPrefix + TEXT("RetryIntervalSecs")), RetryIntervalSecs, GEngineIni))
 	{
 		RetryIntervalSecs = DefaultRetryIntervalSecs;
 	}
 
-	if (!GConfig->GetBool(*Section, TEXT("IncludeCommonMetadata"), IncludeCommonMetadata, GEngineIni))
+	if (!GConfig->GetBool(*Section, *(SettingPrefix + TEXT("IncludeCommonMetadata")), IncludeCommonMetadata, GEngineIni))
 	{
 		IncludeCommonMetadata = DefaultIncludeCommonMetadata;
 	}
-	if (!GConfig->GetBool(*Section, TEXT("DebugLogRequests"), LogRequests, GEngineIni))
+	if (!GConfig->GetBool(*Section, *(SettingPrefix + TEXT("DebugLogRequests")), DebugLogRequests, GEngineIni))
 	{
-		LogRequests = DefaultLogRequests;
+		DebugLogRequests = DefaultDebugLogRequests;
 	}
 
 	EnforceConstraints();
@@ -185,7 +209,7 @@ void FitlightningSettings::LoadSettings()
 void FitlightningSettings::EnforceConstraints()
 {
 	AgentID.TrimStartAndEndInline();
-	AuthToken.TrimStartAndEndInline();
+	AgentAuthToken.TrimStartAndEndInline();
 
 	if (RequestTimeoutSecs < MinRequestTimeoutSecs)
 	{
@@ -199,9 +223,9 @@ void FitlightningSettings::EnforceConstraints()
 	{
 		BytesPerRequest = MaxBytesPerRequest;
 	}
-	if (ProcessIntervalSecs < MinProcessIntervalSecs)
+	if (ProcessingIntervalSecs < MinProcessingIntervalSecs)
 	{
-		ProcessIntervalSecs = MinProcessIntervalSecs;
+		ProcessingIntervalSecs = MinProcessingIntervalSecs;
 	}
 	if (RetryIntervalSecs < MinRetryIntervalSecs)
 	{
@@ -863,7 +887,7 @@ bool FitlightningReadAndStreamToCloud::WorkerDoFlush()
 		WorkerLastFlushFailed.AtomicSet(false);
 		WorkerShippedLogOffset = ShippedNewLogOffset;
 		WriteProgressMarker(ShippedNewLogOffset);
-		WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds() + Settings->ProcessIntervalSecs;
+		WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds() + Settings->ProcessingIntervalSecs;
 		LastFlushProcessedEverything.AtomicSet(FlushProcessedEverything);
 		FlushSuccessOpCounter.Increment();
 		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerDoFlush|internal flush succeeded|ShippedNewLogOffset=%d|WorkerMinNextFlushPlatformTime=%.3lf|FlushProcessedEverything=%d"), (int)ShippedNewLogOffset, WorkerMinNextFlushPlatformTime, FlushProcessedEverything ? 1 : 0);
@@ -881,6 +905,7 @@ FitlightningModule::FitlightningModule()
 
 void FitlightningModule::StartupModule()
 {
+	FCoreDelegates::OnPostEngineInit.AddRaw(this, &FitlightningModule::OnPostEngineInit);
 	// TODO: does it matter if we are loaded later and miss a bunch of log entries during engine initialization?
 	// TODO: Should run plugin earlier and check command line to determine if this is running in an editor with
 	//       similar logic to FEngineLoop::PreInitPreStartupScreen [LaunchEngineLoop.cpp] (GIsEditor not available earlier).
@@ -898,14 +923,15 @@ void FitlightningModule::StartupModule()
 	}
 
 	Settings->LoadSettings();
-	if (Settings->AgentID.IsEmpty() || Settings->AuthToken.IsEmpty())
+	if (Settings->AgentID.IsEmpty() || Settings->AgentAuthToken.IsEmpty())
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("Not yet configured for this game mode. In DefaultEngine.ini section %s configure AgentID and AuthToken to enable. Consider using a different agent for Editor vs Client vs Server mode."), *GetITLINISectionName());
+		UE_LOG(LogPluginITLightning, Log, TEXT("Not yet configured for this game mode. In plugin settings for %s game mode configure Agent ID and Agent Auth Token to enable. Consider using a different agent for Editor vs Client vs Server mode."), *GetITLINISettingPrefix());
 		return;
 	}
-	if (Settings->HttpEndpointURI.IsEmpty())
+	FString EffectiveHttpEndpointURI = Settings->GetEffectiveHttpEndpointURI();
+	if (EffectiveHttpEndpointURI.IsEmpty())
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("Not yet configured for this game mode. In DefaultEngine.ini section %s configure HttpEndpointURI to the appropriate endpoint, such as https://ingest-<REGION>.engine.itlightning.app/ingest/v1"), *GetITLINISectionName());
+		UE_LOG(LogPluginITLightning, Log, TEXT("Not yet configured for this game mode. In plugin settings for %s game mode configure CloudRegion to 'us' or 'eu' (or in advanced situations configure HttpEndpointURI to the appropriate endpoint, such as https://ingest-<REGION>.engine.itlightning.app/ingest/v1)"), *GetITLINISettingPrefix());
 		return;
 	}
 
@@ -916,7 +942,7 @@ void FitlightningModule::StartupModule()
 	}
 
 	float DiceRoll = FMath::FRandRange(0.0, 100.0);
-	LoggingActive = DiceRoll < Settings->ActivationPercent;
+	LoggingActive = DiceRoll < Settings->ActivationPercentage;
 	if (LoggingActive)
 	{
 		// Log all IT Lightning messages to the ITL operations log
@@ -924,13 +950,13 @@ void FitlightningModule::StartupModule()
 		// Log all engine messages to an internal log just for this plugin, which we will then read from the file as we push log data to the cloud
 		GLog->AddOutputDevice(GetITLInternalGameLog().LogDevice.Get());
 	}
-	UE_LOG(LogPluginITLightning, Log, TEXT("Starting up: GameMode=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercent=%lf, DiceRoll=%f, Activated=%s"), GetITLGameMode(true), *Settings->HttpEndpointURI, *Settings->AgentID, Settings->ActivationPercent, DiceRoll, LoggingActive ? TEXT("yes") : TEXT("no"));
+	UE_LOG(LogPluginITLightning, Log, TEXT("Starting up: GameMode=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s"), GetITLGameMode(true), *EffectiveHttpEndpointURI, *Settings->AgentID, Settings->ActivationPercentage, DiceRoll, LoggingActive ? TEXT("yes") : TEXT("no"));
 	if (LoggingActive)
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("Ingestion parameters: RequestTimeoutSecs=%lf, BytesPerRequest=%d, ProcessIntervalSecs=%lf, RetryIntervalSecs=%lf"), Settings->RequestTimeoutSecs, Settings->BytesPerRequest, Settings->ProcessIntervalSecs, Settings->RetryIntervalSecs);
+		UE_LOG(LogPluginITLightning, Log, TEXT("Ingestion parameters: RequestTimeoutSecs=%lf, BytesPerRequest=%d, ProcessingIntervalSecs=%lf, RetryIntervalSecs=%lf"), Settings->RequestTimeoutSecs, Settings->BytesPerRequest, Settings->ProcessingIntervalSecs, Settings->RetryIntervalSecs);
 		FString SourceLogFile = GetITLInternalGameLog().LogFilePath;
-		FString AuthorizationHeader = FString::Format(TEXT("Bearer {0}:{1}"), { *Settings->AgentID, *Settings->AuthToken });
-		CloudPayloadProcessor = TSharedPtr<FitlightningWriteHTTPPayloadProcessor>(new FitlightningWriteHTTPPayloadProcessor(*Settings->HttpEndpointURI, *AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->LogRequests));
+		FString AuthorizationHeader = FString::Format(TEXT("Bearer {0}:{1}"), { *Settings->AgentID, *Settings->AgentAuthToken });
+		CloudPayloadProcessor = TSharedPtr<FitlightningWriteHTTPPayloadProcessor>(new FitlightningWriteHTTPPayloadProcessor(*EffectiveHttpEndpointURI, *AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests));
 		CloudStreamer = MakeUnique<FitlightningReadAndStreamToCloud>(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength);
 		FCoreDelegates::OnExit.AddRaw(this, &FitlightningModule::OnEngineExit);
 	}
@@ -938,7 +964,12 @@ void FitlightningModule::StartupModule()
 
 void FitlightningModule::ShutdownModule()
 {
+	FCoreDelegates::OnPostEngineInit.RemoveAll(this);
 	FCoreDelegates::OnExit.RemoveAll(this);
+	if (UObjectInitialized())
+	{
+		UnregisterSettings();
+	}
 	// Just in case it was not called earlier...
 	StopShippingEngine();
 }
@@ -989,12 +1020,39 @@ void FitlightningModule::StopShippingEngine()
 	}
 }
 
+void FitlightningModule::OnPostEngineInit()
+{
+	if (UObjectInitialized())
+	{
+		// Allow the user to edit settings in the project settings editor
+		RegisterSettings();
+	}
+}
+
 void FitlightningModule::OnEngineExit()
 {
 	UE_LOG(LogPluginITLightning, Log, TEXT("OnEngineExit. Will shutdown the log shipping engine..."));
 	StopShippingEngine();
 }
 
+void FitlightningModule::RegisterSettings()
+{
+	if (ISettingsModule* SettingsModule = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
+	{
+		SettingsModule->RegisterSettings("Project", "Plugins", "ITLightning",
+			LOCTEXT("RuntimeSettingsName", "IT Lightning"),
+			LOCTEXT("RuntimeSettingsDescription", "Configure the IT Lightning plugin"),
+			GetMutableDefault<UITLightningRuntimeSettings>());
+	}
+}
+
+void FitlightningModule::UnregisterSettings()
+{
+	if (ISettingsModule* SettingsModule = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
+	{
+		SettingsModule->UnregisterSettings("Project", "Plugins", TEXT("ITLightning"));
+	}
+}
 #undef LOCTEXT_NAMESPACE
 
 IMPLEMENT_MODULE(FitlightningModule, itlightning)
