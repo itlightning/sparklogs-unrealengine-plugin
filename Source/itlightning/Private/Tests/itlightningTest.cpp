@@ -5,8 +5,8 @@
 #include "CoreTypes.h"
 #include "Containers/UnrealString.h"
 #include "GenericPlatform/GenericPlatform.h"
-#include "UniquePtr.h"
-#include "SharedPointer.h"
+#include "Templates/UniquePtr.h"
+#include "Templates/SharedPointer.h"
 #include "Algo/Compare.h"
 #include "itlightning.h"
 
@@ -234,7 +234,7 @@ bool FitlightningPluginUnitTestUnicode::RunTest(const FString& Parameters)
     TArray<FString> ExpectedPayloads;
 
     TSharedRef<IFileHandle> LogWriter(FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*TestLogFile, true, true));
-    constexpr TCHAR* TestPayload1 = TEXT("Hello world in 2 languages: こんにちは世界   你好，世界");
+    const TCHAR* TestPayload1 = TEXT("Hello world in 2 languages: こんにちは世界   你好，世界");
     ITLWriteStringToFile(LogWriter, *FString::Format(TEXT("{0}\r\n"), { TestPayload1 }));
     LogWriter->Flush();
 

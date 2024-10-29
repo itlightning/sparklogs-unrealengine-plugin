@@ -33,7 +33,7 @@ FString ITLConvertUTF8(const void* Data, int Len);
 class FitlightningSettings
 {
 public:
-	static constexpr TCHAR* PluginStateSection = TEXT("PluginState");
+	static const TCHAR* PluginStateSection;
 
 	static constexpr double DefaultRequestTimeoutSecs = 30;
 	static constexpr double MinRequestTimeoutSecs = 5;
@@ -74,7 +74,7 @@ public:
 
 	FitlightningSettings();
 
-	/** Loads the settings from the game engine INI section appropriate for this runtime mode (editor, client, server, etc). */
+	/** Loads the settings from the game engine INI section appropriate for this launch configuration (editor, client, server, etc). */
 	void LoadSettings();
 
 	/** Gets the effective HTTP endpoint URI (either using the HttpEndpointURI if configured, or the CloudRegion). Returns empty if not configured. */
@@ -94,148 +94,148 @@ class ITLIGHTNING_API UITLightningRuntimeSettings : public UObject
 	GENERATED_BODY()
 
 public:
-	// ------------------------------------------ SERVER MODE SETTINGS
+	// ------------------------------------------ SERVER LAUNCH CONFIGURATION SETTINGS
 	
 	// Set to 'us' or 'eu' based on what your IT Lightning workspace is provisioned to use.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Mode", DisplayName = "Cloud Region")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Cloud Region")
 	FString ServerCloudRegion;
 
 	// For authentication: ID of the cloud agent that will receive the ingested log data.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Mode", DisplayName = "Agent ID")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Agent ID")
 	FString ServerAgentID;
 
 	// For authentication: Auth token associated with the cloud agent receiving the log data.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Mode", DisplayName = "Agent Auth Token")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Agent Auth Token")
 	FString ServerAgentAuthToken;
 
 	// What percent of the time to activate this plugin when the engine starts. 0.0 to 100.0. Defaults to 100%. Useful for incrementally rolling out the plugin.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Mode", DisplayName = "Activation Percentage")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Activation Percentage")
 	float ServerActivationPercentage = FitlightningSettings::DefaultActivationPercentage;
 
 	// HTTP request timeout in seconds.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Mode", DisplayName = "Request Timeout in Seconds")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Request Timeout in Seconds")
 	float ServerRequestTimeoutSecs = FitlightningSettings::DefaultRequestTimeoutSecs;
 
-	// ------------------------------------------ EDITOR MODE SETTINGS
+	// ------------------------------------------ EDITOR LAUNCH CONFIGURATION SETTINGS
 
 	// Set to 'us' or 'eu' based on what your IT Lightning workspace is provisioned to use. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Mode", Meta = (ConfigRestartRequired = true), DisplayName = "Cloud Region")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Cloud Region")
 	FString EditorCloudRegion;
 
 	// For authentication: ID of the cloud agent that will receive the ingested log data. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Mode", Meta = (ConfigRestartRequired = true), DisplayName="Agent ID")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName="Agent ID")
 	FString EditorAgentID;
 
 	// For authentication: Auth token associated with the cloud agent receiving the log data. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Mode", Meta = (ConfigRestartRequired = true), DisplayName="Agent Auth Token")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName="Agent Auth Token")
 	FString EditorAgentAuthToken;
 
 	// What percent of the time to activate this plugin when the engine starts. 0.0 to 100.0. Defaults to 100%. Useful for incrementally rolling out the plugin. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Mode", Meta = (ConfigRestartRequired = true), DisplayName="Activation Percentage")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName="Activation Percentage")
 	float EditorActivationPercentage = FitlightningSettings::DefaultActivationPercentage;
 
 	// HTTP request timeout in seconds. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Mode", Meta = (ConfigRestartRequired = true), DisplayName = "Request Timeout in Seconds")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Request Timeout in Seconds")
 	float EditorRequestTimeoutSecs = FitlightningSettings::DefaultRequestTimeoutSecs;
 
-	// ------------------------------------------ CLIENT MODE SETTINGS
+	// ------------------------------------------ CLIENT LAUNCH CONFIGURATION SETTINGS
 
 	// Set to 'us' or 'eu' based on what your IT Lightning workspace is provisioned to use.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Mode", DisplayName = "Cloud Region")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Cloud Region")
 	FString ClientCloudRegion;
 
 	// For authentication: ID of the cloud agent that will receive the ingested log data.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Mode", DisplayName = "Agent ID")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Agent ID")
 	FString ClientAgentID;
 
 	// For authentication: Auth token associated with the cloud agent receiving the log data.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Mode", DisplayName = "Agent Auth Token")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Agent Auth Token")
 	FString ClientAgentAuthToken;
 
 	// What percent of the time to activate this plugin when the engine starts. 0.0 to 100.0. Defaults to 100%. Useful for incrementally rolling out the plugin.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Mode", DisplayName = "Activation Percentage")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Activation Percentage")
 	float ClientActivationPercentage = FitlightningSettings::DefaultActivationPercentage;
 
 	// HTTP request timeout in seconds.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Mode", DisplayName = "Request Timeout in Seconds")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Request Timeout in Seconds")
 	float ClientRequestTimeoutSecs = FitlightningSettings::DefaultRequestTimeoutSecs;
 
-	// ------------------------------------------ SERVER MODE ADVANCED SETTINGS
+	// ------------------------------------------ SERVER LAUNCH CONFIGURATION ADVANCED SETTINGS
 
 	// Target bytes to read and process at one time (one "chunk").
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Mode", DisplayName = "Bytes Per Request")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Bytes Per Request")
 	int32 ServerBytesPerRequest = FitlightningSettings::DefaultBytesPerRequest;
 
 	// Target seconds between attempts to read and process a chunk.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Mode", DisplayName = "Processing Interval in Seconds")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Processing Interval in Seconds")
 	float ServerProcessingIntervalSecs = FitlightningSettings::DefaultProcessingIntervalSecs;
 
 	// The amount of time to wait after a failed request before retrying.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Mode", DisplayName = "Retry Interval in Seconds")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Retry Interval in Seconds")
 	float ServerRetryIntervalSecs = FitlightningSettings::DefaultRetryIntervalSecs;
 
 	// Whether or not to include common metadata (hostname, game name) in each log event.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Mode", DisplayName = "Include Common Metadata")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Include Common Metadata")
 	bool ServerIncludeCommonMetadata = FitlightningSettings::DefaultIncludeCommonMetadata;
 
 	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., https://ingest-<REGION>.engine.itlightning.app/ingest/v1
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Mode", DisplayName = "Override HTTP Endpoint URI")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Override HTTP Endpoint URI")
 	FString ServerHTTPEndpointURI;
 
 	// For Debugging: Whether or not to log requests.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Mode", DisplayName = "DEBUG: Log All HTTP Request")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "DEBUG: Log All HTTP Request")
 	bool ServerDebugLogRequests = FitlightningSettings::DefaultDebugLogRequests;
 
-	// ------------------------------------------ EDITOR MODE ADVANCED SETTINGS
+	// ------------------------------------------ EDITOR LAUNCH CONFIGURATION ADVANCED SETTINGS
 
 	// Target bytes to read and process at one time (one "chunk"). [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Mode", Meta = (ConfigRestartRequired = true), DisplayName = "Bytes Per Request")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Bytes Per Request")
 	int32 EditorBytesPerRequest = FitlightningSettings::DefaultBytesPerRequest;
 
 	// Target seconds between attempts to read and process a chunk. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Mode", Meta = (ConfigRestartRequired = true), DisplayName = "Processing Interval in Seconds")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Processing Interval in Seconds")
 	float EditorProcessingIntervalSecs = FitlightningSettings::DefaultProcessingIntervalSecs;
 
 	// The amount of time to wait after a failed request before retrying. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Mode", Meta = (ConfigRestartRequired = true), DisplayName = "Retry Interval in Seconds")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Retry Interval in Seconds")
 	float EditorRetryIntervalSecs = FitlightningSettings::DefaultRetryIntervalSecs;
 
 	// Whether or not to include common metadata (hostname, game name) in each log event. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Mode", Meta = (ConfigRestartRequired = true), DisplayName = "Include Common Metadata")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Include Common Metadata")
 	bool EditorIncludeCommonMetadata = FitlightningSettings::DefaultIncludeCommonMetadata;
 
 	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., https://ingest-<REGION>.engine.itlightning.app/ingest/v1 [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Mode", Meta = (ConfigRestartRequired = true), DisplayName = "Override HTTP Endpoint URI")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Override HTTP Endpoint URI")
 	FString EditorHTTPEndpointURI;
 
 	// For Debugging: Whether or not to log requests. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Mode", Meta = (ConfigRestartRequired = true), DisplayName = "DEBUG: Log All HTTP Request")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "DEBUG: Log All HTTP Request")
 	bool EditorDebugLogRequests = FitlightningSettings::DefaultDebugLogRequests;
 
-	// ------------------------------------------ CLIENT MODE ADVANCED SETTINGS
+	// ------------------------------------------ CLIENT LAUNCH CONFIGURATION ADVANCED SETTINGS
 
 	// Target bytes to read and process at one time (one "chunk").
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Mode", DisplayName = "Bytes Per Request")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Bytes Per Request")
 	int32 ClientBytesPerRequest = FitlightningSettings::DefaultBytesPerRequest;
 
 	// Target seconds between attempts to read and process a chunk.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Mode", DisplayName = "Processing Interval in Seconds")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Processing Interval in Seconds")
 	float ClientProcessingIntervalSecs = FitlightningSettings::DefaultProcessingIntervalSecs;
 
 	// The amount of time to wait after a failed request before retrying.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Mode", DisplayName = "Retry Interval in Seconds")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Retry Interval in Seconds")
 	float ClientRetryIntervalSecs = FitlightningSettings::DefaultRetryIntervalSecs;
 
 	// Whether or not to include common metadata (hostname, game name) in each log event.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Mode", DisplayName = "Include Common Metadata")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Include Common Metadata")
 	bool ClientIncludeCommonMetadata = FitlightningSettings::DefaultIncludeCommonMetadata;
 
 	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., https://ingest-<REGION>.engine.itlightning.app/ingest/v1
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Mode", DisplayName = "Override HTTP Endpoint URI")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Override HTTP Endpoint URI")
 	FString ClientHTTPEndpointURI;
 
 	// For Debugging: Whether or not to log requests.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Mode", DisplayName = "DEBUG: Log All HTTP Request")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "DEBUG: Log All HTTP Request")
 	bool ClientDebugLogRequests = FitlightningSettings::DefaultDebugLogRequests;
 };
 
@@ -285,7 +285,7 @@ using TITLJSONStringBuilder = TAnsiStringBuilder<4 * 1024>;
 class FitlightningReadAndStreamToCloud : public FRunnable
 {
 protected:
-	static constexpr TCHAR* ProgressMarkerValue = TEXT("ShippedLogOffset");
+	static const TCHAR* ProgressMarkerValue;
 
 	TSharedRef<FitlightningSettings> Settings;
 	TSharedRef<IitlightningPayloadProcessor> PayloadProcessor;

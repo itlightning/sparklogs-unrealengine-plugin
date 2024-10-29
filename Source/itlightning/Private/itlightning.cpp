@@ -2,12 +2,12 @@
 // Licensed software - see LICENSE
 
 #include "itlightning.h"
-#include <GenericPlatformOutputDevices.h>
-#include <OutputDeviceFile.h>
-#include <Interfaces/IHttpResponse.h>
-#include <HttpModule.h>
-#include <ISettingsModule.h>
-#include <ThreadManager.h>
+#include "GenericPlatform/GenericPlatformOutputDevices.h"
+#include "Misc/OutputDeviceFile.h"
+#include "Interfaces/IHttpResponse.h"
+#include "HttpModule.h"
+#include "ISettingsModule.h"
+#include "HAL/ThreadManager.h"
 
 /*
 #if UE_BUILD_SHIPPING
@@ -25,6 +25,8 @@
 
 DEFINE_LOG_CATEGORY(LogPluginITLightning);
 
+// =============== Globals ===============================================================================
+
 constexpr int GMaxLineLength = 16 * 1024;
 
 static uint8 UTF8ByteOrderMark[3] = {0xEF, 0xBB, 0xBF};
@@ -35,7 +37,7 @@ FString ITLConvertUTF8(const void* Data, int Len)
 	return FString(Converter.Length(), Converter.Get());
 }
 
-const TCHAR* GetITLGameMode(bool ForINISection)
+const TCHAR* GetITLLaunchConfiguration(bool ForINISection)
 {
 	if (GIsEditor)
 	{
@@ -57,23 +59,23 @@ const TCHAR* GetITLGameMode(bool ForINISection)
 
 FString GetITLINISettingPrefix()
 {
-	const TCHAR* GameMode = GetITLGameMode(true);
-	return FString(GameMode);
+	const TCHAR* LaunchConfiguration = GetITLLaunchConfiguration(true);
+	return FString(LaunchConfiguration);
 }
 
-FString GetITLLogFileName(TCHAR* LogTypeName)
+FString GetITLLogFileName(const TCHAR* LogTypeName)
 {
-	const TCHAR* GameMode = GetITLGameMode(false);
-	FString Name = FString(TEXT("itlightning-"), FCString::Strlen(GameMode) + FCString::Strlen(LogTypeName) + FCString::Strlen(TEXT("-.log")));
-	Name.Append(GameMode).Append(TEXT("-")).Append(LogTypeName).Append(TEXT(".log"));
+	const TCHAR* LaunchConfiguration = GetITLLaunchConfiguration(false);
+	FString Name = FString(TEXT("itlightning-"), FCString::Strlen(LaunchConfiguration) + FCString::Strlen(LogTypeName) + FCString::Strlen(TEXT("-.log")));
+	Name.Append(LaunchConfiguration).Append(TEXT("-")).Append(LogTypeName).Append(TEXT(".log"));
 	return Name;
 }
 
 FString GetITLPluginStateFilename()
 {
-	const TCHAR* GameMode = GetITLGameMode(false);
-	FString Name = FString(TEXT("itlightning-"), FCString::Strlen(GameMode) + FCString::Strlen(TEXT("-state.ini")));
-	Name.Append(GameMode).Append(TEXT("-state.ini"));
+	const TCHAR* LaunchConfiguration = GetITLLaunchConfiguration(false);
+	FString Name = FString(TEXT("itlightning-"), FCString::Strlen(LaunchConfiguration) + FCString::Strlen(TEXT("-state.ini")));
+	Name.Append(LaunchConfiguration).Append(TEXT("-state.ini"));
 	return Name;
 }
 
@@ -117,6 +119,10 @@ FITLLogOutputDeviceInitializer& GetITLInternalOpsLog()
 	}
 	return Singleton;
 }
+
+// =============== FitlightningSettings ===============================================================================
+
+const TCHAR* FitlightningSettings::PluginStateSection = TEXT("PluginState");
 
 FitlightningSettings::FitlightningSettings()
 	: RequestTimeoutSecs(DefaultRequestTimeoutSecs)
@@ -233,6 +239,8 @@ void FitlightningSettings::EnforceConstraints()
 	}
 }
 
+// =============== FitlightningWriteNDJSONPayloadProcessor ===============================================================================
+
 FitlightningWriteNDJSONPayloadProcessor::FitlightningWriteNDJSONPayloadProcessor(FString InOutputFilePath) : OutputFilePath(InOutputFilePath) { }
 
 bool FitlightningWriteNDJSONPayloadProcessor::ProcessPayload(const uint8* JSONPayloadInUTF8, int PayloadLen, FitlightningReadAndStreamToCloud* Streamer)
@@ -252,6 +260,8 @@ bool FitlightningWriteNDJSONPayloadProcessor::ProcessPayload(const uint8* JSONPa
 	DebugJSONWriter.Reset();
 	return true;
 }
+
+// =============== FitlightningWriteHTTPPayloadProcessor ===============================================================================
 
 FitlightningWriteHTTPPayloadProcessor::FitlightningWriteHTTPPayloadProcessor(const TCHAR* InEndpointURI, const TCHAR* InAuthorizationHeader, double InTimeoutSecs, bool InLogRequests)
 	: EndpointURI(InEndpointURI)
@@ -388,6 +398,10 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(const uint8* JSONPayl
 	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|END|RequestSucceeded=%d|RetryableFailure=%d"), RequestSucceeded ? 1 : 0, RetryableFailure ? 1 : 0);
 	return RequestSucceeded;
 }
+
+// =============== FitlightningReadAndStreamToCloud ===============================================================================
+
+const TCHAR* FitlightningReadAndStreamToCloud::ProgressMarkerValue = TEXT("ShippedLogOffset");
 
 void FitlightningReadAndStreamToCloud::ComputeCommonEventJSON()
 {
@@ -897,6 +911,8 @@ bool FitlightningReadAndStreamToCloud::WorkerDoFlush()
 	return Result;
 }
 
+// =============== FitlightningModule ===============================================================================
+
 FitlightningModule::FitlightningModule()
 	: LoggingActive(false)
 	, Settings(new FitlightningSettings())
@@ -909,7 +925,7 @@ void FitlightningModule::StartupModule()
 	// TODO: does it matter if we are loaded later and miss a bunch of log entries during engine initialization?
 	// TODO: Should run plugin earlier and check command line to determine if this is running in an editor with
 	//       similar logic to FEngineLoop::PreInitPreStartupScreen [LaunchEngineLoop.cpp] (GIsEditor not available earlier).
-	//       If we change it here, also change GetITLGameMode.
+	//       If we change it here, also change GetITLLaunchConfiguration.
 	if (GIsEditor)
 	{
 		// We must force date/times to be logged in UTC for consistency.
@@ -925,13 +941,13 @@ void FitlightningModule::StartupModule()
 	Settings->LoadSettings();
 	if (Settings->AgentID.IsEmpty() || Settings->AgentAuthToken.IsEmpty())
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("Not yet configured for this game mode. In plugin settings for %s game mode configure Agent ID and Agent Auth Token to enable. Consider using a different agent for Editor vs Client vs Server mode."), *GetITLINISettingPrefix());
+		UE_LOG(LogPluginITLightning, Log, TEXT("Not yet configured for this launch configuration. In plugin settings for %s launch configuration, configure Agent ID and Agent Auth Token to enable. Consider using a different agent for Editor vs Client vs Server."), *GetITLINISettingPrefix());
 		return;
 	}
 	FString EffectiveHttpEndpointURI = Settings->GetEffectiveHttpEndpointURI();
 	if (EffectiveHttpEndpointURI.IsEmpty())
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("Not yet configured for this game mode. In plugin settings for %s game mode configure CloudRegion to 'us' or 'eu' (or in advanced situations configure HttpEndpointURI to the appropriate endpoint, such as https://ingest-<REGION>.engine.itlightning.app/ingest/v1)"), *GetITLINISettingPrefix());
+		UE_LOG(LogPluginITLightning, Log, TEXT("Not yet configured for this launch configuration. In plugin settings for %s launch configuration, configure CloudRegion to 'us' or 'eu' (or in advanced situations configure HttpEndpointURI to the appropriate endpoint, such as https://ingest-<REGION>.engine.itlightning.app/ingest/v1)"), *GetITLINISettingPrefix());
 		return;
 	}
 
@@ -950,7 +966,7 @@ void FitlightningModule::StartupModule()
 		// Log all engine messages to an internal log just for this plugin, which we will then read from the file as we push log data to the cloud
 		GLog->AddOutputDevice(GetITLInternalGameLog().LogDevice.Get());
 	}
-	UE_LOG(LogPluginITLightning, Log, TEXT("Starting up: GameMode=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s"), GetITLGameMode(true), *EffectiveHttpEndpointURI, *Settings->AgentID, Settings->ActivationPercentage, DiceRoll, LoggingActive ? TEXT("yes") : TEXT("no"));
+	UE_LOG(LogPluginITLightning, Log, TEXT("Starting up: LaunchConfiguration=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s"), GetITLLaunchConfiguration(true), *EffectiveHttpEndpointURI, *Settings->AgentID, Settings->ActivationPercentage, DiceRoll, LoggingActive ? TEXT("yes") : TEXT("no"));
 	if (LoggingActive)
 	{
 		UE_LOG(LogPluginITLightning, Log, TEXT("Ingestion parameters: RequestTimeoutSecs=%lf, BytesPerRequest=%d, ProcessingIntervalSecs=%lf, RetryIntervalSecs=%lf"), Settings->RequestTimeoutSecs, Settings->BytesPerRequest, Settings->ProcessingIntervalSecs, Settings->RetryIntervalSecs);
@@ -1053,6 +1069,7 @@ void FitlightningModule::UnregisterSettings()
 		SettingsModule->UnregisterSettings("Project", "Plugins", TEXT("ITLightning"));
 	}
 }
+
 #undef LOCTEXT_NAMESPACE
 
 IMPLEMENT_MODULE(FitlightningModule, itlightning)
