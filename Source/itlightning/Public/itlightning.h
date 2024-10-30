@@ -12,6 +12,8 @@
 
 #define ITL_CONFIG_SECTION_NAME TEXT("/Script/itlightning.ITLightningRuntimeSettings")
 
+#define ITL_PLUGIN_MODULE_NAME "itlightning"
+
 DECLARE_LOG_CATEGORY_EXTERN(LogPluginITLightning, Log, All);
 
 #define ITL_INTERNAL_DEBUG_LOG_DATA 0
@@ -48,6 +50,7 @@ public:
 	static constexpr double WaitForFlushToCloudOnShutdown = 15.0;
 	static constexpr bool DefaultIncludeCommonMetadata = true;
 	static constexpr bool DefaultDebugLogRequests = false;
+	static constexpr bool DefaultAutoStart = true;
 
 	/** The cloud region we want to send logs to, such as 'us' or 'eu' */
 	FString CloudRegion;
@@ -59,7 +62,7 @@ public:
 	FString AgentID;
 	/** Auth token associated with the agent when pushing logs to the cloud */
 	FString AgentAuthToken;
-	/** What percent of the time to activate this plugin. 0.0 to 100.0. Defaults to 100%. Useful for incrementally rolling out the plugin. */
+	/** What percent of the time to activate this plugin (whether started automatically or manually). 0.0 to 100.0. Defaults to 100%. Useful for incrementally rolling out the plugin. */
 	double ActivationPercentage;
 	/** Desired maximum bytes to read and process at one time (one "chunk"). */
 	int32 BytesPerRequest;
@@ -71,6 +74,8 @@ public:
 	bool IncludeCommonMetadata;
 	/** Whether or not to log requests */
 	bool DebugLogRequests;
+	/** Whether or not to automatically start the log shipping engine. */
+	bool AutoStart;
 
 	FitlightningSettings();
 
@@ -108,7 +113,11 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Agent Auth Token")
 	FString ServerAgentAuthToken;
 
-	// What percent of the time to activate this plugin when the engine starts. 0.0 to 100.0. Defaults to 100%. Useful for incrementally rolling out the plugin.
+	// Whether or not to automatically start the log shipping engine. If disabled, you must manually start the engine by calling FitlightningModule::GetModule().StartShippingEngine(...);
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Auto Start")
+	bool ServerAutoStart = FitlightningSettings::DefaultAutoStart;
+
+	// What percent of the time to activate this plugin when the engine starts (whether automatically or manually with StartShippingEngine). 0.0 to 100.0. Defaults to 100%. Useful for incrementally rolling out the plugin.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Activation Percentage")
 	float ServerActivationPercentage = FitlightningSettings::DefaultActivationPercentage;
 
@@ -130,7 +139,11 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName="Agent Auth Token")
 	FString EditorAgentAuthToken;
 
-	// What percent of the time to activate this plugin when the engine starts. 0.0 to 100.0. Defaults to 100%. Useful for incrementally rolling out the plugin. [EDITOR RESTART REQUIRED]
+	// Whether or not to automatically start the log shipping engine. If disabled, you must manually start the engine by calling FitlightningModule::GetModule().StartShippingEngine(...); [EDITOR RESTART REQUIRED]
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Auto Start")
+	bool EditorAutoStart = FitlightningSettings::DefaultAutoStart;
+
+	// What percent of the time to activate this plugin when the engine starts (whether automatically or manually with StartShippingEngine). 0.0 to 100.0. Defaults to 100%. Useful for incrementally rolling out the plugin. [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName="Activation Percentage")
 	float EditorActivationPercentage = FitlightningSettings::DefaultActivationPercentage;
 
@@ -152,7 +165,11 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Agent Auth Token")
 	FString ClientAgentAuthToken;
 
-	// What percent of the time to activate this plugin when the engine starts. 0.0 to 100.0. Defaults to 100%. Useful for incrementally rolling out the plugin.
+	// Whether or not to automatically start the log shipping engine. If disabled, you must manually start the engine by calling FitlightningModule::GetModule().StartShippingEngine(...);
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Auto Start")
+	bool ClientAutoStart = FitlightningSettings::DefaultAutoStart;
+
+	// What percent of the time to activate this plugin when the engine starts (whether automatically or manually with StartShippingEngine). 0.0 to 100.0. Defaults to 100%. Useful for incrementally rolling out the plugin.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Activation Percentage")
 	float ClientActivationPercentage = FitlightningSettings::DefaultActivationPercentage;
 
@@ -357,6 +374,21 @@ protected:
 */
 class FitlightningModule : public IModuleInterface
 {
+public:
+	/**
+	 * Returns the singleton instance of this module, loading it on demand if needed.
+	 * Be careful calling this during shutdown when the module may already be unloaded!
+	 */
+	static inline FitlightningModule& GetModule()
+	{
+		return FModuleManager::LoadModuleChecked<FitlightningModule>(FName(ITL_PLUGIN_MODULE_NAME));
+	}
+
+	/** Returns whether or not the module is currently loaded. */
+	static inline bool IsModuleLoaded()
+	{
+		return FModuleManager::Get().IsModuleLoaded(FName(ITL_PLUGIN_MODULE_NAME));
+	}
 
 public:
 	FitlightningModule();
@@ -366,7 +398,17 @@ public:
 	virtual void ShutdownModule() override;
 	//~ End IModuleInterface Interface
 
-	/** Stop the log shipping engine. It will not start again. */
+	/**
+	 * Starts the log shipping engine if it has not yet started. You can override the agent ID and/or agent auth token
+	 * by specifying non-empty values. (If NULL or empty values are passed, then the value in the settings will be used.)
+	 * This will still only activate if a random roll of the dice passed the "ActivationPercentage" check, or pass
+	 * AlwaysStart as true to force the engine to start regardless of this setting.
+	 *
+	 * Returns true if the shipping engine was activated (may be false if diceroll + ActivationPercentage caused it to not start).
+	 */
+	bool StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, bool AlwaysStart);
+
+	/** Stops the log shipping engine. It will not start again unless StartShippingEngine is manually called. */
 	void StopShippingEngine();
 
 protected:

@@ -132,6 +132,7 @@ FitlightningSettings::FitlightningSettings()
 	, RetryIntervalSecs(DefaultRetryIntervalSecs)
 	, IncludeCommonMetadata(DefaultIncludeCommonMetadata)
 	, DebugLogRequests(DefaultDebugLogRequests)
+	, AutoStart(DefaultAutoStart)
 {
 }
 
@@ -207,6 +208,10 @@ void FitlightningSettings::LoadSettings()
 	if (!GConfig->GetBool(*Section, *(SettingPrefix + TEXT("DebugLogRequests")), DebugLogRequests, GEngineIni))
 	{
 		DebugLogRequests = DefaultDebugLogRequests;
+	}
+	if (!GConfig->GetBool(*Section, *(SettingPrefix + TEXT("AutoStart")), AutoStart, GEngineIni))
+	{
+		AutoStart = DefaultAutoStart;
 	}
 
 	EnforceConstraints();
@@ -939,42 +944,13 @@ void FitlightningModule::StartupModule()
 	}
 
 	Settings->LoadSettings();
-	if (Settings->AgentID.IsEmpty() || Settings->AgentAuthToken.IsEmpty())
+	if (Settings->AutoStart)
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("Not yet configured for this launch configuration. In plugin settings for %s launch configuration, configure Agent ID and Agent Auth Token to enable. Consider using a different agent for Editor vs Client vs Server."), *GetITLINISettingPrefix());
-		return;
+		StartShippingEngine(NULL, NULL, false);
 	}
-	FString EffectiveHttpEndpointURI = Settings->GetEffectiveHttpEndpointURI();
-	if (EffectiveHttpEndpointURI.IsEmpty())
+	else
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("Not yet configured for this launch configuration. In plugin settings for %s launch configuration, configure CloudRegion to 'us' or 'eu' (or in advanced situations configure HttpEndpointURI to the appropriate endpoint, such as https://ingest-<REGION>.engine.itlightning.app/ingest/v1)"), *GetITLINISettingPrefix());
-		return;
-	}
-
-	if (!FPlatformProcess::SupportsMultithreading())
-	{
-		UE_LOG(LogPluginITLightning, Warning, TEXT("This plugin cannot run on this platform. This platform does not multithreading."));
-		return;
-	}
-
-	float DiceRoll = FMath::FRandRange(0.0, 100.0);
-	LoggingActive = DiceRoll < Settings->ActivationPercentage;
-	if (LoggingActive)
-	{
-		// Log all IT Lightning messages to the ITL operations log
-		GLog->AddOutputDevice(GetITLInternalOpsLog().LogDevice.Get());
-		// Log all engine messages to an internal log just for this plugin, which we will then read from the file as we push log data to the cloud
-		GLog->AddOutputDevice(GetITLInternalGameLog().LogDevice.Get());
-	}
-	UE_LOG(LogPluginITLightning, Log, TEXT("Starting up: LaunchConfiguration=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s"), GetITLLaunchConfiguration(true), *EffectiveHttpEndpointURI, *Settings->AgentID, Settings->ActivationPercentage, DiceRoll, LoggingActive ? TEXT("yes") : TEXT("no"));
-	if (LoggingActive)
-	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("Ingestion parameters: RequestTimeoutSecs=%lf, BytesPerRequest=%d, ProcessingIntervalSecs=%lf, RetryIntervalSecs=%lf"), Settings->RequestTimeoutSecs, Settings->BytesPerRequest, Settings->ProcessingIntervalSecs, Settings->RetryIntervalSecs);
-		FString SourceLogFile = GetITLInternalGameLog().LogFilePath;
-		FString AuthorizationHeader = FString::Format(TEXT("Bearer {0}:{1}"), { *Settings->AgentID, *Settings->AgentAuthToken });
-		CloudPayloadProcessor = TSharedPtr<FitlightningWriteHTTPPayloadProcessor>(new FitlightningWriteHTTPPayloadProcessor(*EffectiveHttpEndpointURI, *AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests));
-		CloudStreamer = MakeUnique<FitlightningReadAndStreamToCloud>(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength);
-		FCoreDelegates::OnExit.AddRaw(this, &FitlightningModule::OnEngineExit);
+		UE_LOG(LogPluginITLightning, Log, TEXT("AutoStart is disabled. Waiting for call to FitlightningModule::GetModule().StartShippingEngine(...)"));
 	}
 }
 
@@ -988,6 +964,65 @@ void FitlightningModule::ShutdownModule()
 	}
 	// Just in case it was not called earlier...
 	StopShippingEngine();
+}
+
+bool FitlightningModule::StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, bool AlwaysStart)
+{
+	if (LoggingActive)
+	{
+		UE_LOG(LogPluginITLightning, Log, TEXT("Logging is already active. Ignoring call to StartShippingEngine."));
+		return true;
+	}
+
+	FString EffectiveAgentID = Settings->AgentID;
+	FString EffectiveAgentAuthToken = Settings->AgentAuthToken;
+	if (NULL != OverrideAgentID && FPlatformString::Strlen(OverrideAgentID) > 0)
+	{
+		EffectiveAgentID = OverrideAgentID;
+	}
+	if (NULL != OverrideAgentAuthToken && FPlatformString::Strlen(OverrideAgentAuthToken) > 0)
+	{
+		EffectiveAgentAuthToken = OverrideAgentAuthToken;
+	}
+
+	if (EffectiveAgentID.IsEmpty() || EffectiveAgentAuthToken.IsEmpty())
+	{
+		UE_LOG(LogPluginITLightning, Log, TEXT("Not yet configured for this launch configuration. In plugin settings for %s launch configuration, configure Agent ID and Agent Auth Token to enable. Consider using a different agent for Editor vs Client vs Server."), *GetITLINISettingPrefix());
+		return false;
+	}
+	FString EffectiveHttpEndpointURI = Settings->GetEffectiveHttpEndpointURI();
+	if (EffectiveHttpEndpointURI.IsEmpty())
+	{
+		UE_LOG(LogPluginITLightning, Log, TEXT("Not yet configured for this launch configuration. In plugin settings for %s launch configuration, configure CloudRegion to 'us' or 'eu' (or in advanced situations configure HttpEndpointURI to the appropriate endpoint, such as https://ingest-<REGION>.engine.itlightning.app/ingest/v1)"), *GetITLINISettingPrefix());
+		return false;
+	}
+
+	if (!FPlatformProcess::SupportsMultithreading())
+	{
+		UE_LOG(LogPluginITLightning, Warning, TEXT("This plugin cannot run on this platform. This platform does not multithreading."));
+		return false;
+	}
+
+	float DiceRoll = AlwaysStart ? 10000.0 : FMath::FRandRange(0.0, 100.0);
+	LoggingActive = DiceRoll < Settings->ActivationPercentage;
+	if (LoggingActive)
+	{
+		// Log all IT Lightning messages to the ITL operations log
+		GLog->AddOutputDevice(GetITLInternalOpsLog().LogDevice.Get());
+		// Log all engine messages to an internal log just for this plugin, which we will then read from the file as we push log data to the cloud
+		GLog->AddOutputDevice(GetITLInternalGameLog().LogDevice.Get());
+	}
+	UE_LOG(LogPluginITLightning, Log, TEXT("Starting up: LaunchConfiguration=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s"), GetITLLaunchConfiguration(true), *EffectiveHttpEndpointURI, *EffectiveAgentID, Settings->ActivationPercentage, DiceRoll, LoggingActive ? TEXT("yes") : TEXT("no"));
+	if (LoggingActive)
+	{
+		UE_LOG(LogPluginITLightning, Log, TEXT("Ingestion parameters: RequestTimeoutSecs=%lf, BytesPerRequest=%d, ProcessingIntervalSecs=%lf, RetryIntervalSecs=%lf"), Settings->RequestTimeoutSecs, Settings->BytesPerRequest, Settings->ProcessingIntervalSecs, Settings->RetryIntervalSecs);
+		FString SourceLogFile = GetITLInternalGameLog().LogFilePath;
+		FString AuthorizationHeader = FString::Format(TEXT("Bearer {0}:{1}"), { *EffectiveAgentID, *EffectiveAgentAuthToken });
+		CloudPayloadProcessor = TSharedPtr<FitlightningWriteHTTPPayloadProcessor>(new FitlightningWriteHTTPPayloadProcessor(*EffectiveHttpEndpointURI, *AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests));
+		CloudStreamer = MakeUnique<FitlightningReadAndStreamToCloud>(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength);
+		FCoreDelegates::OnExit.AddRaw(this, &FitlightningModule::OnEngineExit);
+	}
+	return LoggingActive;
 }
 
 void FitlightningModule::StopShippingEngine()
