@@ -133,6 +133,8 @@ FitlightningSettings::FitlightningSettings()
 	, IncludeCommonMetadata(DefaultIncludeCommonMetadata)
 	, DebugLogRequests(DefaultDebugLogRequests)
 	, AutoStart(DefaultAutoStart)
+	, StressTestGenerateIntervalSecs(0.0)
+	, StressTestNumEntriesPerTick(0)
 {
 }
 
@@ -214,6 +216,15 @@ void FitlightningSettings::LoadSettings()
 		AutoStart = DefaultAutoStart;
 	}
 
+	if (!GConfig->GetDouble(*Section, *(SettingPrefix + TEXT("StressTestGenerateIntervalSecs")), StressTestGenerateIntervalSecs, GEngineIni))
+	{
+		StressTestGenerateIntervalSecs = 0.0;
+	}
+	if (!GConfig->GetInt(*Section, *(SettingPrefix + TEXT("StressTestNumEntriesPerTick")), StressTestNumEntriesPerTick, GEngineIni))
+	{
+		StressTestNumEntriesPerTick = 0;
+	}
+
 	EnforceConstraints();
 }
 
@@ -241,6 +252,10 @@ void FitlightningSettings::EnforceConstraints()
 	if (RetryIntervalSecs < MinRetryIntervalSecs)
 	{
 		RetryIntervalSecs = MinRetryIntervalSecs;
+	}
+	if (StressTestGenerateIntervalSecs > 0 && StressTestNumEntriesPerTick < 1)
+	{
+		StressTestNumEntriesPerTick = 1;
 	}
 }
 
@@ -402,6 +417,54 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(const uint8* JSONPayl
 	}
 	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|END|RequestSucceeded=%d|RetryableFailure=%d"), RequestSucceeded ? 1 : 0, RetryableFailure ? 1 : 0);
 	return RequestSucceeded;
+}
+
+// =============== FitlightningStressGenerator ===============================================================================
+
+FitlightningStressGenerator::FitlightningStressGenerator(TSharedRef<FitlightningSettings> InSettings)
+	: Settings(InSettings)
+	, Thread(nullptr)
+{
+	check(FPlatformProcess::SupportsMultithreading());
+	FString ThreadName = TEXT("ITLightning_StressGenerator");
+	FPlatformAtomics::InterlockedExchangePtr((void**)&Thread, FRunnableThread::Create(this, *ThreadName, 0, TPri_BelowNormal));
+}
+
+FitlightningStressGenerator::~FitlightningStressGenerator()
+{
+	if (Thread)
+	{
+		delete Thread;
+	}
+	Thread = nullptr;
+}
+
+bool FitlightningStressGenerator::Init()
+{
+	return true;
+}
+
+uint32 FitlightningStressGenerator::Run()
+{
+	double StressTestGenerateIntervalSecs = Settings->StressTestGenerateIntervalSecs;
+	int StressTestNumEntriesPerTick = Settings->StressTestNumEntriesPerTick;
+	UE_LOG(LogPluginITLightning, Log, TEXT("FitlightningStressGenerator starting. StressTestGenerateIntervalSecs=%.3lf, StressTestNumEntriesPerTick=%d"), StressTestGenerateIntervalSecs, StressTestNumEntriesPerTick);
+	while (StopRequestCounter.GetValue() == 0)
+	{
+		for (int i = 0; i < StressTestNumEntriesPerTick; i++)
+		{
+			UE_LOG(LogEngine, Log, TEXT("FitlightningStressGenerator|Stress test message is being generated at platform_time=%.3lf, iteration=%d, 12345678901234567890123456789012345678901234567890 1234567890123456789012345678901234567890123456 100 12345678901234567890123456789012345678901234567890 1234567890123456789012345678901234567890123456 200 12345678901234567890123456789012345678901234567890 1234567890123456789012345678901234567890123456 300 12345678901234567890123456789012345678901234567890 1234567890123456789012345678901234567890123456 400"), FPlatformTime::Seconds(), i);
+		}
+		FPlatformProcess::SleepNoStats(StressTestGenerateIntervalSecs);
+	}
+	UE_LOG(LogPluginITLightning, Log, TEXT("FitlightningStressGenerator stopped..."));
+	return 0;
+}
+
+void FitlightningStressGenerator::Stop()
+{
+	UE_LOG(LogPluginITLightning, Log, TEXT("FitlightningStressGenerator requesting stop..."));
+	StopRequestCounter.Increment();
 }
 
 // =============== FitlightningReadAndStreamToCloud ===============================================================================
@@ -1021,6 +1084,11 @@ bool FitlightningModule::StartShippingEngine(const TCHAR* OverrideAgentID, const
 		CloudPayloadProcessor = TSharedPtr<FitlightningWriteHTTPPayloadProcessor>(new FitlightningWriteHTTPPayloadProcessor(*EffectiveHttpEndpointURI, *AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests));
 		CloudStreamer = MakeUnique<FitlightningReadAndStreamToCloud>(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength);
 		FCoreDelegates::OnExit.AddRaw(this, &FitlightningModule::OnEngineExit);
+
+		if (Settings->StressTestGenerateIntervalSecs > 0)
+		{
+			StressGenerator = MakeUnique<FitlightningStressGenerator>(Settings);
+		}
 	}
 	return LoggingActive;
 }
@@ -1031,6 +1099,10 @@ void FitlightningModule::StopShippingEngine()
 	{
 		UE_LOG(LogPluginITLightning, Log, TEXT("Shutting down and flushing logs to cloud..."));
 		GLog->Flush();
+		if (StressGenerator.IsValid())
+		{
+			StressGenerator->Stop();
+		}
 		if (CloudStreamer.IsValid())
 		{
 			if (CloudPayloadProcessor.IsValid())
@@ -1066,6 +1138,7 @@ void FitlightningModule::StopShippingEngine()
 			CloudStreamer.Reset();
 		}
 		CloudPayloadProcessor.Reset();
+		StressGenerator.Reset();
 		UE_LOG(LogPluginITLightning, Log, TEXT("Shutdown."));
 		LoggingActive = false;
 	}

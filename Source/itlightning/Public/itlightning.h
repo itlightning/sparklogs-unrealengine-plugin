@@ -77,6 +77,11 @@ public:
 	/** Whether or not to automatically start the log shipping engine. */
 	bool AutoStart;
 
+	/** If non-zero, then will generate fake logs periodically */
+	double StressTestGenerateIntervalSecs;
+	/** The number of log entries to generate every generation interval. */
+	int StressTestNumEntriesPerTick;
+
 	FitlightningSettings();
 
 	/** Loads the settings from the game engine INI section appropriate for this launch configuration (editor, client, server, etc). */
@@ -297,6 +302,28 @@ public:
 using TITLJSONStringBuilder = TAnsiStringBuilder<4 * 1024>;
 
 /**
+ * Background thread that generates fake log entries to stress the logging system.
+ */
+class FitlightningStressGenerator : public FRunnable
+{
+protected:
+	TSharedRef<FitlightningSettings> Settings;
+	volatile FRunnableThread* Thread;
+	/** Non-zero stops this thread */
+	FThreadSafeCounter StopRequestCounter;
+
+public:
+	FitlightningStressGenerator(TSharedRef<FitlightningSettings> InSettings);
+	~FitlightningStressGenerator();
+
+	//~ Begin FRunnable Interface
+	virtual bool Init();
+	virtual uint32 Run();
+	virtual void Stop();
+	//~ End FRunnable Interface
+};
+
+/**
 * On a background thread, reads data from a logfile on disk and streams to the cloud.
 */
 class FitlightningReadAndStreamToCloud : public FRunnable
@@ -422,6 +449,7 @@ private:
 	bool LoggingActive;
 	TSharedRef<FitlightningSettings> Settings;
 	TUniquePtr<FitlightningReadAndStreamToCloud> CloudStreamer;
+	TUniquePtr<FitlightningStressGenerator> StressGenerator;
 	/** The payload processor that sends data to the cloud */
 	TSharedPtr<FitlightningWriteHTTPPayloadProcessor> CloudPayloadProcessor;
 
