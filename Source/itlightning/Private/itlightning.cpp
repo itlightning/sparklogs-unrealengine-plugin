@@ -442,6 +442,12 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPa
 					RequestSucceeded.AtomicSet(false);
 					RetryableFailure.AtomicSet(true);
 				}
+				else if (EHttpResponseCodes::BadRequest == ResponseCode)
+				{
+					// Something about this input was unable to be processed -- drop this input and pretend success so we can continue, but warn about it
+					UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: HTTP response indicates input cannot be processed. Will skip this payload! status=%d, msg=%s"), (int)ResponseCode, *ResponseBody);
+					RequestSucceeded.AtomicSet(true);
+				}
 				else
 				{
 					UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Non-Retryable HTTP response: status=%d, msg=%s"), (int)ResponseCode, *ResponseBody);
