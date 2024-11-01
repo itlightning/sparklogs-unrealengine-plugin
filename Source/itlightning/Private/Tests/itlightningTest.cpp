@@ -59,14 +59,20 @@ public:
     bool FailProcessing;
     TArray<FString> Payloads;
     FitlightningStoreInMemPayloadProcessor() : FailProcessing(false) { }
-    virtual bool ProcessPayload(const uint8* JSONPayloadInUTF8, int PayloadLen, FitlightningReadAndStreamToCloud* Streamer) override
+    virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FitlightningReadAndStreamToCloud* Streamer) override
     {
         if (FailProcessing)
         {
             ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("TEST: forcefully failing processing of payload of length %d"), PayloadLen);
             return false;
         }
-        Payloads.Add(ITLConvertUTF8(JSONPayloadInUTF8, PayloadLen));
+        TArray<uint8> DecompressedData;
+        if (!ITLDecompressData(CompressionMode, JSONPayloadInUTF8.GetData(), PayloadLen, OriginalPayloadLen, DecompressedData))
+        {
+            UE_LOG(LogPluginITLightning, Warning, TEXT("TEST: failed to decompress data in payload: mode=%d, len=%d, original_len=%d"), (int)CompressionMode, PayloadLen, OriginalPayloadLen);
+            return false;
+        }
+        Payloads.Add(ITLConvertUTF8(DecompressedData.GetData(), DecompressedData.Num()));
         return true;
     }
 };
@@ -90,7 +96,19 @@ bool ITLComparePayloads(FAutomationTestBase* T, const TArray<FString>& Actual, c
     }
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestSkipByteMarker, "itlightning.UnitTests.SkipByteMarker", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+static void SetupCompressionModes(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands)
+{
+    OutBeautifiedNames.Add(TEXT("uncompressed"));
+    OutTestCommands.Add(FString::FromInt((int)ITLCompressionMode::None));
+    OutBeautifiedNames.Add(TEXT("LZ4"));
+    OutTestCommands.Add(FString::FromInt((int)ITLCompressionMode::LZ4));
+}
+
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestSkipByteMarker, "itlightning.UnitTests.SkipByteMarker", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FitlightningPluginUnitTestSkipByteMarker::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
 bool FitlightningPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
@@ -106,6 +124,7 @@ bool FitlightningPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters
 
     TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
     Settings->IncludeCommonMetadata = false;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16*1024);
     bool FlushedEverything=false;
@@ -125,7 +144,11 @@ bool FitlightningPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestSkipEmptyPayloads, "itlightning.UnitTests.SkipEmptyPayloads", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestSkipEmptyPayloads, "itlightning.UnitTests.SkipEmptyPayloads", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FitlightningPluginUnitTestSkipEmptyPayloads::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
 bool FitlightningPluginUnitTestSkipEmptyPayloads::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
@@ -137,6 +160,7 @@ bool FitlightningPluginUnitTestSkipEmptyPayloads::RunTest(const FString& Paramet
     
     TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
     Settings->IncludeCommonMetadata = false;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024);
     // Test completely empty file
@@ -173,7 +197,11 @@ bool FitlightningPluginUnitTestSkipEmptyPayloads::RunTest(const FString& Paramet
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestMultiline, "itlightning.UnitTests.Multiline", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestMultiline, "itlightning.UnitTests.Multiline", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FitlightningPluginUnitTestMultiline::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
 bool FitlightningPluginUnitTestMultiline::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
@@ -187,6 +215,7 @@ bool FitlightningPluginUnitTestMultiline::RunTest(const FString& Parameters)
 
     TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
     Settings->IncludeCommonMetadata = false;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Second line is longer\"},{\"message\":\"3\"},{\"message\":\"   fourth line    \\t\"}]"));
@@ -199,7 +228,11 @@ bool FitlightningPluginUnitTestMultiline::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestNewlines, "itlightning.UnitTests.Newlines", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestNewlines, "itlightning.UnitTests.Newlines", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FitlightningPluginUnitTestNewlines::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
 bool FitlightningPluginUnitTestNewlines::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
@@ -213,6 +246,7 @@ bool FitlightningPluginUnitTestNewlines::RunTest(const FString& Parameters)
 
     TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
     Settings->IncludeCommonMetadata = false;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"\\t\"},{\"message\":\"linux\"},{\"message\":\"skip\\rslash\\rR\"},{\"message\":\" \"},{\"message\":\" \"}]"));
@@ -225,7 +259,11 @@ bool FitlightningPluginUnitTestNewlines::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestUnicode, "itlightning.UnitTests.Unicode", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestUnicode, "itlightning.UnitTests.Unicode", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FitlightningPluginUnitTestUnicode::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
 bool FitlightningPluginUnitTestUnicode::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
@@ -240,6 +278,7 @@ bool FitlightningPluginUnitTestUnicode::RunTest(const FString& Parameters)
 
     TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
     Settings->IncludeCommonMetadata = false;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024);
     ExpectedPayloads.Add(FString::Format(TEXT("[{\"message\":\"{0}\"}]"), { TestPayload1 }));
@@ -252,7 +291,11 @@ bool FitlightningPluginUnitTestUnicode::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestMaxLineSize, "itlightning.UnitTests.MaxLineSize", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestMaxLineSize, "itlightning.UnitTests.MaxLineSize", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FitlightningPluginUnitTestMaxLineSize::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
 bool FitlightningPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
@@ -268,6 +311,7 @@ bool FitlightningPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
 
     TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
     Settings->IncludeCommonMetadata = false;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, MaxLineSize);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"12345678\"},{\"message\":\"12345678\"}]"));
@@ -288,7 +332,11 @@ bool FitlightningPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestMaxLineSizeUnicode, "itlightning.UnitTests.MaxLineSizeUnicode", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestMaxLineSizeUnicode, "itlightning.UnitTests.MaxLineSizeUnicode", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FitlightningPluginUnitTestMaxLineSizeUnicode::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
 bool FitlightningPluginUnitTestMaxLineSizeUnicode::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
@@ -306,6 +354,7 @@ bool FitlightningPluginUnitTestMaxLineSizeUnicode::RunTest(const FString& Parame
 
     TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
     Settings->IncludeCommonMetadata = false;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, MaxLineSize);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"1234\"},{\"message\":\"ππ5678\"},{\"message\":\"π34\"}]"));
@@ -327,7 +376,11 @@ bool FitlightningPluginUnitTestMaxLineSizeUnicode::RunTest(const FString& Parame
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestStopAndResume, "itlightning.UnitTests.StopAndResume", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestStopAndResume, "itlightning.UnitTests.StopAndResume", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FitlightningPluginUnitTestStopAndResume::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
 bool FitlightningPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
@@ -341,6 +394,7 @@ bool FitlightningPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
 
     TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
     Settings->IncludeCommonMetadata = false;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
@@ -374,7 +428,11 @@ bool FitlightningPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestHandleLogRotation, "itlightning.UnitTests.HandleLogRotation", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestHandleLogRotation, "itlightning.UnitTests.HandleLogRotation", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FitlightningPluginUnitTestHandleLogRotation::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
 bool FitlightningPluginUnitTestHandleLogRotation::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
@@ -388,6 +446,7 @@ bool FitlightningPluginUnitTestHandleLogRotation::RunTest(const FString& Paramet
 
     TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
     Settings->IncludeCommonMetadata = false;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
     TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"123456789012345678901234567890\"}]"));
@@ -419,7 +478,11 @@ bool FitlightningPluginUnitTestHandleLogRotation::RunTest(const FString& Paramet
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestRetryDelay, "itlightning.UnitTests.RetryDelay", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestRetryDelay, "itlightning.UnitTests.RetryDelay", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FitlightningPluginUnitTestRetryDelay::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
 bool FitlightningPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
@@ -433,6 +496,7 @@ bool FitlightningPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
 
     TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
     Settings->IncludeCommonMetadata = false;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     // Setup so that we process success requests very quickly, but delay a long time after a failure
     constexpr double TestProcessingIntervalSecs = 0.1;
     constexpr double TestRetryIntervalSecs = 3.0;
@@ -474,7 +538,11 @@ bool FitlightningPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FitlightningPluginUnitTestClearRetryTimer, "itlightning.UnitTests.ClearRetryTimer", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestClearRetryTimer, "itlightning.UnitTests.ClearRetryTimer", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FitlightningPluginUnitTestClearRetryTimer::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
 bool FitlightningPluginUnitTestClearRetryTimer::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
@@ -488,6 +556,7 @@ bool FitlightningPluginUnitTestClearRetryTimer::RunTest(const FString& Parameter
 
     TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
     Settings->IncludeCommonMetadata = false;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     // Setup so that we process success requests very quickly, but delay a long time after a failure
     constexpr double TestProcessingIntervalSecs = 0.1;
     constexpr double TestRetryIntervalSecs = 3.0;

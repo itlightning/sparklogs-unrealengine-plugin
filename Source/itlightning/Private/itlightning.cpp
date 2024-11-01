@@ -120,6 +120,68 @@ FITLLogOutputDeviceInitializer& GetITLInternalOpsLog()
 	return Singleton;
 }
 
+bool ITLCompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, TArray<uint8>& OutData)
+{
+	int32 CompressedBufSize = 0;
+	int CompressedSize = 0;
+	switch (Mode)
+	{
+	case ITLCompressionMode::LZ4:
+		if (InDataLen > LZ4_MAX_INPUT_SIZE)
+		{
+			return false;
+		}
+		CompressedBufSize = (int32)ITLLZ4::LZ4_compressBound(InDataLen);
+		OutData.SetNumUninitialized(CompressedBufSize, false);
+		if (InDataLen <= 0)
+		{
+			// no-op
+			return true;
+		}
+		CompressedSize = ITLLZ4::LZ4_compress_default((const char*)InData, (char*)OutData.GetData(), InDataLen, CompressedBufSize);
+		if (CompressedSize <= 0)
+		{
+			return false;
+		}
+		OutData.SetNumUninitialized(CompressedSize, false);
+		return true;
+	case ITLCompressionMode::None:
+		OutData.SetNumUninitialized(0, false);
+		OutData.Append(InData, (int32)InDataLen);
+		return true;
+	default:
+		return false;
+	}
+}
+
+bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, int InOriginalDataLen, TArray<uint8>& OutData)
+{
+	int DecompressedBytes = 0;
+	switch (Mode)
+	{
+	case ITLCompressionMode::LZ4:
+		OutData.SetNumUninitialized(InOriginalDataLen, false);
+		if (InOriginalDataLen <= 0)
+		{
+			// no-op
+			return true;
+		}
+		DecompressedBytes = ITLLZ4::LZ4_decompress_safe((const char*)InData, (char*)OutData.GetData(), InDataLen, InOriginalDataLen);
+		if (DecompressedBytes < 0)
+		{
+			return false;
+		}
+		OutData.SetNumUninitialized(DecompressedBytes, false);
+		return true;
+	case ITLCompressionMode::None:
+		OutData.SetNumUninitialized(0, false);
+		OutData.Append(InData, (int32)InDataLen);
+		return true;
+	default:
+		return false;
+	}
+}
+
 // =============== FitlightningSettings ===============================================================================
 
 const TCHAR* FitlightningSettings::PluginStateSection = TEXT("PluginState");
@@ -133,6 +195,7 @@ FitlightningSettings::FitlightningSettings()
 	, IncludeCommonMetadata(DefaultIncludeCommonMetadata)
 	, DebugLogRequests(DefaultDebugLogRequests)
 	, AutoStart(DefaultAutoStart)
+	, CompressionMode(ITLCompressionMode::Default)
 	, StressTestGenerateIntervalSecs(0.0)
 	, StressTestNumEntriesPerTick(0)
 {
@@ -216,6 +279,21 @@ void FitlightningSettings::LoadSettings()
 		AutoStart = DefaultAutoStart;
 	}
 
+	FString CompressionModeStr = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("CompressionMode")), GEngineIni).ToLower();
+	if (CompressionModeStr == TEXT("lz4"))
+	{
+		CompressionMode = ITLCompressionMode::LZ4;
+	}
+	else if (CompressionModeStr == TEXT("none"))
+	{
+		CompressionMode = ITLCompressionMode::None;
+	}
+	else
+	{
+		UE_LOG(LogPluginITLightning, Warning, TEXT("Unknown compression_mode=%s, using default mode instead..."), *CompressionModeStr);
+		CompressionMode = ITLCompressionMode::Default;
+	}
+
 	if (!GConfig->GetDouble(*Section, *(SettingPrefix + TEXT("StressTestGenerateIntervalSecs")), StressTestGenerateIntervalSecs, GEngineIni))
 	{
 		StressTestGenerateIntervalSecs = 0.0;
@@ -263,7 +341,7 @@ void FitlightningSettings::EnforceConstraints()
 
 FitlightningWriteNDJSONPayloadProcessor::FitlightningWriteNDJSONPayloadProcessor(FString InOutputFilePath) : OutputFilePath(InOutputFilePath) { }
 
-bool FitlightningWriteNDJSONPayloadProcessor::ProcessPayload(const uint8* JSONPayloadInUTF8, int PayloadLen, FitlightningReadAndStreamToCloud* Streamer)
+bool FitlightningWriteNDJSONPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FitlightningReadAndStreamToCloud* Streamer)
 {
 	TUniquePtr<IFileHandle> DebugJSONWriter;
 	DebugJSONWriter.Reset(FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*OutputFilePath, true, true));
@@ -271,7 +349,13 @@ bool FitlightningWriteNDJSONPayloadProcessor::ProcessPayload(const uint8* JSONPa
 	{
 		return false;
 	}
-	if (!DebugJSONWriter->Write((const uint8*)JSONPayloadInUTF8, PayloadLen)
+	TArray<uint8> DecompressedData;
+	if (!ITLDecompressData(CompressionMode, JSONPayloadInUTF8.GetData(), PayloadLen, OriginalPayloadLen, DecompressedData))
+	{
+		UE_LOG(LogPluginITLightning, Warning, TEXT("WriteNDJSONPayloadProcessor: failed to decompress data in payload: mode=%d, len=%d, original_len=%d"), (int)CompressionMode, PayloadLen, OriginalPayloadLen);
+		return false;
+	}
+	if (!DebugJSONWriter->Write((const uint8*)DecompressedData.GetData(), DecompressedData.Num())
 		|| !DebugJSONWriter->Write((const uint8*)("\r\n"), 2)
 		|| !DebugJSONWriter->Flush())
 	{
@@ -296,14 +380,13 @@ void FitlightningWriteHTTPPayloadProcessor::SetTimeoutSecs(double InTimeoutSecs)
 	TimeoutMillisec.Set((int32)(InTimeoutSecs * 1000.0));
 }
 
-bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(const uint8* JSONPayloadInUTF8, int PayloadLen, FitlightningReadAndStreamToCloud* Streamer)
+bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FitlightningReadAndStreamToCloud* Streamer)
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningWriteHTTPPayloadProcessor_ProcessPayload);
 	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|BEGIN"));
 	if (LogRequests)
 	{
-		int CompressedBufSize = ITLLZ4::LZ4_compressBound(PayloadLen);
-		UE_LOG(LogPluginITLightning, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: BEGIN: worst_case_compressed_size=%d, len=%d, timeout_millisec=%d"), CompressedBufSize, PayloadLen, (int)(TimeoutMillisec.GetValue()));
+		UE_LOG(LogPluginITLightning, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: BEGIN: len=%d, original_len=%d, timeout_millisec=%d"), PayloadLen, OriginalPayloadLen, (int)(TimeoutMillisec.GetValue()));
 	}
 	
 	FThreadSafeBool RequestEnded(false);
@@ -315,10 +398,20 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(const uint8* JSONPayl
 	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json; charset=UTF-8"));
 	HttpRequest->SetHeader(TEXT("Authorization"), *AuthorizationHeader);
 	HttpRequest->SetTimeout((double)(TimeoutMillisec.GetValue()) / 1000.0);
-	InternalBuffer.Reserve(PayloadLen);
-	InternalBuffer.Reset(0);
-	InternalBuffer.Append(JSONPayloadInUTF8, PayloadLen);
-	HttpRequest->SetContent(InternalBuffer);
+	switch (CompressionMode)
+	{
+	case ITLCompressionMode::LZ4:
+		HttpRequest->SetHeader(TEXT("Content-Encoding"), TEXT("lz4-block"));
+		HttpRequest->SetHeader(TEXT("X-Original-Content-Length"), FString::FromInt(OriginalPayloadLen));
+		break;
+	case ITLCompressionMode::None:
+		// no special header to set
+		break;
+	default:
+		UE_LOG(LogPluginITLightning, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: unknown compression mode %d"), (int)CompressionMode);
+		return false;
+	}
+	HttpRequest->SetContent(JSONPayloadInUTF8);
 	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|Headers and data prepared"));
 
 	HttpRequest->OnProcessRequestComplete().BindLambda([&](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
@@ -502,7 +595,9 @@ FitlightningReadAndStreamToCloud::FitlightningReadAndStreamToCloud(const TCHAR* 
 	}
 
 	WorkerBuffer.AddUninitialized(Settings->BytesPerRequest);
-	WorkerNextPayload.AddUninitialized(Settings->BytesPerRequest + 4096 + (Settings->BytesPerRequest / 10));
+	int BufferSize = Settings->BytesPerRequest + 4096 + (Settings->BytesPerRequest / 10);
+	WorkerNextPayload.AddUninitialized(BufferSize);
+	WorkerNextEncodedPayload.AddUninitialized(BufferSize);
 	check(MaxLineLength > 0);
 	check(FPlatformProcess::SupportsMultithreading());
 	FString ThreadName = FString::Printf(TEXT("ITLightning_Reader_%s"), *FPaths::GetBaseFilename(InSourceLogFile));
@@ -866,6 +961,16 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 	return true;
 }
 
+/** [WORKER] Compress the current payload in WorkerNextPayload and store in WorkerNextEncodedPayload. */
+bool FitlightningReadAndStreamToCloud::WorkerCompressPayload()
+{
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningReadAndStreamToCloud_WorkerCompressPayload);
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerCompressPayload|Begin compressing payload"));
+	bool Success = ITLCompressData(Settings->CompressionMode, (const uint8*)WorkerNextPayload.GetData(), WorkerNextPayload.Len(), WorkerNextEncodedPayload);
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerCompressPayload|Finish compressing payload|success=%d|original_len=%d|compressed_len=%d"), Success ? 1 : 0, (int)WorkerNextPayload.Len(), (int)WorkerNextEncodedPayload.Num());
+	return Success;
+}
+
 bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippedLogOffset, bool& OutFlushProcessedEverything)
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningReadAndStreamToCloud_WorkerInternalDoFlush);
@@ -931,8 +1036,13 @@ bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippe
 #endif
 	if (NumCapturedLines > 0)
 	{
+		if (!WorkerCompressPayload())
+		{
+			UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: Failed to compress payload: mode=%d"), (int)Settings->CompressionMode);
+			return false;
+		}
 		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|Begin processing payload"));
-		if (!PayloadProcessor->ProcessPayload((const uint8*)WorkerNextPayload.GetData(), WorkerNextPayload.Len(), this))
+		if (!PayloadProcessor->ProcessPayload(WorkerNextEncodedPayload, WorkerNextEncodedPayload.Num(), WorkerNextPayload.Len(), Settings->CompressionMode, this))
 		{
 			UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: Failed to process payload: offset=%ld, captured_offset=%d, logfile='%s'"), EffectiveShippedLogOffset, CapturedOffset, *SourceLogFile);
 			return false;

@@ -29,6 +29,17 @@ DECLARE_LOG_CATEGORY_EXTERN(LogPluginITLightning, Log, All);
 /** Convenience function to convert UTF8 data to an FString. Can incur allocations so use sparingly or only on debug paths. */
 FString ITLConvertUTF8(const void* Data, int Len);
 
+/** The type of data compression to use. */
+enum class ITLCompressionMode
+{
+	Default = 0,
+	LZ4 = 0,
+	None = 1
+};
+
+bool ITLCompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, TArray<uint8>& OutData);
+bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, int InOriginalDataLen, TArray<uint8>& OutData);
+
 /**
  * Manages plugin settings.
  */
@@ -76,6 +87,8 @@ public:
 	bool DebugLogRequests;
 	/** Whether or not to automatically start the log shipping engine. */
 	bool AutoStart;
+	/** The type of data compression to use on the log payload. */
+	ITLCompressionMode CompressionMode;
 
 	/** If non-zero, then will generate fake logs periodically */
 	double StressTestGenerateIntervalSecs;
@@ -204,6 +217,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Override HTTP Endpoint URI")
 	FString ServerHTTPEndpointURI;
 
+	// How to compress the payload. Use 'lz4' or 'none'. 'lz4' is normally more CPU efficient as it reduces the size of the TLS payload.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Compression Mode")
+	FString ServerCompressionMode;
+
 	// For Debugging: Whether or not to log requests.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "DEBUG: Log All HTTP Request")
 	bool ServerDebugLogRequests = FitlightningSettings::DefaultDebugLogRequests;
@@ -229,6 +246,10 @@ public:
 	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., https://ingest-<REGION>.engine.itlightning.app/ingest/v1 [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Override HTTP Endpoint URI")
 	FString EditorHTTPEndpointURI;
+
+	// How to compress the payload. Use 'lz4' or 'none'. 'lz4' is normally more CPU efficient as it reduces the size of the TLS payload. [EDITOR RESTART REQUIRED]
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Compression Mode")
+	FString EditorCompressionMode;
 
 	// For Debugging: Whether or not to log requests. [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "DEBUG: Log All HTTP Request")
@@ -256,6 +277,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Override HTTP Endpoint URI")
 	FString ClientHTTPEndpointURI;
 
+	// How to compress the payload. Use 'lz4' or 'none'. 'lz4' is normally more CPU efficient as it reduces the size of the TLS payload.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Compression Mode")
+	FString ClientCompressionMode;
+
 	// For Debugging: Whether or not to log requests.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "DEBUG: Log All HTTP Request")
 	bool ClientDebugLogRequests = FitlightningSettings::DefaultDebugLogRequests;
@@ -264,14 +289,14 @@ public:
 class FitlightningReadAndStreamToCloud;
 
 /**
- * An interface that takes a JSON log payload from the WORKER thread of the streamer, and processes it.
+ * An interface that takes a (potentially compressed) JSON log payload from the WORKER thread of the streamer, and processes it.
  */
 class IitlightningPayloadProcessor
 {
 public:
 	virtual ~IitlightningPayloadProcessor() = default;
 	/** Processes the JSON payload, and returns true on success or false on failure. */
-	virtual bool ProcessPayload(const uint8* JSONPayloadInUTF8, int PayloadLen, FitlightningReadAndStreamToCloud* Streamer) = 0;
+	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FitlightningReadAndStreamToCloud* Streamer) = 0;
 };
 
 /** A payload processor that writes the data to a local file (for DEBUG purposes only). */
@@ -281,7 +306,7 @@ protected:
 	FString OutputFilePath;
 public:
 	FitlightningWriteNDJSONPayloadProcessor(FString InOutputFilePath);
-	virtual bool ProcessPayload(const uint8* JSONPayloadInUTF8, int PayloadLen, FitlightningReadAndStreamToCloud* Streamer) override;
+	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FitlightningReadAndStreamToCloud* Streamer) override;
 };
 
 /** A payload processor that synchronously POSTs the data to an HTTP(S) endpoint. */
@@ -291,11 +316,10 @@ protected:
 	FString EndpointURI;
 	FString AuthorizationHeader;
 	FThreadSafeCounter TimeoutMillisec;
-	TArray<uint8> InternalBuffer;
 	bool LogRequests;
 public:
 	FitlightningWriteHTTPPayloadProcessor(const TCHAR* InEndpointURI, const TCHAR* InAuthorizationHeader, double InTimeoutSecs, bool InLogRequests);
-	virtual bool ProcessPayload(const uint8* JSONPayloadInUTF8, int PayloadLen, FitlightningReadAndStreamToCloud* Streamer) override;
+	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FitlightningReadAndStreamToCloud* Streamer) override;
 	void SetTimeoutSecs(double InTimeoutSecs);
 };
 
@@ -357,6 +381,8 @@ protected:
 	TArray<uint8> WorkerBuffer;
 	/** [WORKER] string buffer that holds JSON data for next payload to deliver to the cloud. Will be BytesPerRequest in size. */
 	TITLJSONStringBuilder WorkerNextPayload;
+	/** [WORKER] byte buffer that holds the encoded data for the next payload. Can vary in size based on compression mode. */
+	TArray<uint8> WorkerNextEncodedPayload;
 	/** [WORKER] The offset where we next need to start processing data in the logfile. */
 	int64 WorkerShippedLogOffset;
 	/** [WORKER] If non-zero, the minimum time when we can attempt to flush to cloud again automatically. Useful to wait longer to retry after a failure. */
@@ -390,6 +416,8 @@ public:
 protected:
 	/** [WORKER] Build the JSON payload from as much of the data in WorkerBuffer as possible, up to NumToRead bytes. Sets OutCapturedOffset to the number of bytes captured into the payload. Returns false on failure. Do not call directly. */
 	virtual bool WorkerBuildNextPayload(int NumToRead, int& OutCapturedOffset, int& OutNumCapturedLines);
+	/** [WORKER] Compress the current payload in WorkerNextPayload and store in WorkerNextEncodedPayload. */
+	virtual bool WorkerCompressPayload();
 	/** [WORKER] Does the actual work for the flush operation, returns true on success. Does not update progress marker or thread state. Do not call directly. */
 	virtual bool WorkerInternalDoFlush(int64& OutNewShippedLogOffset, bool& OutFlushProcessedEverything);
 	/** [WORKER] Attempts to flush any newly available logs to the cloud. Response for updating flush op counters, LastFlushProcessedEverything, and MinNextFlushPlatformTime state. Returns false on failure. Only call from worker thread. */
