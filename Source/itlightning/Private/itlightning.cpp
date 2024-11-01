@@ -4,8 +4,6 @@
 #include "itlightning.h"
 #include "GenericPlatform/GenericPlatformOutputDevices.h"
 #include "Misc/OutputDeviceFile.h"
-#include "Interfaces/IHttpResponse.h"
-#include "HttpModule.h"
 #include "ISettingsModule.h"
 #include "HAL/ThreadManager.h"
 
@@ -479,24 +477,7 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPa
 	else
 	{
 		// Synchronously wait for the request to complete or fail
-		while (!RequestEnded)
-		{
-			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|In loop waiting for request to end|RequestEnded=%d"), RequestEnded ? 1 : 0);
-			// TODO: support cancellation in the future if we need to
-			double CurrentTime = FPlatformTime::Seconds();
-			double Elapsed = CurrentTime - StartTime;
-			// It's possible the timeout has shortened while we've been waiting, so always use the current timeout value
-			double Timeout = (double)(TimeoutMillisec.GetValue()) / 1000.0;
-			if (Elapsed > Timeout)
-			{
-				UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Timed out after %.3lf seconds; will retry..."), Elapsed);
-				HttpRequest->CancelRequest();
-				RequestSucceeded.AtomicSet(false);
-				RetryableFailure.AtomicSet(true);
-				break;
-			}
-			FPlatformProcess::SleepNoStats(0.1f);
-		}
+		SleepWaitingForHTTPRequest(HttpRequest, RequestEnded, RequestSucceeded, RetryableFailure, StartTime);
 	}
 
 	// If we had a non-retryable failure, then trigger this worker to stop
@@ -516,6 +497,31 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPa
 	}
 	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|END|RequestSucceeded=%d|RetryableFailure=%d"), RequestSucceeded ? 1 : 0, RetryableFailure ? 1 : 0);
 	return RequestSucceeded;
+}
+
+bool FitlightningWriteHTTPPayloadProcessor::SleepWaitingForHTTPRequest(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest, FThreadSafeBool& RequestEnded, FThreadSafeBool& RequestSucceeded, FThreadSafeBool& RetryableFailure, double StartTime)
+{
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningWriteHTTPPayloadProcessor_SleepWaitingForHTTPRequest);
+	while (!RequestEnded)
+	{
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|In loop waiting for request to end|RequestEnded=%d"), RequestEnded ? 1 : 0);
+		// TODO: support cancellation in the future if we need to
+		double CurrentTime = FPlatformTime::Seconds();
+		double Elapsed = CurrentTime - StartTime;
+		// It's possible the timeout has shortened while we've been waiting, so always use the current timeout value
+		double Timeout = (double)(TimeoutMillisec.GetValue()) / 1000.0;
+		if (Elapsed > Timeout)
+		{
+			UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Timed out after %.3lf seconds; will retry..."), Elapsed);
+			HttpRequest->CancelRequest();
+			RequestSucceeded.AtomicSet(false);
+			RetryableFailure.AtomicSet(true);
+			return false;
+		}
+		// Capture stats in this sleep to ensure it is counted as an idle scope...
+		FPlatformProcess::Sleep(0.1f);
+	}
+	return true;
 }
 
 // =============== FitlightningStressGenerator ===============================================================================
@@ -856,6 +862,53 @@ void AppendUTF8AsEscapedJsonString(TITLJSONStringBuilder& Builder, const ANSICHA
 	Builder.Append('\"');
 }
 
+bool FitlightningReadAndStreamToCloud::WorkerReadNextPayload(int& OutNumToRead, int64& OutEffectiveShippedLogOffset, int64& OutRemainingBytes)
+{
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningReadAndStreamToCloud_WorkerReadNextPayload);
+
+	OutEffectiveShippedLogOffset = WorkerShippedLogOffset;
+
+	// Re-open the file. UE doesn't contain cross-platform class that can stay open and refresh the filesize OR to read up to N (but maybe less than N bytes).
+	// The only solution and stay within UE class library is to just re-open the file every flush request. This is actually quite fast on modern platforms.
+	TUniquePtr<IFileHandle> WorkerReader;
+	WorkerReader.Reset(FPlatformFileManager::Get().GetPlatformFile().OpenRead(*SourceLogFile, true));
+	if (WorkerReader == nullptr)
+	{
+		UE_LOG(LogPluginITLightning, Warning, TEXT("STREAMER: Failed to open logfile='%s'"), *SourceLogFile);
+		return false;
+	}
+	int64 FileSize = WorkerReader->Size();
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|opened log file|last_offset=%ld|current_file_size=%ld|logfile='%s'"), OutEffectiveShippedLogOffset, FileSize, *SourceLogFile);
+	if (OutEffectiveShippedLogOffset > FileSize)
+	{
+		UE_LOG(LogPluginITLightning, Log, TEXT("STREAMER: Logfile reduced size, re-reading from start: new_size=%ld, previously_processed_to=%ld, logfile='%s'"), FileSize, OutEffectiveShippedLogOffset, *SourceLogFile);
+		OutEffectiveShippedLogOffset = 0;
+	}
+	// Start at the last known shipped position, read as many bytes as possible up to the max buffer size, and capture log lines into a JSON payload
+	WorkerReader->Seek(OutEffectiveShippedLogOffset);
+	OutRemainingBytes = FileSize - OutEffectiveShippedLogOffset;
+	OutNumToRead = (int)(FMath::Clamp<int64>(OutRemainingBytes, 0, (int64)(WorkerBuffer.Num())));
+	if (OutNumToRead <= 0)
+	{
+		// We've read everything we possibly can already
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|Nothing more can be read|FileSize=%ld|EffectiveShippedLogOffset=%ld"), FileSize, OutEffectiveShippedLogOffset);
+		return true;
+	}
+
+	uint8* BufferData = WorkerBuffer.GetData();
+	if (!WorkerReader->Read(BufferData, OutNumToRead))
+	{
+		UE_LOG(LogPluginITLightning, Warning, TEXT("STREAMER: Failed to read data: offset=%ld, bytes=%ld, logfile='%s'"), OutEffectiveShippedLogOffset, OutNumToRead, *SourceLogFile);
+		return false;
+	}
+#if ITL_INTERNAL_DEBUG_LOG_DATA == 1
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|read data into buffer|offset=%ld|data_len=%d|data=%s|logfile='%s'"), OutEffectiveShippedLogOffset, OutNumToRead, *ITLConvertUTF8(BufferData, OutNumToRead), *SourceLogFile);
+#else
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|read data into buffer|offset=%ld|data_len=%d|logfile='%s'"), OutEffectiveShippedLogOffset, OutNumToRead, *SourceLogFile);
+#endif
+	return true;
+}
+
 bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int& OutCapturedOffset, int& OutNumCapturedLines)
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningReadAndStreamToCloud_WorkerBuildNextPayload);
@@ -967,7 +1020,6 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 	return true;
 }
 
-/** [WORKER] Compress the current payload in WorkerNextPayload and store in WorkerNextEncodedPayload. */
 bool FitlightningReadAndStreamToCloud::WorkerCompressPayload()
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningReadAndStreamToCloud_WorkerCompressPayload);
@@ -981,49 +1033,21 @@ bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippe
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningReadAndStreamToCloud_WorkerInternalDoFlush);
 	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|BEGIN"));
-	int64 EffectiveShippedLogOffset = WorkerShippedLogOffset;
-	OutNewShippedLogOffset = EffectiveShippedLogOffset;
+	OutNewShippedLogOffset = WorkerShippedLogOffset;
 	OutFlushProcessedEverything = false;
 	
-	// Re-open the file. UE doesn't contain cross-platform class that can stay open and refresh the filesize OR to read up to N (but maybe less than N bytes).
-	// The only solution and stay within UE class library is to just re-open the file every flush request. This is actually quite fast on modern platforms.
-	TUniquePtr<IFileHandle> WorkerReader;
-	WorkerReader.Reset(FPlatformFileManager::Get().GetPlatformFile().OpenRead(*SourceLogFile, true));
-	if (WorkerReader == nullptr)
+	int NumToRead = 0;
+	int64 EffectiveShippedLogOffset = 0, RemainingBytes;
+	if (!WorkerReadNextPayload(NumToRead, EffectiveShippedLogOffset, RemainingBytes))
 	{
-		UE_LOG(LogPluginITLightning, Warning, TEXT("STREAMER: Failed to open logfile='%s'"), *SourceLogFile);
 		return false;
 	}
-	int64 FileSize = WorkerReader->Size();
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|opened log file|last_offset=%ld|current_file_size=%ld|logfile='%s'"), EffectiveShippedLogOffset, FileSize, *SourceLogFile);
-	if (EffectiveShippedLogOffset > FileSize)
-	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("STREAMER: Logfile reduced size, re-reading from start: new_size=%ld, previously_processed_to=%ld, logfile='%s'"), FileSize, EffectiveShippedLogOffset, *SourceLogFile);
-		EffectiveShippedLogOffset = 0;
-	}
-	// Start at the last known shipped position, read as many bytes as possible up to the max buffer size, and capture log lines into a JSON payload
-	WorkerReader->Seek(EffectiveShippedLogOffset);
-	int64 RemainingBytes = FileSize - EffectiveShippedLogOffset;
-	int NumToRead = (int)(FMath::Clamp<int64>(RemainingBytes, 0, (int64)(WorkerBuffer.Num())));
 	if (NumToRead <= 0)
 	{
-		// We've read everything we possibly can already
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|Nothing more can be read|FileSize=%ld|EffectiveShippedLogOffset=%ld"), FileSize, EffectiveShippedLogOffset);
+		// nothing more to read
 		OutFlushProcessedEverything = true;
 		return true;
 	}
-
-	uint8* BufferData = WorkerBuffer.GetData();
-	if (!WorkerReader->Read(BufferData, NumToRead))
-	{
-		UE_LOG(LogPluginITLightning, Warning, TEXT("STREAMER: Failed to read data: offset=%ld, bytes=%ld, logfile='%s'"), EffectiveShippedLogOffset, NumToRead, *SourceLogFile);
-		return false;
-	}
-#if ITL_INTERNAL_DEBUG_LOG_DATA == 1
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|read data into buffer|offset=%ld|data_len=%d|data=%s|logfile='%s'"), EffectiveShippedLogOffset, NumToRead, *ITLConvertUTF8(BufferData, NumToRead), *SourceLogFile);
-#else
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|read data into buffer|offset=%ld|data_len=%d|logfile='%s'"), EffectiveShippedLogOffset, NumToRead, *SourceLogFile);
-#endif
 	
 	int CapturedOffset = 0;
 	int NumCapturedLines = 0;

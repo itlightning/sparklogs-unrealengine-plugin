@@ -8,6 +8,8 @@
 #include "UObject/Object.h"
 #include "Modules/ModuleManager.h"
 #include "HAL/Runnable.h"
+#include "Interfaces/IHttpResponse.h"
+#include "HttpModule.h"
 #include "itlightning.generated.h"
 
 #define ITL_CONFIG_SECTION_NAME TEXT("/Script/itlightning.ITLightningRuntimeSettings")
@@ -51,7 +53,7 @@ public:
 	static constexpr double DefaultRequestTimeoutSecs = 30;
 	static constexpr double MinRequestTimeoutSecs = 5;
 	static constexpr double DefaultActivationPercentage = 100.0;
-	static constexpr int DefaultBytesPerRequest = 2 * 1024 * 1024;
+	static constexpr int DefaultBytesPerRequest = 3 * 1024 * 1024;
 	static constexpr int MinBytesPerRequest = 1024 * 128;
 	static constexpr int MaxBytesPerRequest = 1024 * 1024 * 4;
 	static constexpr double DefaultProcessingIntervalSecs = 2.0;
@@ -321,6 +323,10 @@ public:
 	FitlightningWriteHTTPPayloadProcessor(const TCHAR* InEndpointURI, const TCHAR* InAuthorizationHeader, double InTimeoutSecs, bool InLogRequests);
 	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FitlightningReadAndStreamToCloud* Streamer) override;
 	void SetTimeoutSecs(double InTimeoutSecs);
+
+protected:
+	/** Wait for the HTTP request to complete. Returns false on timeout or true if the request completed. */
+	bool SleepWaitingForHTTPRequest(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest, FThreadSafeBool& RequestEnded, FThreadSafeBool& RequestSucceeded, FThreadSafeBool& RetryableFailure, double StartTime);
 };
 
 using TITLJSONStringBuilder = TAnsiStringBuilder<4 * 1024>;
@@ -414,6 +420,8 @@ public:
 	virtual void DeleteProgressMarker();
 
 protected:
+	/** [WORKER] Re-opens the logfile and reads more data into the work buffer. */
+	virtual bool WorkerReadNextPayload(int& OutNumToRead, int64& OutEffectiveShippedLogOffset, int64& OutRemainingBytes);
 	/** [WORKER] Build the JSON payload from as much of the data in WorkerBuffer as possible, up to NumToRead bytes. Sets OutCapturedOffset to the number of bytes captured into the payload. Returns false on failure. Do not call directly. */
 	virtual bool WorkerBuildNextPayload(int NumToRead, int& OutCapturedOffset, int& OutNumCapturedLines);
 	/** [WORKER] Compress the current payload in WorkerNextPayload and store in WorkerNextEncodedPayload. */
