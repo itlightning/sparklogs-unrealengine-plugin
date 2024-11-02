@@ -29,23 +29,23 @@ DECLARE_LOG_CATEGORY_EXTERN(LogPluginITLightning, Log, All);
 #endif
 
 /** Convenience function to convert UTF8 data to an FString. Can incur allocations so use sparingly or only on debug paths. */
-FString ITLConvertUTF8(const void* Data, int Len);
+ITLIGHTNING_API FString ITLConvertUTF8(const void* Data, int Len);
 
 /** The type of data compression to use. */
-enum class ITLCompressionMode
+enum class ITLIGHTNING_API ITLCompressionMode
 {
 	Default = 0,
 	LZ4 = 0,
 	None = 1
 };
 
-bool ITLCompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, TArray<uint8>& OutData);
-bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, int InOriginalDataLen, TArray<uint8>& OutData);
+ITLIGHTNING_API bool ITLCompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, TArray<uint8>& OutData);
+ITLIGHTNING_API bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, int InOriginalDataLen, TArray<uint8>& OutData);
 
 /**
  * Manages plugin settings.
  */
-class FitlightningSettings
+class ITLIGHTNING_API FitlightningSettings
 {
 public:
 	static const TCHAR* PluginStateSection;
@@ -288,12 +288,12 @@ public:
 	bool ClientDebugLogRequests = FitlightningSettings::DefaultDebugLogRequests;
 };
 
-class FitlightningReadAndStreamToCloud;
+class ITLIGHTNING_API FitlightningReadAndStreamToCloud;
 
 /**
  * An interface that takes a (potentially compressed) JSON log payload from the WORKER thread of the streamer, and processes it.
  */
-class IitlightningPayloadProcessor
+class ITLIGHTNING_API IitlightningPayloadProcessor
 {
 public:
 	virtual ~IitlightningPayloadProcessor() = default;
@@ -302,7 +302,7 @@ public:
 };
 
 /** A payload processor that writes the data to a local file (for DEBUG purposes only). */
-class FitlightningWriteNDJSONPayloadProcessor : public IitlightningPayloadProcessor
+class ITLIGHTNING_API FitlightningWriteNDJSONPayloadProcessor : public IitlightningPayloadProcessor
 {
 protected:
 	FString OutputFilePath;
@@ -312,7 +312,7 @@ public:
 };
 
 /** A payload processor that synchronously POSTs the data to an HTTP(S) endpoint. */
-class FitlightningWriteHTTPPayloadProcessor : public IitlightningPayloadProcessor
+class ITLIGHTNING_API FitlightningWriteHTTPPayloadProcessor : public IitlightningPayloadProcessor
 {
 protected:
 	FString EndpointURI;
@@ -334,7 +334,7 @@ using TITLJSONStringBuilder = TAnsiStringBuilder<4 * 1024>;
 /**
  * Background thread that generates fake log entries to stress the logging system.
  */
-class FitlightningStressGenerator : public FRunnable
+class ITLIGHTNING_API FitlightningStressGenerator : public FRunnable
 {
 protected:
 	TSharedRef<FitlightningSettings> Settings;
@@ -356,7 +356,7 @@ public:
 /**
 * On a background thread, reads data from a logfile on disk and streams to the cloud.
 */
-class FitlightningReadAndStreamToCloud : public FRunnable
+class ITLIGHTNING_API FitlightningReadAndStreamToCloud : public FRunnable
 {
 protected:
 	static const TCHAR* ProgressMarkerValue;
@@ -435,7 +435,7 @@ protected:
 /**
 * Main plugin module. Reads settings and handles startup/shutdown.
 */
-class FitlightningModule : public IModuleInterface
+class ITLIGHTNING_API FitlightningModule : public IModuleInterface
 {
 public:
 	/**
