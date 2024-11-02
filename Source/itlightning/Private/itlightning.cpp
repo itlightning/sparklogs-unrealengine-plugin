@@ -288,7 +288,10 @@ void FitlightningSettings::LoadSettings()
 	}
 	else
 	{
-		UE_LOG(LogPluginITLightning, Warning, TEXT("Unknown compression_mode=%s, using default mode instead..."), *CompressionModeStr);
+		if (CompressionModeStr.Len() > 0)
+		{
+			UE_LOG(LogPluginITLightning, Warning, TEXT("Unknown compression_mode=%s, using default mode instead..."), *CompressionModeStr);
+		}
 		CompressionMode = ITLCompressionMode::Default;
 	}
 
@@ -393,6 +396,7 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPa
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
 	HttpRequest->SetURL(*EndpointURI);
 	HttpRequest->SetVerb(TEXT("POST"));
+	SetHTTPTimezoneHeader(HttpRequest);
 	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json; charset=UTF-8"));
 	HttpRequest->SetHeader(TEXT("Authorization"), *AuthorizationHeader);
 	HttpRequest->SetTimeout((double)(TimeoutMillisec.GetValue()) / 1000.0);
@@ -497,6 +501,27 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPa
 	}
 	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|END|RequestSucceeded=%d|RetryableFailure=%d"), RequestSucceeded ? 1 : 0, RetryableFailure ? 1 : 0);
 	return RequestSucceeded;
+}
+
+void FitlightningWriteHTTPPayloadProcessor::SetHTTPTimezoneHeader(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest)
+{
+	static FString TimezoneHeader(TEXT("X-Timezone"));
+	static FString TimezoneHeaderValueUTC(TEXT("UTC"));
+	if (GPrintLogTimes == ELogTimes::Local)
+	{
+		FTimespan LocalOffset = FDateTime::Now() - FDateTime::UtcNow();
+		int32 TotalMinutes = FMath::RoundToInt(LocalOffset.GetTotalMinutes());
+		int32 Hours = FMath::Abs(TotalMinutes) / 60;
+		int32 Minutes = FMath::Abs(TotalMinutes) % 60;
+		const TCHAR* Sign = (TotalMinutes >= 0) ? TEXT("+") : TEXT("-");
+		FString TZOffset = FString::Printf(TEXT("UTC%s%02d:%02d"), Sign, Hours, Minutes);
+		HttpRequest->SetHeader(TimezoneHeader, TZOffset);
+	}
+	else
+	{
+		// Assume UTC
+		HttpRequest->SetHeader(TimezoneHeader, TimezoneHeaderValueUTC);
+	}
 }
 
 bool FitlightningWriteHTTPPayloadProcessor::SleepWaitingForHTTPRequest(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest, FThreadSafeBool& RequestEnded, FThreadSafeBool& RequestSucceeded, FThreadSafeBool& RetryableFailure, double StartTime)
@@ -1134,15 +1159,33 @@ void FitlightningModule::StartupModule()
 	// TODO: Should run plugin earlier and check command line to determine if this is running in an editor with
 	//       similar logic to FEngineLoop::PreInitPreStartupScreen [LaunchEngineLoop.cpp] (GIsEditor not available earlier).
 	//       If we change it here, also change GetITLLaunchConfiguration.
+	IConsoleVariable* ICVar = IConsoleManager::Get().FindConsoleVariable(TEXT("log.Timestamp"), false);
 	if (GIsEditor)
 	{
-		// We must force date/times to be logged in UTC for consistency.
-		// Inside of the itlightninginit module, it forces that setting even before config is loaded.
+		// We must force date/times to be logged in either UTC or Local so that each log message contains a timestamp.
 		FString DefaultEngineIniPath = FPaths::ProjectConfigDir() + TEXT("DefaultEngine.ini");
 		FString CurrentLogTimesValue = GConfig->GetStr(TEXT("LogFiles"), TEXT("LogTimes"), DefaultEngineIniPath);
-		if (CurrentLogTimesValue != TEXT("UTC")) {
-			UE_LOG(LogPluginITLightning, Warning, TEXT("Changing DefaultEngine.ini so [LogFiles]LogTimes=UTC"));
+		if (CurrentLogTimesValue != TEXT("UTC") && CurrentLogTimesValue != TEXT("Local")) {
+			UE_LOG(LogPluginITLightning, Warning, TEXT("Timestamps in log messages are required (LogTimes must be UTC or Local). Changing DefaultEngine.ini so [LogFiles]LogTimes=UTC"));
 			GConfig->SetString(TEXT("LogFiles"), TEXT("LogTimes"), TEXT("UTC"), DefaultEngineIniPath);
+			GPrintLogTimes = ELogTimes::UTC;
+			if (ICVar)
+			{
+				ICVar->Set((int)ELogTimes::UTC, ECVF_SetByCode);
+			}
+		}
+	}
+	else
+	{
+		if (ICVar)
+		{
+			// Has to be either Local or UTC, force UTC if needed
+			ELogTimes::Type CurrentValue = (ELogTimes::Type)ICVar->GetInt();
+			if (CurrentValue != ELogTimes::UTC && CurrentValue != ELogTimes::Local)
+			{
+				UE_LOG(LogPluginITLightning, Warning, TEXT("ITLightningPlugin: log.Timestamp not set to either Local or UTC; forcing to UTC"));
+				ICVar->Set((int)ELogTimes::UTC, ECVF_SetByCode);
+			}
 		}
 	}
 

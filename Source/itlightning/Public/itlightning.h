@@ -325,6 +325,8 @@ public:
 	void SetTimeoutSecs(double InTimeoutSecs);
 
 protected:
+	/** Sets an HTTP header to communicate proper timezone information */
+	void SetHTTPTimezoneHeader(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest);
 	/** Wait for the HTTP request to complete. Returns false on timeout or true if the request completed. */
 	bool SleepWaitingForHTTPRequest(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest, FThreadSafeBool& RequestEnded, FThreadSafeBool& RequestSucceeded, FThreadSafeBool& RetryableFailure, double StartTime);
 };
