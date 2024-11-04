@@ -369,6 +369,8 @@ protected:
 	FString SourceLogFile;
 	int MaxLineLength;
 
+	/** If non-empty, will override the computer name */
+	FString OverrideComputerName;
 	/** JSON object fragment that is common to all log events (hostname, project name, etc.) */
 	TArray<uint8> CommonEventJSONData;
 	/** WORKER thread */
@@ -402,7 +404,7 @@ protected:
 
 public:
 
-	FitlightningReadAndStreamToCloud(const TCHAR* SourceLogFile, TSharedRef<FitlightningSettings> InSettings, TSharedRef<IitlightningPayloadProcessor> InPayloadProcessor, int InMaxLineLength);
+	FitlightningReadAndStreamToCloud(const TCHAR* SourceLogFile, TSharedRef<FitlightningSettings> InSettings, TSharedRef<IitlightningPayloadProcessor> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName);
 	~FitlightningReadAndStreamToCloud();
 
 	//~ Begin FRunnable Interface
@@ -465,13 +467,16 @@ public:
 
 	/**
 	 * Starts the log shipping engine if it has not yet started. You can override the agent ID and/or agent auth token
-	 * by specifying non-empty values. (If NULL or empty values are passed, then the value in the settings will be used.)
+	 * by specifying non-empty values. You can also optionally override the compute name that will be used in the metadata
+	 * sent with all log agents -- the default is to use FPlatformProcess::ComputerName().
+	 * (If NULL or empty values are passed for override strings, then the default values will be used, etc.)
+	 * 
 	 * This will still only activate if a random roll of the dice passed the "ActivationPercentage" check, or pass
 	 * AlwaysStart as true to force the engine to start regardless of this setting.
 	 *
 	 * Returns true if the shipping engine was activated (may be false if diceroll + ActivationPercentage caused it to not start).
 	 */
-	bool StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, bool AlwaysStart);
+	bool StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideComputerName, bool AlwaysStart);
 
 	/** Stops the log shipping engine. It will not start again unless StartShippingEngine is manually called. */
 	void StopShippingEngine();

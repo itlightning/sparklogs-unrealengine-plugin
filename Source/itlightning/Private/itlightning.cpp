@@ -603,24 +603,36 @@ const TCHAR* FitlightningReadAndStreamToCloud::ProgressMarkerValue = TEXT("Shipp
 
 void FitlightningReadAndStreamToCloud::ComputeCommonEventJSON()
 {
+	FString EffectiveComputerName;
+	if (OverrideComputerName.IsEmpty())
+	{
+		EffectiveComputerName = FPlatformProcess::ComputerName();
+	}
+	else
+	{
+		EffectiveComputerName = OverrideComputerName;
+	}
+
 	FString CommonEventJSON;
-	CommonEventJSON.Appendf(TEXT("\"hostname\": %s, \"pid\": %d"), *EscapeJsonString(FPlatformProcess::ComputerName()), FPlatformProcess::GetCurrentProcessId());
+	CommonEventJSON.Appendf(TEXT("\"hostname\": %s, \"pid\": %d"), *EscapeJsonString(EffectiveComputerName), FPlatformProcess::GetCurrentProcessId());
 	FString ProjectName = FApp::GetProjectName();
 	if (ProjectName.Len() > 0 && ProjectName != "None")
 	{
 		CommonEventJSON.Appendf(TEXT(", \"app\": %s"), *EscapeJsonString(FApp::GetProjectName()));
 	}
+	UE_LOG(LogPluginITLightning, Log, TEXT("Common event JSON computed. unreal_engine_common_event_data={%s}"), *CommonEventJSON)
 	int64 CommonEventJSONLen = FTCHARToUTF8_Convert::ConvertedLength(*CommonEventJSON, CommonEventJSON.Len());
 	CommonEventJSONData.SetNum(0, false);
 	CommonEventJSONData.AddUninitialized(CommonEventJSONLen);
 	FTCHARToUTF8_Convert::Convert(CommonEventJSONData.GetData(), CommonEventJSONLen, *CommonEventJSON, CommonEventJSON.Len());
 }
 
-FitlightningReadAndStreamToCloud::FitlightningReadAndStreamToCloud(const TCHAR* InSourceLogFile, TSharedRef<FitlightningSettings> InSettings, TSharedRef<IitlightningPayloadProcessor> InPayloadProcessor, int InMaxLineLength)
+FitlightningReadAndStreamToCloud::FitlightningReadAndStreamToCloud(const TCHAR* InSourceLogFile, TSharedRef<FitlightningSettings> InSettings, TSharedRef<IitlightningPayloadProcessor> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName)
 	: Settings(InSettings)
 	, PayloadProcessor(InPayloadProcessor)
 	, SourceLogFile(InSourceLogFile)
 	, MaxLineLength(InMaxLineLength)
+	, OverrideComputerName(InOverrideComputerName == nullptr ? TEXT("") : InOverrideComputerName)
 	, Thread(nullptr)
 	, WorkerShippedLogOffset(0)
 	, WorkerMinNextFlushPlatformTime(0)
@@ -1192,7 +1204,7 @@ void FitlightningModule::StartupModule()
 	Settings->LoadSettings();
 	if (Settings->AutoStart)
 	{
-		StartShippingEngine(NULL, NULL, false);
+		StartShippingEngine(NULL, NULL, NULL, false);
 	}
 	else
 	{
@@ -1212,7 +1224,7 @@ void FitlightningModule::ShutdownModule()
 	StopShippingEngine();
 }
 
-bool FitlightningModule::StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, bool AlwaysStart)
+bool FitlightningModule::StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideComputerName, bool AlwaysStart)
 {
 	if (LoggingActive)
 	{
@@ -1265,7 +1277,7 @@ bool FitlightningModule::StartShippingEngine(const TCHAR* OverrideAgentID, const
 		FString SourceLogFile = GetITLInternalGameLog().LogFilePath;
 		FString AuthorizationHeader = FString::Format(TEXT("Bearer {0}:{1}"), { *EffectiveAgentID, *EffectiveAgentAuthToken });
 		CloudPayloadProcessor = TSharedPtr<FitlightningWriteHTTPPayloadProcessor>(new FitlightningWriteHTTPPayloadProcessor(*EffectiveHttpEndpointURI, *AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests));
-		CloudStreamer = MakeUnique<FitlightningReadAndStreamToCloud>(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength);
+		CloudStreamer = MakeUnique<FitlightningReadAndStreamToCloud>(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, OverrideComputerName);
 		FCoreDelegates::OnExit.AddRaw(this, &FitlightningModule::OnEngineExit);
 
 		if (Settings->StressTestGenerateIntervalSecs > 0)
