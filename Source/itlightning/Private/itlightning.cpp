@@ -1176,8 +1176,8 @@ void FitlightningModule::StartupModule()
 	{
 		// We must force date/times to be logged in either UTC or Local so that each log message contains a timestamp.
 		FString DefaultEngineIniPath = FPaths::ProjectConfigDir() + TEXT("DefaultEngine.ini");
-		FString CurrentLogTimesValue = GConfig->GetStr(TEXT("LogFiles"), TEXT("LogTimes"), DefaultEngineIniPath);
-		if (CurrentLogTimesValue != TEXT("UTC") && CurrentLogTimesValue != TEXT("Local")) {
+		FString CurrentLogTimesValue = GConfig->GetStr(TEXT("LogFiles"), TEXT("LogTimes"), DefaultEngineIniPath).TrimStartAndEnd();
+		if (CurrentLogTimesValue.Len() > 0 && CurrentLogTimesValue != TEXT("UTC") && CurrentLogTimesValue != TEXT("Local")) {
 			UE_LOG(LogPluginITLightning, Warning, TEXT("Timestamps in log messages are required (LogTimes must be UTC or Local). Changing DefaultEngine.ini so [LogFiles]LogTimes=UTC"));
 			GConfig->SetString(TEXT("LogFiles"), TEXT("LogTimes"), TEXT("UTC"), DefaultEngineIniPath);
 			GPrintLogTimes = ELogTimes::UTC;
