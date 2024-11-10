@@ -29,6 +29,12 @@ constexpr int GMaxLineLength = 16 * 1024;
 
 static uint8 UTF8ByteOrderMark[3] = {0xEF, 0xBB, 0xBF};
 
+#if !NO_LOGGING
+const FName ITLightningCategoryName(LogPluginITLightning.GetCategoryName());
+#else
+const FName ITLightningCategoryName(TEXT("LogPluginITLightning"));
+#endif
+
 FString ITLConvertUTF8(const void* Data, int Len)
 {
 	FUTF8ToTCHAR Converter((const ANSICHAR*)(Data), Len);
@@ -113,7 +119,7 @@ FITLLogOutputDeviceInitializer& GetITLInternalOpsLog()
 	if (Singleton.InitLogDevice(*LogFileName))
 	{
 		// The ops log should only contain logs about this plugin itself
-		Singleton.LogDevice->IncludeCategory(FName(LogPluginITLightning.GetCategoryName().ToString()));
+		Singleton.LogDevice->IncludeCategory(ITLightningCategoryName);
 	}
 	return Singleton;
 }
