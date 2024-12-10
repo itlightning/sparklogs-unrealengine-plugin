@@ -50,16 +50,19 @@ class ITLIGHTNING_API FitlightningSettings
 public:
 	static const TCHAR* PluginStateSection;
 
-	static constexpr double DefaultRequestTimeoutSecs = 30;
-	static constexpr double MinRequestTimeoutSecs = 5;
+	static constexpr double DefaultRequestTimeoutSecs = 90;
+	static constexpr double MinRequestTimeoutSecs = 30;
+	static constexpr double MaxRequestTimeoutSecs = 4 * 60;
 	static constexpr double DefaultActivationPercentage = 100.0;
 	static constexpr int DefaultBytesPerRequest = 3 * 1024 * 1024;
 	static constexpr int MinBytesPerRequest = 1024 * 128;
 	static constexpr int MaxBytesPerRequest = 1024 * 1024 * 4;
 	static constexpr double DefaultProcessingIntervalSecs = 2.0;
 	static constexpr double MinProcessingIntervalSecs = 0.5;
-	static constexpr double DefaultRetryIntervalSecs = 20.0;
-	static constexpr double MinRetryIntervalSecs = 3.0;
+	static constexpr double DefaultRetryIntervalSecs = 30.0;
+	static constexpr double MinRetryIntervalSecs = 15.0;
+	// This should not be longer than 5 minutes, because the ingest dedup cache expires a few minutes later
+	static constexpr double MaxRetryIntervalSecs = 5 * 60;
 	static constexpr double WaitForFlushToCloudOnShutdown = 15.0;
 	static constexpr bool DefaultIncludeCommonMetadata = true;
 	static constexpr bool DefaultDebugLogRequests = false;
@@ -397,6 +400,10 @@ protected:
 	int64 WorkerShippedLogOffset;
 	/** [WORKER] If non-zero, the minimum time when we can attempt to flush to cloud again automatically. Useful to wait longer to retry after a failure. */
 	double WorkerMinNextFlushPlatformTime;
+	/** [WORKER] The number of consecutive flush failures we've had in a row. */
+	int WorkerNumConsecutiveFlushFailures;
+	/** [WORKER] The payload size of the request the last time we failed to flush. */
+	int WorkerLastFailedFlushPayloadSize;
 	/** Whether or not the next flush platform time is because of a failure. */
 	FThreadSafeBool WorkerLastFlushFailed;
 
@@ -422,6 +429,9 @@ public:
 	virtual bool WriteProgressMarker(int64 InMarker);
 	/** Delete the progress marker */
 	virtual void DeleteProgressMarker();
+
+	/** [WORKER] Returns the number of seconds to wait during a flush retry based on the number of consecutive failures. */
+	virtual double WorkerGetRetrySecs();
 
 protected:
 	/** [WORKER] Re-opens the logfile and reads more data into the work buffer. */

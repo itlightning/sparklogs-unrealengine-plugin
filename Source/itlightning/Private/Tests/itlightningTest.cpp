@@ -58,9 +58,11 @@ class FitlightningStoreInMemPayloadProcessor : public IitlightningPayloadProcess
 public:
     bool FailProcessing;
     TArray<FString> Payloads;
+    int LastOriginalPayloadLen;
     FitlightningStoreInMemPayloadProcessor() : FailProcessing(false) { }
     virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FitlightningReadAndStreamToCloud* Streamer) override
     {
+        LastOriginalPayloadLen = OriginalPayloadLen;
         if (FailProcessing)
         {
             ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("TEST: forcefully failing processing of payload of length %d"), PayloadLen);
@@ -564,6 +566,82 @@ bool FitlightningPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
     TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestFalse(TEXT("FlushAndWait[FINAL] should NOT capture everything"), FlushedEverything);
+
+    Streamer.Reset();
+    return true;
+}
+
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestRetrySamePayloadSize, "itlightning.UnitTests.RetrySamePayloadSize", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FitlightningPluginUnitTestRetrySamePayloadSize::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
+bool FitlightningPluginUnitTestRetrySamePayloadSize::RunTest(const FString& Parameters)
+{
+    FTempDirectory TempDir(ITLGetTestDir());
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+
+    TArray<FString> ExpectedPayloads;
+
+    TSharedRef<IFileHandle> LogWriter(FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*TestLogFile, true, true));
+    ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nLine 2\r\n1234"));
+    LogWriter->Flush();
+
+    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    Settings->IncludeCommonMetadata = false;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
+    // Setup so that we process success requests and retry requests very quickly.
+    constexpr double TestProcessingIntervalSecs = 0.1;
+    constexpr double TestRetryIntervalSecs = 0.1;
+    Settings->ProcessingIntervalSecs = TestProcessingIntervalSecs;
+    Settings->RetryIntervalSecs = TestRetryIntervalSecs;
+    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
+    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
+    ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
+    bool FlushedEverything = false;
+    TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, TestProcessingIntervalSecs * 5, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[1] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
+    TestFalse(TEXT("FlushAndWait[1] should NOT capture everything"), FlushedEverything);
+
+    // Setup more data to log, but simulate failure of the payload processor
+    PayloadProcessor->FailProcessing = true;
+    ITLWriteStringToFile(LogWriter, TEXT("Line 3-ABCDEFG\r\nLine 4"));
+    LogWriter->Flush();
+    TestFalse(TEXT("FlushAndWait[2] should fail because of failure to process"), Streamer->FlushAndWait(1, false, false, false, TestProcessingIntervalSecs * 5, FlushedEverything));
+    TestFalse(TEXT("FlushAndWait[2] should NOT capture everything"), FlushedEverything);
+    TestNotEqual(TEXT("FlushAndWait[2] should have non-zero payload size"), PayloadProcessor->LastOriginalPayloadLen, 0);
+    // Make sure this value is definitely set again the next time we process a payload
+    int ExpectedOriginalPayloadLen = PayloadProcessor->LastOriginalPayloadLen;
+    PayloadProcessor->LastOriginalPayloadLen = 0;
+
+    // Write more data, and then make sure that a retried flush (that still fails)
+    ITLWriteStringToFile(LogWriter, TEXT("\r\nLine 5\r\nLine 6 this is a long line!!!\r\n"));
+    LogWriter->Flush();
+    // Make sure all manual flush requests have been processed
+    FPlatformProcess::SleepNoStats(TestRetryIntervalSecs * 5);
+    TestFalse(TEXT("FlushAndWait[3] should fail because of failure to process"), Streamer->FlushAndWait(1, true, false, false, TestRetryIntervalSecs * 10, FlushedEverything));
+    TestFalse(TEXT("FlushAndWait[3] should NOT capture everything"), FlushedEverything);
+    TestEqual(TEXT("FlushAndWait[3] last payload read size same as before"), PayloadProcessor->LastOriginalPayloadLen, ExpectedOriginalPayloadLen);
+
+    // One more iteration cycle to make sure that subsequent retries have the same behavior...
+    PayloadProcessor->LastOriginalPayloadLen = 0;
+    FPlatformProcess::SleepNoStats(TestRetryIntervalSecs * 10);
+    TestFalse(TEXT("FlushAndWait[4] should fail because of failure to process"), Streamer->FlushAndWait(1, true, false, false, TestRetryIntervalSecs * 10, FlushedEverything));
+    TestFalse(TEXT("FlushAndWait[4] should NOT capture everything"), FlushedEverything);
+    TestEqual(TEXT("FlushAndWait[4] last payload read size same as before"), PayloadProcessor->LastOriginalPayloadLen, ExpectedOriginalPayloadLen);
+
+    // Once we unblock the failure, make sure we fully capture everything after two cycles...
+    PayloadProcessor->FailProcessing = false;
+    ExpectedPayloads.Add(TEXT("[{\"message\":\"1234Line 3-ABCDEFG\"}]"));
+    ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 4\"},{\"message\":\"Line 5\"},{\"message\":\"Line 6 this is a long line!!!\"}]"));
+    TestTrue(TEXT("FlushAndWait[5] should succeed"), Streamer->FlushAndWait(2, true, false, false, TestRetryIntervalSecs * 1.2, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[5] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
+    TestTrue(TEXT("FlushAndWait[5] should capture everything"), FlushedEverything);
+    TestTrue(TEXT("FlushAndWait[5] last payload should be larger"), PayloadProcessor->LastOriginalPayloadLen > ExpectedOriginalPayloadLen);
+
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
+    TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
 
     Streamer.Reset();
     return true;

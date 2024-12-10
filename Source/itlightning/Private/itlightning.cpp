@@ -322,6 +322,10 @@ void FitlightningSettings::EnforceConstraints()
 	{
 		RequestTimeoutSecs = MinRequestTimeoutSecs;
 	}
+	if (RequestTimeoutSecs > MaxRequestTimeoutSecs)
+	{
+		RequestTimeoutSecs = MaxRequestTimeoutSecs;
+	}
 	if (BytesPerRequest < MinBytesPerRequest)
 	{
 		BytesPerRequest = MinBytesPerRequest;
@@ -337,6 +341,10 @@ void FitlightningSettings::EnforceConstraints()
 	if (RetryIntervalSecs < MinRetryIntervalSecs)
 	{
 		RetryIntervalSecs = MinRetryIntervalSecs;
+	}
+	if (RetryIntervalSecs > MaxRetryIntervalSecs)
+	{
+		RetryIntervalSecs = MaxRetryIntervalSecs;
 	}
 	if (StressTestGenerateIntervalSecs > 0 && StressTestNumEntriesPerTick < 1)
 	{
@@ -465,7 +473,7 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPa
 			}
 			else
 			{
-				UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: General HTTP request failure; will retry..."));
+				UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: General HTTP request failure; will retry; retry_seconds=%.3lf"), Streamer->WorkerGetRetrySecs());
 				RequestSucceeded.AtomicSet(false);
 				RetryableFailure.AtomicSet(true);
 			}
@@ -642,6 +650,8 @@ FitlightningReadAndStreamToCloud::FitlightningReadAndStreamToCloud(const TCHAR* 
 	, Thread(nullptr)
 	, WorkerShippedLogOffset(0)
 	, WorkerMinNextFlushPlatformTime(0)
+	, WorkerNumConsecutiveFlushFailures(0)
+	, WorkerLastFailedFlushPayloadSize(0)
 {
 	ProgressMarkerPath = FPaths::Combine(FPaths::GetPath(InSourceLogFile), GetITLPluginStateFilename());
 	if (Settings->IncludeCommonMetadata)
@@ -921,20 +931,30 @@ bool FitlightningReadAndStreamToCloud::WorkerReadNextPayload(int& OutNumToRead, 
 		return false;
 	}
 	int64 FileSize = WorkerReader->Size();
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|opened log file|last_offset=%ld|current_file_size=%ld|logfile='%s'"), OutEffectiveShippedLogOffset, FileSize, *SourceLogFile);
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerReadNextPayload|opened log file|last_offset=%ld|current_file_size=%ld|logfile='%s'"), OutEffectiveShippedLogOffset, FileSize, *SourceLogFile);
 	if (OutEffectiveShippedLogOffset > FileSize)
 	{
 		UE_LOG(LogPluginITLightning, Log, TEXT("STREAMER: Logfile reduced size, re-reading from start: new_size=%ld, previously_processed_to=%ld, logfile='%s'"), FileSize, OutEffectiveShippedLogOffset, *SourceLogFile);
 		OutEffectiveShippedLogOffset = 0;
+		// Don't force a retried read to use the same payload size as last time since the whole file has changed.
+		WorkerLastFailedFlushPayloadSize = 0;
 	}
 	// Start at the last known shipped position, read as many bytes as possible up to the max buffer size, and capture log lines into a JSON payload
 	WorkerReader->Seek(OutEffectiveShippedLogOffset);
 	OutRemainingBytes = FileSize - OutEffectiveShippedLogOffset;
 	OutNumToRead = (int)(FMath::Clamp<int64>(OutRemainingBytes, 0, (int64)(WorkerBuffer.Num())));
+	if (WorkerLastFailedFlushPayloadSize > 0 && OutNumToRead > WorkerLastFailedFlushPayloadSize)
+	{
+		// Retried requests always use the same max payload size as last time,
+		// so that any retry has the same data as last time and can be deduplicated in worst-case scenarios.
+		// (e.g., an actual observed scenario where Unreal Engine HTTP plugin was sending requests successfully
+		// but was not processing responses properly and instead timing them out...)
+		OutNumToRead = WorkerLastFailedFlushPayloadSize;
+	}
 	if (OutNumToRead <= 0)
 	{
 		// We've read everything we possibly can already
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|Nothing more can be read|FileSize=%ld|EffectiveShippedLogOffset=%ld"), FileSize, OutEffectiveShippedLogOffset);
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerReadNextPayload|Nothing more can be read|FileSize=%ld|EffectiveShippedLogOffset=%ld"), FileSize, OutEffectiveShippedLogOffset);
 		return true;
 	}
 
@@ -945,9 +965,9 @@ bool FitlightningReadAndStreamToCloud::WorkerReadNextPayload(int& OutNumToRead, 
 		return false;
 	}
 #if ITL_INTERNAL_DEBUG_LOG_DATA == 1
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|read data into buffer|offset=%ld|data_len=%d|data=%s|logfile='%s'"), OutEffectiveShippedLogOffset, OutNumToRead, *ITLConvertUTF8(BufferData, OutNumToRead), *SourceLogFile);
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerReadNextPayload|read data into buffer|offset=%ld|data_len=%d|data=%s|logfile='%s'"), OutEffectiveShippedLogOffset, OutNumToRead, *ITLConvertUTF8(BufferData, OutNumToRead), *SourceLogFile);
 #else
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|read data into buffer|offset=%ld|data_len=%d|logfile='%s'"), OutEffectiveShippedLogOffset, OutNumToRead, *SourceLogFile);
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerReadNextPayload|read data into buffer|offset=%ld|data_len=%d|logfile='%s'"), OutEffectiveShippedLogOffset, OutNumToRead, *SourceLogFile);
 #endif
 	return true;
 }
@@ -1080,7 +1100,7 @@ bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippe
 	OutFlushProcessedEverything = false;
 	
 	int NumToRead = 0;
-	int64 EffectiveShippedLogOffset = 0, RemainingBytes;
+	int64 EffectiveShippedLogOffset = WorkerShippedLogOffset, RemainingBytes;
 	if (!WorkerReadNextPayload(NumToRead, EffectiveShippedLogOffset, RemainingBytes))
 	{
 		return false;
@@ -1096,15 +1116,15 @@ bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippe
 	int NumCapturedLines = 0;
 	if (!WorkerBuildNextPayload(NumToRead, CapturedOffset, NumCapturedLines))
 	{
-		UE_LOG(LogPluginITLightning, Warning, TEXT("STREAMER: Failed to build payload: offset=%ld, captured_offset=%d, logfile='%s'"), EffectiveShippedLogOffset, CapturedOffset, *SourceLogFile);
+		UE_LOG(LogPluginITLightning, Warning, TEXT("STREAMER: Failed to build payload: offset=%ld, payload_input_size=%d, logfile='%s'"), EffectiveShippedLogOffset, CapturedOffset, *SourceLogFile);
 		return false;
 	}
 
 #if ITL_INTERNAL_DEBUG_LOG_DATA == 1
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|payload is ready to process|offset=%ld|captured_offset=%d|captured_lines=%d|data_len=%d|data=%s|logfile='%s'"),
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|payload is ready to process|offset=%ld|payload_input_size=%d|captured_lines=%d|data_len=%d|data=%s|logfile='%s'"),
 		EffectiveShippedLogOffset, CapturedOffset, NumCapturedLines, WorkerNextPayload.Len(), *ITLConvertUTF8(WorkerNextPayload.GetData(), WorkerNextPayload.Len()), *SourceLogFile);
 #else
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|payload is ready to process|offset=%ld|captured_offset=%d|captured_lines=%d|data_len=%d|logfile='%s'"),
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|payload is ready to process|offset=%ld|payload_input_size=%d|captured_lines=%d|data_len=%d|logfile='%s'"),
 		EffectiveShippedLogOffset, CapturedOffset, NumCapturedLines, WorkerNextPayload.Len(), *SourceLogFile);
 #endif
 	if (NumCapturedLines > 0)
@@ -1117,10 +1137,11 @@ bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippe
 		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|Begin processing payload"));
 		if (!PayloadProcessor->ProcessPayload(WorkerNextEncodedPayload, WorkerNextEncodedPayload.Num(), WorkerNextPayload.Len(), Settings->CompressionMode, this))
 		{
-			UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: Failed to process payload: offset=%ld, captured_offset=%d, logfile='%s'"), EffectiveShippedLogOffset, CapturedOffset, *SourceLogFile);
+			UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: Failed to process payload: offset=%ld, num_read=%d, payload_input_size=%d, logfile='%s'"), EffectiveShippedLogOffset, NumToRead, CapturedOffset, *SourceLogFile);
+			WorkerLastFailedFlushPayloadSize = NumToRead;
 			return false;
 		}
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|Finished processing payload|CapturedOffset=%ld"), CapturedOffset);
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|Finished processing payload|PayloadInputSize=%ld"), CapturedOffset);
 	}
 	int ProcessedOffset = CapturedOffset;
 
@@ -1143,13 +1164,17 @@ bool FitlightningReadAndStreamToCloud::WorkerDoFlush()
 	if (!Result)
 	{
 		WorkerLastFlushFailed.AtomicSet(true);
-		WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds() + Settings->RetryIntervalSecs;
+		WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds() + WorkerGetRetrySecs();
 		LastFlushProcessedEverything.AtomicSet(false);
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerDoFlush|internal flush failed|WorkerMinNextFlushPlatformTime=%.3lf"), WorkerMinNextFlushPlatformTime);
+		// Increment this counter after the retry interval is calculated
+		WorkerNumConsecutiveFlushFailures++;
+		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerDoFlush|internal flush failed|WorkerMinNextFlushPlatformTime=%.3lf|NumConsecutiveFlushFailures=%d"), WorkerMinNextFlushPlatformTime, WorkerNumConsecutiveFlushFailures);
 	}
 	else
 	{
 		WorkerLastFlushFailed.AtomicSet(false);
+		WorkerNumConsecutiveFlushFailures = 0;
+		WorkerLastFailedFlushPayloadSize = 0;
 		WorkerShippedLogOffset = ShippedNewLogOffset;
 		WriteProgressMarker(ShippedNewLogOffset);
 		WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds() + Settings->ProcessingIntervalSecs;
@@ -1160,6 +1185,17 @@ bool FitlightningReadAndStreamToCloud::WorkerDoFlush()
 	FlushOpCounter.Increment();
 	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerDoFlush|END|Result=%d"), Result ? 1 : 0);
 	return Result;
+}
+
+double FitlightningReadAndStreamToCloud::WorkerGetRetrySecs()
+{
+	double RetrySecs = Settings->RetryIntervalSecs * (WorkerNumConsecutiveFlushFailures + 1);
+	if (RetrySecs > Settings->MaxRetryIntervalSecs)
+	{
+		RetrySecs = Settings->MaxRetryIntervalSecs;
+	}
+	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerGetRetrySecs=%.3lf"), RetrySecs);
+	return RetrySecs;
 }
 
 // =============== FitlightningModule ===============================================================================
