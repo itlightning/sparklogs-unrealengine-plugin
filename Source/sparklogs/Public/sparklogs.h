@@ -1,4 +1,4 @@
-// Copyright (C) 2024 IT Lightning, LLC. All rights reserved.
+// Copyright (C) 2024-2025 IT Lightning, LLC. All rights reserved.
 // Licensed software - see LICENSE
 
 #pragma once
@@ -10,13 +10,13 @@
 #include "HAL/Runnable.h"
 #include "Interfaces/IHttpResponse.h"
 #include "HttpModule.h"
-#include "itlightning.generated.h"
+#include "sparklogs.generated.h"
 
-#define ITL_CONFIG_SECTION_NAME TEXT("/Script/itlightning.ITLightningRuntimeSettings")
+#define ITL_CONFIG_SECTION_NAME TEXT("/Script/sparklogs.SparkLogsRuntimeSettings")
 
-#define ITL_PLUGIN_MODULE_NAME "itlightning"
+#define ITL_PLUGIN_MODULE_NAME "sparklogs"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogPluginITLightning, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogPluginSparkLogs, Log, All);
 
 #define ITL_INTERNAL_DEBUG_LOG_DATA 0
 #define ITL_INTERNAL_DEBUG_LOGGING 0
@@ -29,23 +29,23 @@ DECLARE_LOG_CATEGORY_EXTERN(LogPluginITLightning, Log, All);
 #endif
 
 /** Convenience function to convert UTF8 data to an FString. Can incur allocations so use sparingly or only on debug paths. */
-ITLIGHTNING_API FString ITLConvertUTF8(const void* Data, int Len);
+SPARKLOGS_API FString ITLConvertUTF8(const void* Data, int Len);
 
 /** The type of data compression to use. */
-enum class ITLIGHTNING_API ITLCompressionMode
+enum class SPARKLOGS_API ITLCompressionMode
 {
 	Default = 0,
 	LZ4 = 0,
 	None = 1
 };
 
-ITLIGHTNING_API bool ITLCompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, TArray<uint8>& OutData);
-ITLIGHTNING_API bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, int InOriginalDataLen, TArray<uint8>& OutData);
+SPARKLOGS_API bool ITLCompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, TArray<uint8>& OutData);
+SPARKLOGS_API bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, int InOriginalDataLen, TArray<uint8>& OutData);
 
 /**
  * Manages plugin settings.
  */
-class ITLIGHTNING_API FitlightningSettings
+class SPARKLOGS_API FsparklogsSettings
 {
 public:
 	static const TCHAR* PluginStateSection;
@@ -78,6 +78,8 @@ public:
 	FString AgentID;
 	/** Auth token associated with the agent when pushing logs to the cloud */
 	FString AgentAuthToken;
+	/** Overrides the HTTP Authorization header value directly (if specified, the AgentID and AgentAuthToken values will be ignored). Useful if you specify your own HTTP endpoint. */
+	FString HttpAuthorizationHeaderValue;
 	/** What percent of the time to activate this plugin (whether started automatically or manually). 0.0 to 100.0. Defaults to 100%. Useful for incrementally rolling out the plugin. */
 	double ActivationPercentage;
 	/** Desired maximum bytes to read and process at one time (one "chunk"). */
@@ -100,7 +102,7 @@ public:
 	/** The number of log entries to generate every generation interval. */
 	int StressTestNumEntriesPerTick;
 
-	FitlightningSettings();
+	FsparklogsSettings();
 
 	/** Loads the settings from the game engine INI section appropriate for this launch configuration (editor, client, server, etc). */
 	void LoadSettings();
@@ -117,14 +119,14 @@ protected:
  * Settings for the plugin that will be managed and edited by Unreal Engine
  */
 UCLASS(config=Engine, DefaultConfig)
-class ITLIGHTNING_API UITLightningRuntimeSettings : public UObject
+class SPARKLOGS_API USparkLogsRuntimeSettings : public UObject
 {
 	GENERATED_BODY()
 
 public:
 	// ------------------------------------------ SERVER LAUNCH CONFIGURATION SETTINGS
 	
-	// Set to 'us' or 'eu' based on what your IT Lightning workspace is provisioned to use.
+	// Set to 'us' or 'eu' based on what your SparkLogs workspace is provisioned to use.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Cloud Region")
 	FString ServerCloudRegion;
 
@@ -136,21 +138,21 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Agent Auth Token")
 	FString ServerAgentAuthToken;
 
-	// Whether or not to automatically start the log shipping engine. If disabled, you must manually start the engine by calling FitlightningModule::GetModule().StartShippingEngine(...);
+	// Whether or not to automatically start the log shipping engine. If disabled, you must manually start the engine by calling FsparklogsModule::GetModule().StartShippingEngine(...);
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Auto Start")
-	bool ServerAutoStart = FitlightningSettings::DefaultAutoStart;
+	bool ServerAutoStart = FsparklogsSettings::DefaultAutoStart;
 
 	// What percent of the time to activate this plugin when the engine starts (whether automatically or manually with StartShippingEngine). 0.0 to 100.0. Defaults to 100%. Useful for incrementally rolling out the plugin.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Activation Percentage")
-	float ServerActivationPercentage = FitlightningSettings::DefaultActivationPercentage;
+	float ServerActivationPercentage = FsparklogsSettings::DefaultActivationPercentage;
 
 	// HTTP request timeout in seconds.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Request Timeout in Seconds")
-	float ServerRequestTimeoutSecs = FitlightningSettings::DefaultRequestTimeoutSecs;
+	float ServerRequestTimeoutSecs = FsparklogsSettings::DefaultRequestTimeoutSecs;
 
 	// ------------------------------------------ EDITOR LAUNCH CONFIGURATION SETTINGS
 
-	// Set to 'us' or 'eu' based on what your IT Lightning workspace is provisioned to use. [EDITOR RESTART REQUIRED]
+	// Set to 'us' or 'eu' based on what your SparkLogs workspace is provisioned to use. [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Cloud Region")
 	FString EditorCloudRegion;
 
@@ -162,21 +164,21 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName="Agent Auth Token")
 	FString EditorAgentAuthToken;
 
-	// Whether or not to automatically start the log shipping engine. If disabled, you must manually start the engine by calling FitlightningModule::GetModule().StartShippingEngine(...); [EDITOR RESTART REQUIRED]
+	// Whether or not to automatically start the log shipping engine. If disabled, you must manually start the engine by calling FsparklogsModule::GetModule().StartShippingEngine(...); [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Auto Start")
-	bool EditorAutoStart = FitlightningSettings::DefaultAutoStart;
+	bool EditorAutoStart = FsparklogsSettings::DefaultAutoStart;
 
 	// What percent of the time to activate this plugin when the engine starts (whether automatically or manually with StartShippingEngine). 0.0 to 100.0. Defaults to 100%. Useful for incrementally rolling out the plugin. [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName="Activation Percentage")
-	float EditorActivationPercentage = FitlightningSettings::DefaultActivationPercentage;
+	float EditorActivationPercentage = FsparklogsSettings::DefaultActivationPercentage;
 
 	// HTTP request timeout in seconds. [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Request Timeout in Seconds")
-	float EditorRequestTimeoutSecs = FitlightningSettings::DefaultRequestTimeoutSecs;
+	float EditorRequestTimeoutSecs = FsparklogsSettings::DefaultRequestTimeoutSecs;
 
 	// ------------------------------------------ CLIENT LAUNCH CONFIGURATION SETTINGS
 
-	// Set to 'us' or 'eu' based on what your IT Lightning workspace is provisioned to use.
+	// Set to 'us' or 'eu' based on what your SparkLogs workspace is provisioned to use.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Cloud Region")
 	FString ClientCloudRegion;
 
@@ -188,39 +190,43 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Agent Auth Token")
 	FString ClientAgentAuthToken;
 
-	// Whether or not to automatically start the log shipping engine. If disabled, you must manually start the engine by calling FitlightningModule::GetModule().StartShippingEngine(...);
+	// Whether or not to automatically start the log shipping engine. If disabled, you must manually start the engine by calling FsparklogsModule::GetModule().StartShippingEngine(...);
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Auto Start")
-	bool ClientAutoStart = FitlightningSettings::DefaultAutoStart;
+	bool ClientAutoStart = FsparklogsSettings::DefaultAutoStart;
 
 	// What percent of the time to activate this plugin when the engine starts (whether automatically or manually with StartShippingEngine). 0.0 to 100.0. Defaults to 100%. Useful for incrementally rolling out the plugin.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Activation Percentage")
-	float ClientActivationPercentage = FitlightningSettings::DefaultActivationPercentage;
+	float ClientActivationPercentage = FsparklogsSettings::DefaultActivationPercentage;
 
 	// HTTP request timeout in seconds.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Request Timeout in Seconds")
-	float ClientRequestTimeoutSecs = FitlightningSettings::DefaultRequestTimeoutSecs;
+	float ClientRequestTimeoutSecs = FsparklogsSettings::DefaultRequestTimeoutSecs;
 
 	// ------------------------------------------ SERVER LAUNCH CONFIGURATION ADVANCED SETTINGS
 
 	// Target bytes to read and process at one time (one "chunk").
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Bytes Per Request")
-	int32 ServerBytesPerRequest = FitlightningSettings::DefaultBytesPerRequest;
+	int32 ServerBytesPerRequest = FsparklogsSettings::DefaultBytesPerRequest;
 
 	// Target seconds between attempts to read and process a chunk.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Processing Interval in Seconds")
-	float ServerProcessingIntervalSecs = FitlightningSettings::DefaultProcessingIntervalSecs;
+	float ServerProcessingIntervalSecs = FsparklogsSettings::DefaultProcessingIntervalSecs;
 
 	// The amount of time to wait after a failed request before retrying.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Retry Interval in Seconds")
-	float ServerRetryIntervalSecs = FitlightningSettings::DefaultRetryIntervalSecs;
+	float ServerRetryIntervalSecs = FsparklogsSettings::DefaultRetryIntervalSecs;
 
 	// Whether or not to include common metadata (hostname, game name) in each log event.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Include Common Metadata")
-	bool ServerIncludeCommonMetadata = FitlightningSettings::DefaultIncludeCommonMetadata;
+	bool ServerIncludeCommonMetadata = FsparklogsSettings::DefaultIncludeCommonMetadata;
 
-	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., https://ingest-<REGION>.engine.itlightning.app/ingest/v1
+	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., https://ingestlogs.myservice.com/ingest/v1
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Override HTTP Endpoint URI")
 	FString ServerHTTPEndpointURI;
+
+	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue */
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Override HTTP Authorization Header Value")
+	FString ServerHTTPAuthorizationHeaderValue;
 
 	// How to compress the payload. Use 'lz4' or 'none'. 'lz4' is normally more CPU efficient as it reduces the size of the TLS payload.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Compression Mode")
@@ -228,29 +234,33 @@ public:
 
 	// For Debugging: Whether or not to log requests.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "DEBUG: Log All HTTP Request")
-	bool ServerDebugLogRequests = FitlightningSettings::DefaultDebugLogRequests;
+	bool ServerDebugLogRequests = FsparklogsSettings::DefaultDebugLogRequests;
 
 	// ------------------------------------------ EDITOR LAUNCH CONFIGURATION ADVANCED SETTINGS
 
 	// Target bytes to read and process at one time (one "chunk"). [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Bytes Per Request")
-	int32 EditorBytesPerRequest = FitlightningSettings::DefaultBytesPerRequest;
+	int32 EditorBytesPerRequest = FsparklogsSettings::DefaultBytesPerRequest;
 
 	// Target seconds between attempts to read and process a chunk. [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Processing Interval in Seconds")
-	float EditorProcessingIntervalSecs = FitlightningSettings::DefaultProcessingIntervalSecs;
+	float EditorProcessingIntervalSecs = FsparklogsSettings::DefaultProcessingIntervalSecs;
 
 	// The amount of time to wait after a failed request before retrying. [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Retry Interval in Seconds")
-	float EditorRetryIntervalSecs = FitlightningSettings::DefaultRetryIntervalSecs;
+	float EditorRetryIntervalSecs = FsparklogsSettings::DefaultRetryIntervalSecs;
 
 	// Whether or not to include common metadata (hostname, game name) in each log event. [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Include Common Metadata")
-	bool EditorIncludeCommonMetadata = FitlightningSettings::DefaultIncludeCommonMetadata;
+	bool EditorIncludeCommonMetadata = FsparklogsSettings::DefaultIncludeCommonMetadata;
 
-	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., https://ingest-<REGION>.engine.itlightning.app/ingest/v1 [EDITOR RESTART REQUIRED]
+	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., https://ingestlogs.myservice.com/ingest/v1 [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Override HTTP Endpoint URI")
 	FString EditorHTTPEndpointURI;
+
+	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue [EDITOR RESTART REQUIRED] */
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", DisplayName = "Override HTTP Authorization Header Value")
+	FString EditorHTTPAuthorizationHeaderValue;
 
 	// How to compress the payload. Use 'lz4' or 'none'. 'lz4' is normally more CPU efficient as it reduces the size of the TLS payload. [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Compression Mode")
@@ -258,29 +268,33 @@ public:
 
 	// For Debugging: Whether or not to log requests. [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "DEBUG: Log All HTTP Request")
-	bool EditorDebugLogRequests = FitlightningSettings::DefaultDebugLogRequests;
+	bool EditorDebugLogRequests = FsparklogsSettings::DefaultDebugLogRequests;
 
 	// ------------------------------------------ CLIENT LAUNCH CONFIGURATION ADVANCED SETTINGS
 
 	// Target bytes to read and process at one time (one "chunk").
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Bytes Per Request")
-	int32 ClientBytesPerRequest = FitlightningSettings::DefaultBytesPerRequest;
+	int32 ClientBytesPerRequest = FsparklogsSettings::DefaultBytesPerRequest;
 
 	// Target seconds between attempts to read and process a chunk.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Processing Interval in Seconds")
-	float ClientProcessingIntervalSecs = FitlightningSettings::DefaultProcessingIntervalSecs;
+	float ClientProcessingIntervalSecs = FsparklogsSettings::DefaultProcessingIntervalSecs;
 
 	// The amount of time to wait after a failed request before retrying.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Retry Interval in Seconds")
-	float ClientRetryIntervalSecs = FitlightningSettings::DefaultRetryIntervalSecs;
+	float ClientRetryIntervalSecs = FsparklogsSettings::DefaultRetryIntervalSecs;
 
 	// Whether or not to include common metadata (hostname, game name) in each log event.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Include Common Metadata")
-	bool ClientIncludeCommonMetadata = FitlightningSettings::DefaultIncludeCommonMetadata;
+	bool ClientIncludeCommonMetadata = FsparklogsSettings::DefaultIncludeCommonMetadata;
 
-	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., https://ingest-<REGION>.engine.itlightning.app/ingest/v1
+	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., https://ingestlogs.myservice.com/ingest/v1
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Override HTTP Endpoint URI")
 	FString ClientHTTPEndpointURI;
+
+	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue */
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Override HTTP Authorization Header Value")
+	FString ClientHTTPAuthorizationHeaderValue;
 
 	// How to compress the payload. Use 'lz4' or 'none'. 'lz4' is normally more CPU efficient as it reduces the size of the TLS payload.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Compression Mode")
@@ -288,34 +302,34 @@ public:
 
 	// For Debugging: Whether or not to log requests.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "DEBUG: Log All HTTP Request")
-	bool ClientDebugLogRequests = FitlightningSettings::DefaultDebugLogRequests;
+	bool ClientDebugLogRequests = FsparklogsSettings::DefaultDebugLogRequests;
 };
 
-class ITLIGHTNING_API FitlightningReadAndStreamToCloud;
+class SPARKLOGS_API FsparklogsReadAndStreamToCloud;
 
 /**
  * An interface that takes a (potentially compressed) JSON log payload from the WORKER thread of the streamer, and processes it.
  */
-class ITLIGHTNING_API IitlightningPayloadProcessor
+class SPARKLOGS_API IsparklogsPayloadProcessor
 {
 public:
-	virtual ~IitlightningPayloadProcessor() = default;
+	virtual ~IsparklogsPayloadProcessor() = default;
 	/** Processes the JSON payload, and returns true on success or false on failure. */
-	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FitlightningReadAndStreamToCloud* Streamer) = 0;
+	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FsparklogsReadAndStreamToCloud* Streamer) = 0;
 };
 
 /** A payload processor that writes the data to a local file (for DEBUG purposes only). */
-class ITLIGHTNING_API FitlightningWriteNDJSONPayloadProcessor : public IitlightningPayloadProcessor
+class SPARKLOGS_API FsparklogsWriteNDJSONPayloadProcessor : public IsparklogsPayloadProcessor
 {
 protected:
 	FString OutputFilePath;
 public:
-	FitlightningWriteNDJSONPayloadProcessor(FString InOutputFilePath);
-	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FitlightningReadAndStreamToCloud* Streamer) override;
+	FsparklogsWriteNDJSONPayloadProcessor(FString InOutputFilePath);
+	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FsparklogsReadAndStreamToCloud* Streamer) override;
 };
 
 /** A payload processor that synchronously POSTs the data to an HTTP(S) endpoint. */
-class ITLIGHTNING_API FitlightningWriteHTTPPayloadProcessor : public IitlightningPayloadProcessor
+class SPARKLOGS_API FsparklogsWriteHTTPPayloadProcessor : public IsparklogsPayloadProcessor
 {
 protected:
 	FString EndpointURI;
@@ -323,8 +337,8 @@ protected:
 	FThreadSafeCounter TimeoutMillisec;
 	bool LogRequests;
 public:
-	FitlightningWriteHTTPPayloadProcessor(const TCHAR* InEndpointURI, const TCHAR* InAuthorizationHeader, double InTimeoutSecs, bool InLogRequests);
-	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FitlightningReadAndStreamToCloud* Streamer) override;
+	FsparklogsWriteHTTPPayloadProcessor(const TCHAR* InEndpointURI, const TCHAR* InAuthorizationHeader, double InTimeoutSecs, bool InLogRequests);
+	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FsparklogsReadAndStreamToCloud* Streamer) override;
 	void SetTimeoutSecs(double InTimeoutSecs);
 
 protected:
@@ -339,17 +353,17 @@ using TITLJSONStringBuilder = TAnsiStringBuilder<4 * 1024>;
 /**
  * Background thread that generates fake log entries to stress the logging system.
  */
-class ITLIGHTNING_API FitlightningStressGenerator : public FRunnable
+class SPARKLOGS_API FsparklogsStressGenerator : public FRunnable
 {
 protected:
-	TSharedRef<FitlightningSettings> Settings;
+	TSharedRef<FsparklogsSettings> Settings;
 	volatile FRunnableThread* Thread;
 	/** Non-zero stops this thread */
 	FThreadSafeCounter StopRequestCounter;
 
 public:
-	FitlightningStressGenerator(TSharedRef<FitlightningSettings> InSettings);
-	~FitlightningStressGenerator();
+	FsparklogsStressGenerator(TSharedRef<FsparklogsSettings> InSettings);
+	~FsparklogsStressGenerator();
 
 	//~ Begin FRunnable Interface
 	virtual bool Init();
@@ -361,13 +375,13 @@ public:
 /**
 * On a background thread, reads data from a logfile on disk and streams to the cloud.
 */
-class ITLIGHTNING_API FitlightningReadAndStreamToCloud : public FRunnable
+class SPARKLOGS_API FsparklogsReadAndStreamToCloud : public FRunnable
 {
 protected:
 	static const TCHAR* ProgressMarkerValue;
 
-	TSharedRef<FitlightningSettings> Settings;
-	TSharedRef<IitlightningPayloadProcessor> PayloadProcessor;
+	TSharedRef<FsparklogsSettings> Settings;
+	TSharedRef<IsparklogsPayloadProcessor> PayloadProcessor;
 	FString ProgressMarkerPath;
 	FString SourceLogFile;
 	int MaxLineLength;
@@ -411,8 +425,8 @@ protected:
 
 public:
 
-	FitlightningReadAndStreamToCloud(const TCHAR* SourceLogFile, TSharedRef<FitlightningSettings> InSettings, TSharedRef<IitlightningPayloadProcessor> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName);
-	~FitlightningReadAndStreamToCloud();
+	FsparklogsReadAndStreamToCloud(const TCHAR* SourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName);
+	~FsparklogsReadAndStreamToCloud();
 
 	//~ Begin FRunnable Interface
 	virtual bool Init();
@@ -449,16 +463,16 @@ protected:
 /**
 * Main plugin module. Reads settings and handles startup/shutdown.
 */
-class ITLIGHTNING_API FitlightningModule : public IModuleInterface
+class SPARKLOGS_API FsparklogsModule : public IModuleInterface
 {
 public:
 	/**
 	 * Returns the singleton instance of this module, loading it on demand if needed.
 	 * Be careful calling this during shutdown when the module may already be unloaded!
 	 */
-	static inline FitlightningModule& GetModule()
+	static inline FsparklogsModule& GetModule()
 	{
-		return FModuleManager::LoadModuleChecked<FitlightningModule>(FName(ITL_PLUGIN_MODULE_NAME));
+		return FModuleManager::LoadModuleChecked<FsparklogsModule>(FName(ITL_PLUGIN_MODULE_NAME));
 	}
 
 	/** Returns whether or not the module is currently loaded. */
@@ -468,7 +482,7 @@ public:
 	}
 
 public:
-	FitlightningModule();
+	FsparklogsModule();
 
 	//~ Begin IModuleInterface Interface
 	virtual void StartupModule() override;
@@ -477,7 +491,9 @@ public:
 
 	/**
 	 * Starts the log shipping engine if it has not yet started. You can override the agent ID and/or agent auth token
-	 * by specifying non-empty values. You can also optionally override the compute name that will be used in the metadata
+	 * by specifying non-empty values. (Alternatively you can override the authentication header value directly, which
+	 * can be useful if you're using the plugin with your own HTTP endpoint.)
+	 * You can also optionally override the compute name that will be used in the metadata
 	 * sent with all log agents -- the default is to use FPlatformProcess::ComputerName().
 	 * (If NULL or empty values are passed for override strings, then the default values will be used, etc.)
 	 * 
@@ -486,7 +502,7 @@ public:
 	 *
 	 * Returns true if the shipping engine was activated (may be false if diceroll + ActivationPercentage caused it to not start).
 	 */
-	bool StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideComputerName, bool AlwaysStart);
+	bool StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, bool AlwaysStart);
 
 	/** Stops the log shipping engine. It will not start again unless StartShippingEngine is manually called. */
 	void StopShippingEngine();
@@ -500,11 +516,11 @@ protected:
 private:
 
 	bool LoggingActive;
-	TSharedRef<FitlightningSettings> Settings;
-	TUniquePtr<FitlightningReadAndStreamToCloud> CloudStreamer;
-	TUniquePtr<FitlightningStressGenerator> StressGenerator;
+	TSharedRef<FsparklogsSettings> Settings;
+	TUniquePtr<FsparklogsReadAndStreamToCloud> CloudStreamer;
+	TUniquePtr<FsparklogsStressGenerator> StressGenerator;
 	/** The payload processor that sends data to the cloud */
-	TSharedPtr<FitlightningWriteHTTPPayloadProcessor> CloudPayloadProcessor;
+	TSharedPtr<FsparklogsWriteHTTPPayloadProcessor> CloudPayloadProcessor;
 
 	void RegisterSettings();
 	void UnregisterSettings();

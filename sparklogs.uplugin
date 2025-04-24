@@ -2,11 +2,11 @@
 	"FileVersion": 3,
 	"Version": 1,
 	"VersionName": "1.0",
-	"FriendlyName": "IT Lightning",
-	"Description": "Ship game engine logs to IT Lightning, a cost effective, petabyte-scale cloud logging service that's actually a joy to use. Can also be used to ship logs to any HTTP(S) endpoint that accepts JSON.",
+	"FriendlyName": "SparkLogs",
+	"Description": "Ship game engine logs and analytics to SparkLogs, a cost effective, petabyte-scale cloud logging service that's actually a joy to use. Can also be used to ship logs to any HTTP(S) endpoint that accepts JSON.",
 	"Category": "Other",
 	"CreatedBy": "IT Lightning, LLC",
-	"CreatedByURL": "https://itlightning.com/",
+	"CreatedByURL": "https://sparklogs.com/",
 	"DocsURL": "",
 	"MarketplaceURL": "",
 	"SupportURL": "https://discord.gg/Yu8F8w8tDw",
@@ -16,7 +16,7 @@
 	"Installed": false,
 	"Modules": [
 		{
-			"Name": "itlightning",
+			"Name": "sparklogs",
 			"Type": "Runtime",
 			"LoadingPhase": "PreDefault",
 			"PlatformAllowList": [
@@ -31,7 +31,7 @@
 			]
 		},
 		{
-			"Name": "itlightninginit",
+			"Name": "sparklogsinit",
 			"Type": "Runtime",
 			"LoadingPhase": "EarliestPossible",
 			"PlatformAllowList": [

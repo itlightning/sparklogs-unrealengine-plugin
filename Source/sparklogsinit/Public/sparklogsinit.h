@@ -1,4 +1,4 @@
-// Copyright (C) 2024 IT Lightning, LLC. All rights reserved.
+// Copyright (C) 2024-2025 IT Lightning, LLC. All rights reserved.
 // Licensed software - see LICENSE
 
 #pragma once
@@ -6,7 +6,7 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 
-class FitlightninginitModule : public IModuleInterface
+class FsparklogsinitModule : public IModuleInterface
 {
 
 public:

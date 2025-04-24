@@ -1,12 +1,12 @@
-// Copyright (C) 2024 IT Lightning, LLC. All rights reserved.
+// Copyright (C) 2024-2025 IT Lightning, LLC. All rights reserved.
 // Licensed software - see LICENSE
 
 using System.IO;
 using UnrealBuildTool;
 
-public class itlightning : ModuleRules
+public class sparklogs : ModuleRules
 {
-	public itlightning(ReadOnlyTargetRules Target) : base(Target)
+	public sparklogs(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 		

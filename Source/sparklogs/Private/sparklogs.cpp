@@ -1,7 +1,7 @@
-// Copyright (C) 2024 IT Lightning, LLC. All rights reserved.
+// Copyright (C) 2024-2025 IT Lightning, LLC. All rights reserved.
 // Licensed software - see LICENSE
 
-#include "itlightning.h"
+#include "sparklogs.h"
 #include "GenericPlatform/GenericPlatformOutputDevices.h"
 #include "Misc/OutputDeviceFile.h"
 #include "ISettingsModule.h"
@@ -19,9 +19,9 @@
 #undef LZ4_NAMESPACE
 
 
-#define LOCTEXT_NAMESPACE "FitlightningModule"
+#define LOCTEXT_NAMESPACE "FsparklogsModule"
 
-DEFINE_LOG_CATEGORY(LogPluginITLightning);
+DEFINE_LOG_CATEGORY(LogPluginSparkLogs);
 
 // =============== Globals ===============================================================================
 
@@ -30,9 +30,9 @@ constexpr int GMaxLineLength = 16 * 1024;
 static uint8 UTF8ByteOrderMark[3] = {0xEF, 0xBB, 0xBF};
 
 #if !NO_LOGGING
-const FName ITLightningCategoryName(LogPluginITLightning.GetCategoryName());
+const FName SparkLogsCategoryName(LogPluginSparkLogs.GetCategoryName());
 #else
-const FName ITLightningCategoryName(TEXT("LogPluginITLightning"));
+const FName SparkLogsCategoryName(TEXT("LogPluginSparkLogs"));
 #endif
 
 FString ITLConvertUTF8(const void* Data, int Len)
@@ -70,7 +70,7 @@ FString GetITLINISettingPrefix()
 FString GetITLLogFileName(const TCHAR* LogTypeName)
 {
 	const TCHAR* LaunchConfiguration = GetITLLaunchConfiguration(false);
-	FString Name = FString(TEXT("itlightning-"), FCString::Strlen(LaunchConfiguration) + FCString::Strlen(LogTypeName) + FCString::Strlen(TEXT("-.log")));
+	FString Name = FString(TEXT("sparklogs-"), FCString::Strlen(LaunchConfiguration) + FCString::Strlen(LogTypeName) + FCString::Strlen(TEXT("-.log")));
 	Name.Append(LaunchConfiguration).Append(TEXT("-")).Append(LogTypeName).Append(TEXT(".log"));
 	return Name;
 }
@@ -78,7 +78,7 @@ FString GetITLLogFileName(const TCHAR* LogTypeName)
 FString GetITLPluginStateFilename()
 {
 	const TCHAR* LaunchConfiguration = GetITLLaunchConfiguration(false);
-	FString Name = FString(TEXT("itlightning-"), FCString::Strlen(LaunchConfiguration) + FCString::Strlen(TEXT("-state.ini")));
+	FString Name = FString(TEXT("sparklogs-"), FCString::Strlen(LaunchConfiguration) + FCString::Strlen(TEXT("-state.ini")));
 	Name.Append(LaunchConfiguration).Append(TEXT("-state.ini"));
 	return Name;
 }
@@ -119,7 +119,7 @@ FITLLogOutputDeviceInitializer& GetITLInternalOpsLog()
 	if (Singleton.InitLogDevice(*LogFileName))
 	{
 		// The ops log should only contain logs about this plugin itself
-		Singleton.LogDevice->IncludeCategory(ITLightningCategoryName);
+		Singleton.LogDevice->IncludeCategory(SparkLogsCategoryName);
 	}
 	return Singleton;
 }
@@ -186,11 +186,11 @@ bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InData, int InDataL
 	}
 }
 
-// =============== FitlightningSettings ===============================================================================
+// =============== FsparklogsSettings ===============================================================================
 
-const TCHAR* FitlightningSettings::PluginStateSection = TEXT("PluginState");
+const TCHAR* FsparklogsSettings::PluginStateSection = TEXT("PluginState");
 
-FitlightningSettings::FitlightningSettings()
+FsparklogsSettings::FsparklogsSettings()
 	: RequestTimeoutSecs(DefaultRequestTimeoutSecs)
 	, ActivationPercentage(DefaultActivationPercentage)
 	, BytesPerRequest(DefaultBytesPerRequest)
@@ -206,7 +206,7 @@ FitlightningSettings::FitlightningSettings()
 }
 
 /** Gets the effective HTTP endpoint URI (either using the HttpEndpointURI if configured, or the CloudRegion). Returns empty if not configured. */
-FString FitlightningSettings::GetEffectiveHttpEndpointURI()
+FString FsparklogsSettings::GetEffectiveHttpEndpointURI()
 {
 	CloudRegion.TrimStartAndEndInline();
 	HttpEndpointURI.TrimStartAndEndInline();
@@ -222,11 +222,11 @@ FString FitlightningSettings::GetEffectiveHttpEndpointURI()
 	}
 	else
 	{
-		return FString::Format(TEXT("https://ingest-{0}.engine.itlightning.app/ingest/v1"), { CloudRegionLower });
+		return FString::Format(TEXT("https://ingest-{0}.engine.sparklogs.app/ingest/v1"), { CloudRegionLower });
 	}
 }
 
-void FitlightningSettings::LoadSettings()
+void FsparklogsSettings::LoadSettings()
 {
 	FString Section = ITL_CONFIG_SECTION_NAME;
 	FString SettingPrefix = GetITLINISettingPrefix();
@@ -240,6 +240,7 @@ void FitlightningSettings::LoadSettings()
 
 	AgentID = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("AgentID")), GEngineIni);
 	AgentAuthToken = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("AgentAuthToken")), GEngineIni);
+	HttpAuthorizationHeaderValue = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("HTTPAuthorizationHeaderValue")), GEngineIni);
 	
 	FString StringActivationPercentage;
 	GConfig->GetString(*Section, *(SettingPrefix + TEXT("ActivationPercentage")), StringActivationPercentage, GEngineIni);
@@ -296,7 +297,7 @@ void FitlightningSettings::LoadSettings()
 	{
 		if (CompressionModeStr.Len() > 0)
 		{
-			UE_LOG(LogPluginITLightning, Warning, TEXT("Unknown compression_mode=%s, using default mode instead..."), *CompressionModeStr);
+			UE_LOG(LogPluginSparkLogs, Warning, TEXT("Unknown compression_mode=%s, using default mode instead..."), *CompressionModeStr);
 		}
 		CompressionMode = ITLCompressionMode::Default;
 	}
@@ -313,7 +314,7 @@ void FitlightningSettings::LoadSettings()
 	EnforceConstraints();
 }
 
-void FitlightningSettings::EnforceConstraints()
+void FsparklogsSettings::EnforceConstraints()
 {
 	AgentID.TrimStartAndEndInline();
 	AgentAuthToken.TrimStartAndEndInline();
@@ -352,11 +353,11 @@ void FitlightningSettings::EnforceConstraints()
 	}
 }
 
-// =============== FitlightningWriteNDJSONPayloadProcessor ===============================================================================
+// =============== FsparklogsWriteNDJSONPayloadProcessor ===============================================================================
 
-FitlightningWriteNDJSONPayloadProcessor::FitlightningWriteNDJSONPayloadProcessor(FString InOutputFilePath) : OutputFilePath(InOutputFilePath) { }
+FsparklogsWriteNDJSONPayloadProcessor::FsparklogsWriteNDJSONPayloadProcessor(FString InOutputFilePath) : OutputFilePath(InOutputFilePath) { }
 
-bool FitlightningWriteNDJSONPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FitlightningReadAndStreamToCloud* Streamer)
+bool FsparklogsWriteNDJSONPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FsparklogsReadAndStreamToCloud* Streamer)
 {
 	TUniquePtr<IFileHandle> DebugJSONWriter;
 	DebugJSONWriter.Reset(FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*OutputFilePath, true, true));
@@ -367,7 +368,7 @@ bool FitlightningWriteNDJSONPayloadProcessor::ProcessPayload(TArray<uint8>& JSON
 	TArray<uint8> DecompressedData;
 	if (!ITLDecompressData(CompressionMode, JSONPayloadInUTF8.GetData(), PayloadLen, OriginalPayloadLen, DecompressedData))
 	{
-		UE_LOG(LogPluginITLightning, Warning, TEXT("WriteNDJSONPayloadProcessor: failed to decompress data in payload: mode=%d, len=%d, original_len=%d"), (int)CompressionMode, PayloadLen, OriginalPayloadLen);
+		UE_LOG(LogPluginSparkLogs, Warning, TEXT("WriteNDJSONPayloadProcessor: failed to decompress data in payload: mode=%d, len=%d, original_len=%d"), (int)CompressionMode, PayloadLen, OriginalPayloadLen);
 		return false;
 	}
 	if (!DebugJSONWriter->Write((const uint8*)DecompressedData.GetData(), DecompressedData.Num())
@@ -380,9 +381,9 @@ bool FitlightningWriteNDJSONPayloadProcessor::ProcessPayload(TArray<uint8>& JSON
 	return true;
 }
 
-// =============== FitlightningWriteHTTPPayloadProcessor ===============================================================================
+// =============== FsparklogsWriteHTTPPayloadProcessor ===============================================================================
 
-FitlightningWriteHTTPPayloadProcessor::FitlightningWriteHTTPPayloadProcessor(const TCHAR* InEndpointURI, const TCHAR* InAuthorizationHeader, double InTimeoutSecs, bool InLogRequests)
+FsparklogsWriteHTTPPayloadProcessor::FsparklogsWriteHTTPPayloadProcessor(const TCHAR* InEndpointURI, const TCHAR* InAuthorizationHeader, double InTimeoutSecs, bool InLogRequests)
 	: EndpointURI(InEndpointURI)
 	, AuthorizationHeader(InAuthorizationHeader)
 	, LogRequests(InLogRequests)
@@ -390,18 +391,18 @@ FitlightningWriteHTTPPayloadProcessor::FitlightningWriteHTTPPayloadProcessor(con
 	SetTimeoutSecs(InTimeoutSecs);
 }
 
-void FitlightningWriteHTTPPayloadProcessor::SetTimeoutSecs(double InTimeoutSecs)
+void FsparklogsWriteHTTPPayloadProcessor::SetTimeoutSecs(double InTimeoutSecs)
 {
 	TimeoutMillisec.Set((int32)(InTimeoutSecs * 1000.0));
 }
 
-bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FitlightningReadAndStreamToCloud* Streamer)
+bool FsparklogsWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FsparklogsReadAndStreamToCloud* Streamer)
 {
-	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningWriteHTTPPayloadProcessor_ProcessPayload);
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|BEGIN"));
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_FsparklogsWriteHTTPPayloadProcessor_ProcessPayload);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|BEGIN"));
 	if (LogRequests)
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: BEGIN: len=%d, original_len=%d, timeout_millisec=%d"), PayloadLen, OriginalPayloadLen, (int)(TimeoutMillisec.GetValue()));
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: BEGIN: len=%d, original_len=%d, timeout_millisec=%d"), PayloadLen, OriginalPayloadLen, (int)(TimeoutMillisec.GetValue()));
 	}
 	
 	FThreadSafeBool RequestEnded(false);
@@ -424,24 +425,24 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPa
 		// no special header to set
 		break;
 	default:
-		UE_LOG(LogPluginITLightning, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: unknown compression mode %d"), (int)CompressionMode);
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: unknown compression mode %d"), (int)CompressionMode);
 		return false;
 	}
 	HttpRequest->SetContent(JSONPayloadInUTF8);
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|Headers and data prepared"));
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|Headers and data prepared"));
 
 	HttpRequest->OnProcessRequestComplete().BindLambda([&](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 		{
-			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|OnProcessRequestComplete|BEGIN"));
+			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|OnProcessRequestComplete|BEGIN"));
 			if (LogRequests)
 			{
 				if (Response.IsValid())
 				{
-					UE_LOG(LogPluginITLightning, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: RequestComplete: successful=%d, http_status=%d"), bWasSuccessful ? 1 : 0, (int)(Response->GetResponseCode()));
+					UE_LOG(LogPluginSparkLogs, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: RequestComplete: successful=%d, http_status=%d"), bWasSuccessful ? 1 : 0, (int)(Response->GetResponseCode()));
 				}
 				else
 				{
-					UE_LOG(LogPluginITLightning, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: RequestComplete: successful=%d, null_response_object"), bWasSuccessful ? 1 : 0);
+					UE_LOG(LogPluginSparkLogs, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: RequestComplete: successful=%d, null_response_object"), bWasSuccessful ? 1 : 0);
 				}
 			}
 			if (bWasSuccessful && Response.IsValid())
@@ -454,41 +455,41 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPa
 				}
 				else if (EHttpResponseCodes::TooManyRequests == ResponseCode || ResponseCode >= EHttpResponseCodes::ServerError)
 				{
-					UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Retryable HTTP response: status=%d, msg=%s"), (int)ResponseCode, *ResponseBody);
+					UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Retryable HTTP response: status=%d, msg=%s"), (int)ResponseCode, *ResponseBody);
 					RequestSucceeded.AtomicSet(false);
 					RetryableFailure.AtomicSet(true);
 				}
 				else if (EHttpResponseCodes::BadRequest == ResponseCode)
 				{
 					// Something about this input was unable to be processed -- drop this input and pretend success so we can continue, but warn about it
-					UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: HTTP response indicates input cannot be processed. Will skip this payload! status=%d, msg=%s"), (int)ResponseCode, *ResponseBody);
+					UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: HTTP response indicates input cannot be processed. Will skip this payload! status=%d, msg=%s"), (int)ResponseCode, *ResponseBody);
 					RequestSucceeded.AtomicSet(true);
 				}
 				else
 				{
-					UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Non-Retryable HTTP response: status=%d, msg=%s"), (int)ResponseCode, *ResponseBody);
+					UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Non-Retryable HTTP response: status=%d, msg=%s"), (int)ResponseCode, *ResponseBody);
 					RequestSucceeded.AtomicSet(false);
 					RetryableFailure.AtomicSet(false);
 				}
 			}
 			else
 			{
-				UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: General HTTP request failure; will retry; retry_seconds=%.3lf"), Streamer->WorkerGetRetrySecs());
+				UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: General HTTP request failure; will retry; retry_seconds=%.3lf"), Streamer->WorkerGetRetrySecs());
 				RequestSucceeded.AtomicSet(false);
 				RetryableFailure.AtomicSet(true);
 			}
 
 			// Signal that the request has finished (success or failure)
 			RequestEnded.AtomicSet(true);
-			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|OnProcessRequestComplete|END|RequestEnded=%d"), RequestEnded ? 1 : 0);
+			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|OnProcessRequestComplete|END|RequestEnded=%d"), RequestEnded ? 1 : 0);
 		});
 
 	// Start the HTTP request
 	double StartTime = FPlatformTime::Seconds();
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|Starting to process request at time=%.3lf"), StartTime);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|Starting to process request at time=%.3lf"), StartTime);
 	if (!HttpRequest->ProcessRequest())
 	{
-		UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: failed to initiate HttpRequest"));
+		UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: failed to initiate HttpRequest"));
 		RequestSucceeded.AtomicSet(false);
 		RetryableFailure.AtomicSet(true);
 	}
@@ -499,25 +500,25 @@ bool FitlightningWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPa
 	}
 
 	// If we had a non-retryable failure, then trigger this worker to stop
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|After request finished|RequestSucceeded=%d|RetryableFailure=%d"), RequestSucceeded ? 1 : 0, RetryableFailure ? 1 : 0);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|After request finished|RequestSucceeded=%d|RetryableFailure=%d"), RequestSucceeded ? 1 : 0, RetryableFailure ? 1 : 0);
 	if (!RequestSucceeded && !RetryableFailure)
 	{
 		if (Streamer != nullptr)
 		{
-			UE_LOG(LogPluginITLightning, Error, TEXT("HTTPPayloadProcessor::ProcessPayload: stopping log streaming service after non-retryable failure"));
+			UE_LOG(LogPluginSparkLogs, Error, TEXT("HTTPPayloadProcessor::ProcessPayload: stopping log streaming service after non-retryable failure"));
 			Streamer->Stop();
 		}
 	}
 
 	if (LogRequests)
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: END: success=%d, can_retry=%d"), RequestSucceeded ? 1 : 0, RetryableFailure ? 1 : 0);
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("HTTPPayloadProcessor::ProcessPayload: END: success=%d, can_retry=%d"), RequestSucceeded ? 1 : 0, RetryableFailure ? 1 : 0);
 	}
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|END|RequestSucceeded=%d|RetryableFailure=%d"), RequestSucceeded ? 1 : 0, RetryableFailure ? 1 : 0);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|END|RequestSucceeded=%d|RetryableFailure=%d"), RequestSucceeded ? 1 : 0, RetryableFailure ? 1 : 0);
 	return RequestSucceeded;
 }
 
-void FitlightningWriteHTTPPayloadProcessor::SetHTTPTimezoneHeader(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest)
+void FsparklogsWriteHTTPPayloadProcessor::SetHTTPTimezoneHeader(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest)
 {
 	static FString TimezoneHeader(TEXT("X-Timezone"));
 	static FString TimezoneHeaderValueUTC(TEXT("UTC"));
@@ -538,12 +539,12 @@ void FitlightningWriteHTTPPayloadProcessor::SetHTTPTimezoneHeader(TSharedRef<IHt
 	}
 }
 
-bool FitlightningWriteHTTPPayloadProcessor::SleepWaitingForHTTPRequest(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest, FThreadSafeBool& RequestEnded, FThreadSafeBool& RequestSucceeded, FThreadSafeBool& RetryableFailure, double StartTime)
+bool FsparklogsWriteHTTPPayloadProcessor::SleepWaitingForHTTPRequest(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest, FThreadSafeBool& RequestEnded, FThreadSafeBool& RequestSucceeded, FThreadSafeBool& RetryableFailure, double StartTime)
 {
-	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningWriteHTTPPayloadProcessor_SleepWaitingForHTTPRequest);
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_FsparklogsWriteHTTPPayloadProcessor_SleepWaitingForHTTPRequest);
 	while (!RequestEnded)
 	{
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|In loop waiting for request to end|RequestEnded=%d"), RequestEnded ? 1 : 0);
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|In loop waiting for request to end|RequestEnded=%d"), RequestEnded ? 1 : 0);
 		// TODO: support cancellation in the future if we need to
 		double CurrentTime = FPlatformTime::Seconds();
 		double Elapsed = CurrentTime - StartTime;
@@ -551,7 +552,7 @@ bool FitlightningWriteHTTPPayloadProcessor::SleepWaitingForHTTPRequest(TSharedRe
 		double Timeout = (double)(TimeoutMillisec.GetValue()) / 1000.0;
 		if (Elapsed > Timeout)
 		{
-			UE_LOG(LogPluginITLightning, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Timed out after %.3lf seconds; will retry..."), Elapsed);
+			UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Timed out after %.3lf seconds; will retry..."), Elapsed);
 			HttpRequest->CancelRequest();
 			RequestSucceeded.AtomicSet(false);
 			RetryableFailure.AtomicSet(true);
@@ -563,18 +564,18 @@ bool FitlightningWriteHTTPPayloadProcessor::SleepWaitingForHTTPRequest(TSharedRe
 	return true;
 }
 
-// =============== FitlightningStressGenerator ===============================================================================
+// =============== FsparklogsStressGenerator ===============================================================================
 
-FitlightningStressGenerator::FitlightningStressGenerator(TSharedRef<FitlightningSettings> InSettings)
+FsparklogsStressGenerator::FsparklogsStressGenerator(TSharedRef<FsparklogsSettings> InSettings)
 	: Settings(InSettings)
 	, Thread(nullptr)
 {
 	check(FPlatformProcess::SupportsMultithreading());
-	FString ThreadName = TEXT("ITLightning_StressGenerator");
+	FString ThreadName = TEXT("SparkLogs_StressGenerator");
 	FPlatformAtomics::InterlockedExchangePtr((void**)&Thread, FRunnableThread::Create(this, *ThreadName, 0, TPri_BelowNormal));
 }
 
-FitlightningStressGenerator::~FitlightningStressGenerator()
+FsparklogsStressGenerator::~FsparklogsStressGenerator()
 {
 	if (Thread)
 	{
@@ -583,39 +584,39 @@ FitlightningStressGenerator::~FitlightningStressGenerator()
 	Thread = nullptr;
 }
 
-bool FitlightningStressGenerator::Init()
+bool FsparklogsStressGenerator::Init()
 {
 	return true;
 }
 
-uint32 FitlightningStressGenerator::Run()
+uint32 FsparklogsStressGenerator::Run()
 {
 	double StressTestGenerateIntervalSecs = Settings->StressTestGenerateIntervalSecs;
 	int StressTestNumEntriesPerTick = Settings->StressTestNumEntriesPerTick;
-	UE_LOG(LogPluginITLightning, Log, TEXT("FitlightningStressGenerator starting. StressTestGenerateIntervalSecs=%.3lf, StressTestNumEntriesPerTick=%d"), StressTestGenerateIntervalSecs, StressTestNumEntriesPerTick);
+	UE_LOG(LogPluginSparkLogs, Log, TEXT("FsparklogsStressGenerator starting. StressTestGenerateIntervalSecs=%.3lf, StressTestNumEntriesPerTick=%d"), StressTestGenerateIntervalSecs, StressTestNumEntriesPerTick);
 	while (StopRequestCounter.GetValue() == 0)
 	{
 		for (int i = 0; i < StressTestNumEntriesPerTick; i++)
 		{
-			UE_LOG(LogEngine, Log, TEXT("FitlightningStressGenerator|Stress test message is being generated at platform_time=%.3lf, iteration=%d, 12345678901234567890123456789012345678901234567890 1234567890123456789012345678901234567890123456 100 12345678901234567890123456789012345678901234567890 1234567890123456789012345678901234567890123456 200 12345678901234567890123456789012345678901234567890 1234567890123456789012345678901234567890123456 300 12345678901234567890123456789012345678901234567890 1234567890123456789012345678901234567890123456 400"), FPlatformTime::Seconds(), i);
+			UE_LOG(LogEngine, Log, TEXT("FsparklogsStressGenerator|Stress test message is being generated at platform_time=%.3lf, iteration=%d, 12345678901234567890123456789012345678901234567890 1234567890123456789012345678901234567890123456 100 12345678901234567890123456789012345678901234567890 1234567890123456789012345678901234567890123456 200 12345678901234567890123456789012345678901234567890 1234567890123456789012345678901234567890123456 300 12345678901234567890123456789012345678901234567890 1234567890123456789012345678901234567890123456 400"), FPlatformTime::Seconds(), i);
 		}
 		FPlatformProcess::SleepNoStats(StressTestGenerateIntervalSecs);
 	}
-	UE_LOG(LogPluginITLightning, Log, TEXT("FitlightningStressGenerator stopped..."));
+	UE_LOG(LogPluginSparkLogs, Log, TEXT("FsparklogsStressGenerator stopped..."));
 	return 0;
 }
 
-void FitlightningStressGenerator::Stop()
+void FsparklogsStressGenerator::Stop()
 {
-	UE_LOG(LogPluginITLightning, Log, TEXT("FitlightningStressGenerator requesting stop..."));
+	UE_LOG(LogPluginSparkLogs, Log, TEXT("FsparklogsStressGenerator requesting stop..."));
 	StopRequestCounter.Increment();
 }
 
-// =============== FitlightningReadAndStreamToCloud ===============================================================================
+// =============== FsparklogsReadAndStreamToCloud ===============================================================================
 
-const TCHAR* FitlightningReadAndStreamToCloud::ProgressMarkerValue = TEXT("ShippedLogOffset");
+const TCHAR* FsparklogsReadAndStreamToCloud::ProgressMarkerValue = TEXT("ShippedLogOffset");
 
-void FitlightningReadAndStreamToCloud::ComputeCommonEventJSON()
+void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON()
 {
 	FString EffectiveComputerName;
 	if (OverrideComputerName.IsEmpty())
@@ -634,14 +635,14 @@ void FitlightningReadAndStreamToCloud::ComputeCommonEventJSON()
 	{
 		CommonEventJSON.Appendf(TEXT(", \"app\": %s"), *EscapeJsonString(FApp::GetProjectName()));
 	}
-	UE_LOG(LogPluginITLightning, Log, TEXT("Common event JSON computed. unreal_engine_common_event_data={%s}"), *CommonEventJSON)
+	UE_LOG(LogPluginSparkLogs, Log, TEXT("Common event JSON computed. unreal_engine_common_event_data={%s}"), *CommonEventJSON)
 	int64 CommonEventJSONLen = FTCHARToUTF8_Convert::ConvertedLength(*CommonEventJSON, CommonEventJSON.Len());
 	CommonEventJSONData.SetNum(0, false);
 	CommonEventJSONData.AddUninitialized(CommonEventJSONLen);
 	FTCHARToUTF8_Convert::Convert(CommonEventJSONData.GetData(), CommonEventJSONLen, *CommonEventJSON, CommonEventJSON.Len());
 }
 
-FitlightningReadAndStreamToCloud::FitlightningReadAndStreamToCloud(const TCHAR* InSourceLogFile, TSharedRef<FitlightningSettings> InSettings, TSharedRef<IitlightningPayloadProcessor> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName)
+FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const TCHAR* InSourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName)
 	: Settings(InSettings)
 	, PayloadProcessor(InPayloadProcessor)
 	, SourceLogFile(InSourceLogFile)
@@ -665,11 +666,11 @@ FitlightningReadAndStreamToCloud::FitlightningReadAndStreamToCloud(const TCHAR* 
 	WorkerNextEncodedPayload.AddUninitialized(BufferSize);
 	check(MaxLineLength > 0);
 	check(FPlatformProcess::SupportsMultithreading());
-	FString ThreadName = FString::Printf(TEXT("ITLightning_Reader_%s"), *FPaths::GetBaseFilename(InSourceLogFile));
+	FString ThreadName = FString::Printf(TEXT("SparkLogs_Reader_%s"), *FPaths::GetBaseFilename(InSourceLogFile));
 	FPlatformAtomics::InterlockedExchangePtr((void**)&Thread, FRunnableThread::Create(this, *ThreadName, 0, TPri_BelowNormal));
 }
 
-FitlightningReadAndStreamToCloud::~FitlightningReadAndStreamToCloud()
+FsparklogsReadAndStreamToCloud::~FsparklogsReadAndStreamToCloud()
 {
 	if (Thread)
 	{
@@ -678,25 +679,25 @@ FitlightningReadAndStreamToCloud::~FitlightningReadAndStreamToCloud()
 	Thread = nullptr;
 }
 
-bool FitlightningReadAndStreamToCloud::Init()
+bool FsparklogsReadAndStreamToCloud::Init()
 {
 	return true;
 }
 
-uint32 FitlightningReadAndStreamToCloud::Run()
+uint32 FsparklogsReadAndStreamToCloud::Run()
 {
 	WorkerFullyCleanedUp.AtomicSet(false);
 	ReadProgressMarker(WorkerShippedLogOffset);
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|Run|BEGIN|WorkerShippedLogOffset=%d"), (int)WorkerShippedLogOffset);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Run|BEGIN|WorkerShippedLogOffset=%d"), (int)WorkerShippedLogOffset);
 	// A pending flush will be processed before stopping
 	while (StopRequestCounter.GetValue() == 0 || FlushRequestCounter.GetValue() > 0)
 	{
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|Run|In loop|WorkerLastFlushFailed=%d|FlushRequestCounter=%d"), WorkerLastFlushFailed ? 1 : 0, (int)FlushRequestCounter.GetValue());
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Run|In loop|WorkerLastFlushFailed=%d|FlushRequestCounter=%d"), WorkerLastFlushFailed ? 1 : 0, (int)FlushRequestCounter.GetValue());
 		// Only allow manual flushes if we are not in a retry delay because the last operation failed.
 		if (WorkerLastFlushFailed == false && FlushRequestCounter.GetValue() > 0)
 		{
 			int32 NewValue = FlushRequestCounter.Decrement();
-			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|Run|Manual flush requested|FlushRequestCounter=%d"), (int)NewValue);
+			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Run|Manual flush requested|FlushRequestCounter=%d"), (int)NewValue);
 			WorkerDoFlush();
 		}
 		else if (FPlatformTime::Seconds() > WorkerMinNextFlushPlatformTime)
@@ -705,11 +706,11 @@ uint32 FitlightningReadAndStreamToCloud::Run()
 			if (FlushRequestCounter.GetValue() > 0)
 			{
 				int32 NewValue = FlushRequestCounter.Decrement();
-				ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|Run|Manual flush requested after retry timer expired|FlushRequestCounter=%d"), (int)NewValue);
+				ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Run|Manual flush requested after retry timer expired|FlushRequestCounter=%d"), (int)NewValue);
 			}
 			else
 			{
-				ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|Run|Periodic flush"));
+				ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Run|Periodic flush"));
 			}
 			WorkerDoFlush();
 		}
@@ -720,32 +721,32 @@ uint32 FitlightningReadAndStreamToCloud::Run()
 		}
 	}
 	WorkerFullyCleanedUp.AtomicSet(true);
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|Run|END"));
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Run|END"));
 	return 0;
 }
 
-void FitlightningReadAndStreamToCloud::Stop()
+void FsparklogsReadAndStreamToCloud::Stop()
 {
 	int32 NewValue = StopRequestCounter.Increment();
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|Stop|StopRequestCounter=%d"), (int)NewValue);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Stop|StopRequestCounter=%d"), (int)NewValue);
 }
 
-bool FitlightningReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer, bool InitiateStop, bool OnMainGameThread, double TimeoutSec, bool& OutLastFlushProcessedEverything)
+bool FsparklogsReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer, bool InitiateStop, bool OnMainGameThread, double TimeoutSec, bool& OutLastFlushProcessedEverything)
 {
 	OutLastFlushProcessedEverything = false;
 	bool WasSuccessful = true;
 
 	// If we've already requested a stop, a flush is impossible
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|StopRequestCounter=%d"), (int)StopRequestCounter.GetValue());
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|StopRequestCounter=%d"), (int)StopRequestCounter.GetValue());
 	if (StopRequestCounter.GetValue() > 0)
 	{
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|stop already requested, exiting with false"));
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|stop already requested, exiting with false"));
 		return false;
 	}
 
 	if (ClearRetryTimer)
 	{
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|Clearing retry timer..."));
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|Clearing retry timer..."));
 		WorkerLastFlushFailed.AtomicSet(false);
 	}
 
@@ -753,23 +754,23 @@ bool FitlightningReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer,
 	{
 		int StartFlushSuccessOpCounter = FlushSuccessOpCounter.GetValue();
 		int StartFlushOpCounter = FlushOpCounter.GetValue();
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|Starting Loop|i=%d|N=%d|FlushSuccessOpCounter=%d|FlushOpCounter=%d"), (int)i, (int)N, (int)StartFlushSuccessOpCounter, (int)StartFlushOpCounter);
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|Starting Loop|i=%d|N=%d|FlushSuccessOpCounter=%d|FlushOpCounter=%d"), (int)i, (int)N, (int)StartFlushSuccessOpCounter, (int)StartFlushOpCounter);
 		FlushRequestCounter.Increment();
 		// Last time around, we might initiate a stop
 		if (InitiateStop && i == N-1)
 		{
-			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|Initiating stop..."));
+			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|Initiating stop..."));
 			Stop();
 		}
 		double StartTime = FPlatformTime::Seconds();
 		double LastTime = StartTime;
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|Waiting for request to finish...|StartTime=%.3lf"), StartTime);
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|Waiting for request to finish...|StartTime=%.3lf"), StartTime);
 		while (FlushOpCounter.GetValue() == StartFlushOpCounter)
 		{
 			double Now = FPlatformTime::Seconds();
 			if (Now - StartTime > TimeoutSec)
 			{
-				ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|Timed out, returning false"));
+				ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|Timed out, returning false"));
 				return false;
 			}
 			if (OnMainGameThread)
@@ -786,32 +787,32 @@ bool FitlightningReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer,
 			LastTime = Now;
 		}
 		WasSuccessful = FlushSuccessOpCounter.GetValue() != StartFlushSuccessOpCounter;
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|Finished waiting for request|WasSuccessful=%d|FlushSuccessOpCounter=%d|FlushOpCounter=%d"), WasSuccessful ? 1 : 0, (int)FlushSuccessOpCounter.GetValue(), (int)FlushOpCounter.GetValue());
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|Finished waiting for request|WasSuccessful=%d|FlushSuccessOpCounter=%d|FlushOpCounter=%d"), WasSuccessful ? 1 : 0, (int)FlushSuccessOpCounter.GetValue(), (int)FlushOpCounter.GetValue());
 	}
 	if (WasSuccessful)
 	{
 		OutLastFlushProcessedEverything = LastFlushProcessedEverything;
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|LastFlushProcessedEverything=%d"), OutLastFlushProcessedEverything ? 1 : 0);
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|LastFlushProcessedEverything=%d"), OutLastFlushProcessedEverything ? 1 : 0);
 	}
 	if (InitiateStop) {
 		// Wait for the worker to fully stop, up to the timeout
 		double StartTime = FPlatformTime::Seconds();
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|Waiting for thread to stop...|StartTime=%.3lf"), StartTime);
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|Waiting for thread to stop...|StartTime=%.3lf"), StartTime);
 		while (!WorkerFullyCleanedUp)
 		{
 			if (FPlatformTime::Seconds() - StartTime > TimeoutSec)
 			{
-				ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|Timed out waiting for thread to stop"));
+				ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|Timed out waiting for thread to stop"));
 				return false;
 			}
 			FPlatformProcess::SleepNoStats(0.01f);
 		}
 	}
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|FlushAndWait|END|WasSuccessful=%d"), WasSuccessful ? 1 : 0);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|END|WasSuccessful=%d"), WasSuccessful ? 1 : 0);
 	return WasSuccessful;
 }
 
-bool FitlightningReadAndStreamToCloud::ReadProgressMarker(int64& OutMarker)
+bool FsparklogsReadAndStreamToCloud::ReadProgressMarker(int64& OutMarker)
 {
 	OutMarker = 0;
 	double OutDouble = 0.0;
@@ -819,14 +820,14 @@ bool FitlightningReadAndStreamToCloud::ReadProgressMarker(int64& OutMarker)
 	{
 		bool WasDisabled = GConfig->AreFileOperationsDisabled();
 		GConfig->EnableFileOperations();
-		bool Result = GConfig->GetDouble(FitlightningSettings::PluginStateSection, ProgressMarkerValue, OutDouble, *ProgressMarkerPath);
+		bool Result = GConfig->GetDouble(FsparklogsSettings::PluginStateSection, ProgressMarkerValue, OutDouble, *ProgressMarkerPath);
 		if (WasDisabled)
 		{
 			GConfig->DisableFileOperations();
 		}
 		if (!Result)
 		{
-			UE_LOG(LogPluginITLightning, Warning, TEXT("Failed to read progress marker from %s"), *ProgressMarkerPath);
+			UE_LOG(LogPluginSparkLogs, Warning, TEXT("Failed to read progress marker from %s"), *ProgressMarkerPath);
 			return false;
 		}
 	}
@@ -835,13 +836,13 @@ bool FitlightningReadAndStreamToCloud::ReadProgressMarker(int64& OutMarker)
 	return true;
 }
 
-bool FitlightningReadAndStreamToCloud::WriteProgressMarker(int64 InMarker)
+bool FsparklogsReadAndStreamToCloud::WriteProgressMarker(int64 InMarker)
 {
 	// TODO: should we use the sqlite plugin instead, maybe it's not as much overhead as writing INI file each time?
 	// Precise to 52+ bits
 	bool WasDisabled = GConfig->AreFileOperationsDisabled();
 	GConfig->EnableFileOperations();
-	GConfig->SetDouble(FitlightningSettings::PluginStateSection, ProgressMarkerValue, (double)(InMarker), *ProgressMarkerPath);
+	GConfig->SetDouble(FsparklogsSettings::PluginStateSection, ProgressMarkerValue, (double)(InMarker), *ProgressMarkerPath);
 	GConfig->Flush(false, ProgressMarkerPath);
 	if (WasDisabled)
 	{
@@ -850,7 +851,7 @@ bool FitlightningReadAndStreamToCloud::WriteProgressMarker(int64 InMarker)
 	return true;
 }
 
-void FitlightningReadAndStreamToCloud::DeleteProgressMarker()
+void FsparklogsReadAndStreamToCloud::DeleteProgressMarker()
 {
 	IFileManager::Get().Delete(*ProgressMarkerPath, false, true, false);
 }
@@ -915,9 +916,9 @@ void AppendUTF8AsEscapedJsonString(TITLJSONStringBuilder& Builder, const ANSICHA
 	Builder.Append('\"');
 }
 
-bool FitlightningReadAndStreamToCloud::WorkerReadNextPayload(int& OutNumToRead, int64& OutEffectiveShippedLogOffset, int64& OutRemainingBytes)
+bool FsparklogsReadAndStreamToCloud::WorkerReadNextPayload(int& OutNumToRead, int64& OutEffectiveShippedLogOffset, int64& OutRemainingBytes)
 {
-	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningReadAndStreamToCloud_WorkerReadNextPayload);
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_FsparklogsReadAndStreamToCloud_WorkerReadNextPayload);
 
 	OutEffectiveShippedLogOffset = WorkerShippedLogOffset;
 
@@ -927,14 +928,14 @@ bool FitlightningReadAndStreamToCloud::WorkerReadNextPayload(int& OutNumToRead, 
 	WorkerReader.Reset(FPlatformFileManager::Get().GetPlatformFile().OpenRead(*SourceLogFile, true));
 	if (WorkerReader == nullptr)
 	{
-		UE_LOG(LogPluginITLightning, Warning, TEXT("STREAMER: Failed to open logfile='%s'"), *SourceLogFile);
+		UE_LOG(LogPluginSparkLogs, Warning, TEXT("STREAMER: Failed to open logfile='%s'"), *SourceLogFile);
 		return false;
 	}
 	int64 FileSize = WorkerReader->Size();
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerReadNextPayload|opened log file|last_offset=%ld|current_file_size=%ld|logfile='%s'"), OutEffectiveShippedLogOffset, FileSize, *SourceLogFile);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerReadNextPayload|opened log file|last_offset=%ld|current_file_size=%ld|logfile='%s'"), OutEffectiveShippedLogOffset, FileSize, *SourceLogFile);
 	if (OutEffectiveShippedLogOffset > FileSize)
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("STREAMER: Logfile reduced size, re-reading from start: new_size=%ld, previously_processed_to=%ld, logfile='%s'"), FileSize, OutEffectiveShippedLogOffset, *SourceLogFile);
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("STREAMER: Logfile reduced size, re-reading from start: new_size=%ld, previously_processed_to=%ld, logfile='%s'"), FileSize, OutEffectiveShippedLogOffset, *SourceLogFile);
 		OutEffectiveShippedLogOffset = 0;
 		// Don't force a retried read to use the same payload size as last time since the whole file has changed.
 		WorkerLastFailedFlushPayloadSize = 0;
@@ -954,27 +955,27 @@ bool FitlightningReadAndStreamToCloud::WorkerReadNextPayload(int& OutNumToRead, 
 	if (OutNumToRead <= 0)
 	{
 		// We've read everything we possibly can already
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerReadNextPayload|Nothing more can be read|FileSize=%ld|EffectiveShippedLogOffset=%ld"), FileSize, OutEffectiveShippedLogOffset);
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerReadNextPayload|Nothing more can be read|FileSize=%ld|EffectiveShippedLogOffset=%ld"), FileSize, OutEffectiveShippedLogOffset);
 		return true;
 	}
 
 	uint8* BufferData = WorkerBuffer.GetData();
 	if (!WorkerReader->Read(BufferData, OutNumToRead))
 	{
-		UE_LOG(LogPluginITLightning, Warning, TEXT("STREAMER: Failed to read data: offset=%ld, bytes=%ld, logfile='%s'"), OutEffectiveShippedLogOffset, OutNumToRead, *SourceLogFile);
+		UE_LOG(LogPluginSparkLogs, Warning, TEXT("STREAMER: Failed to read data: offset=%ld, bytes=%ld, logfile='%s'"), OutEffectiveShippedLogOffset, OutNumToRead, *SourceLogFile);
 		return false;
 	}
 #if ITL_INTERNAL_DEBUG_LOG_DATA == 1
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerReadNextPayload|read data into buffer|offset=%ld|data_len=%d|data=%s|logfile='%s'"), OutEffectiveShippedLogOffset, OutNumToRead, *ITLConvertUTF8(BufferData, OutNumToRead), *SourceLogFile);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerReadNextPayload|read data into buffer|offset=%ld|data_len=%d|data=%s|logfile='%s'"), OutEffectiveShippedLogOffset, OutNumToRead, *ITLConvertUTF8(BufferData, OutNumToRead), *SourceLogFile);
 #else
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerReadNextPayload|read data into buffer|offset=%ld|data_len=%d|logfile='%s'"), OutEffectiveShippedLogOffset, OutNumToRead, *SourceLogFile);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerReadNextPayload|read data into buffer|offset=%ld|data_len=%d|logfile='%s'"), OutEffectiveShippedLogOffset, OutNumToRead, *SourceLogFile);
 #endif
 	return true;
 }
 
-bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int& OutCapturedOffset, int& OutNumCapturedLines)
+bool FsparklogsReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int& OutCapturedOffset, int& OutNumCapturedLines)
 {
-	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningReadAndStreamToCloud_WorkerBuildNextPayload);
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_FsparklogsReadAndStreamToCloud_WorkerBuildNextPayload);
 	OutCapturedOffset = 0;
 	const uint8* BufferData = WorkerBuffer.GetData();
 	OutNumCapturedLines = 0;
@@ -986,7 +987,7 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 		// Skip the UTF-8 byte order marker (always at the start of the file)
 		if (0 == std::memcmp(BufferData + NextOffset, UTF8ByteOrderMark, sizeof(UTF8ByteOrderMark)))
 		{
-			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|skipping UTF8 BOM|offset_before=%d|offset_after=%d"), NextOffset, NextOffset + sizeof(UTF8ByteOrderMark));
+			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerBuildNextPayload|skipping UTF8 BOM|offset_before=%d|offset_after=%d"), NextOffset, NextOffset + sizeof(UTF8ByteOrderMark));
 			NextOffset += sizeof(UTF8ByteOrderMark);
 			OutCapturedOffset = NextOffset;
 			continue;
@@ -997,14 +998,14 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 		int FoundIndex = 0;
 		int ExtraToSkip = 1; // skip over the \n char
 		bool HaveLine = FindFirstByte(BufferData + NextOffset, static_cast<uint8>('\n'), NumToSearch, FoundIndex);
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|after newline search|NextOffset=%d|HaveLine=%d|NumToSearch=%d|FoundIndex=%d"), NextOffset, (int)HaveLine, NumToSearch, FoundIndex);
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerBuildNextPayload|after newline search|NextOffset=%d|HaveLine=%d|NumToSearch=%d|FoundIndex=%d"), NextOffset, (int)HaveLine, NumToSearch, FoundIndex);
 		if (!HaveLine && NumToSearch == MaxLineLength && RemainingBytes > NumToSearch)
 		{
 			// Even though we didn't find a line, break the line at the max length and process it
 			// It's unsafe to break a line in the middle of a multi-byte UTF-8, so find a safe break point...
 			ExtraToSkip = 0;
 			FoundIndex = MaxLineLength - 1;
-			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|no newline found, search for safe breakpoint|NextOffset=%d|FoundIndex=%d"), NextOffset, FoundIndex);
+			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerBuildNextPayload|no newline found, search for safe breakpoint|NextOffset=%d|FoundIndex=%d"), NextOffset, FoundIndex);
 			while (FoundIndex > 0)
 			{
 				if (*(BufferData + NextOffset + FoundIndex) >= 0x80)
@@ -1019,12 +1020,12 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 				}
 			}
 			HaveLine = true;
-			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|found safe breakpoint|NextOffset=%d|FoundIndex=%d|ExtraToSkip=%d"), NextOffset, FoundIndex, ExtraToSkip);
+			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerBuildNextPayload|found safe breakpoint|NextOffset=%d|FoundIndex=%d|ExtraToSkip=%d"), NextOffset, FoundIndex, ExtraToSkip);
 		}
 		if (!HaveLine)
 		{
 			// No more complete lines to process, this is enough for now
-			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|no more lines to process, break"));
+			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerBuildNextPayload|no more lines to process, break"));
 			break;
 		}
 		// Trim newlines control characters of any kind at the end
@@ -1035,7 +1036,7 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 			uint8 c = *(BufferData + NextOffset + FoundIndex - 1);
 			if (c == '\n' || c == '\r')
 			{
-				ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|character at NextOffset=%d, FoundIndex=%d is newline, will skip it"), NextOffset, FoundIndex);
+				ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerBuildNextPayload|character at NextOffset=%d, FoundIndex=%d is newline, will skip it"), NextOffset, FoundIndex);
 				ExtraToSkip++;
 				FoundIndex--;
 			}
@@ -1044,11 +1045,11 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 				break;
 			}
 		}
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|line summary|NextOffset=%d|FoundIndex=%d|ExtraToSkip=%d"), NextOffset, FoundIndex, ExtraToSkip);
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerBuildNextPayload|line summary|NextOffset=%d|FoundIndex=%d|ExtraToSkip=%d"), NextOffset, FoundIndex, ExtraToSkip);
 		// Skip blank lines without capturing anything
 		if (FoundIndex <= 0)
 		{
-			ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|skipping blank line..."));
+			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerBuildNextPayload|skipping blank line..."));
 			if (ExtraToSkip <= 0)
 			{
 				ExtraToSkip = 1;
@@ -1072,7 +1073,7 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 		WorkerNextPayload.Append("\"message\":", 10 /* length of `"message":` */);
 		AppendUTF8AsEscapedJsonString(WorkerNextPayload, (const ANSICHAR*)(BufferData + NextOffset), FoundIndex);
 #if ITL_INTERNAL_DEBUG_LOG_DATA == 1
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerBuildNextPayload|adding message to payload: %s"), *ITLConvertUTF8(BufferData + NextOffset, FoundIndex));
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerBuildNextPayload|adding message to payload: %s"), *ITLConvertUTF8(BufferData + NextOffset, FoundIndex));
 #endif
 		WorkerNextPayload.Append('}');
 		OutNumCapturedLines++;
@@ -1083,19 +1084,19 @@ bool FitlightningReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int
 	return true;
 }
 
-bool FitlightningReadAndStreamToCloud::WorkerCompressPayload()
+bool FsparklogsReadAndStreamToCloud::WorkerCompressPayload()
 {
-	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningReadAndStreamToCloud_WorkerCompressPayload);
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerCompressPayload|Begin compressing payload"));
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_FsparklogsReadAndStreamToCloud_WorkerCompressPayload);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerCompressPayload|Begin compressing payload"));
 	bool Success = ITLCompressData(Settings->CompressionMode, (const uint8*)WorkerNextPayload.GetData(), WorkerNextPayload.Len(), WorkerNextEncodedPayload);
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerCompressPayload|Finish compressing payload|success=%d|original_len=%d|compressed_len=%d"), Success ? 1 : 0, (int)WorkerNextPayload.Len(), (int)WorkerNextEncodedPayload.Num());
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerCompressPayload|Finish compressing payload|success=%d|original_len=%d|compressed_len=%d"), Success ? 1 : 0, (int)WorkerNextPayload.Len(), (int)WorkerNextEncodedPayload.Num());
 	return Success;
 }
 
-bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippedLogOffset, bool& OutFlushProcessedEverything)
+bool FsparklogsReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippedLogOffset, bool& OutFlushProcessedEverything)
 {
-	QUICK_SCOPE_CYCLE_COUNTER(STAT_FitlightningReadAndStreamToCloud_WorkerInternalDoFlush);
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|BEGIN"));
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_FsparklogsReadAndStreamToCloud_WorkerInternalDoFlush);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerInternalDoFlush|BEGIN"));
 	OutNewShippedLogOffset = WorkerShippedLogOffset;
 	OutFlushProcessedEverything = false;
 	
@@ -1116,32 +1117,32 @@ bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippe
 	int NumCapturedLines = 0;
 	if (!WorkerBuildNextPayload(NumToRead, CapturedOffset, NumCapturedLines))
 	{
-		UE_LOG(LogPluginITLightning, Warning, TEXT("STREAMER: Failed to build payload: offset=%ld, payload_input_size=%d, logfile='%s'"), EffectiveShippedLogOffset, CapturedOffset, *SourceLogFile);
+		UE_LOG(LogPluginSparkLogs, Warning, TEXT("STREAMER: Failed to build payload: offset=%ld, payload_input_size=%d, logfile='%s'"), EffectiveShippedLogOffset, CapturedOffset, *SourceLogFile);
 		return false;
 	}
 
 #if ITL_INTERNAL_DEBUG_LOG_DATA == 1
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|payload is ready to process|offset=%ld|payload_input_size=%d|captured_lines=%d|data_len=%d|data=%s|logfile='%s'"),
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerInternalDoFlush|payload is ready to process|offset=%ld|payload_input_size=%d|captured_lines=%d|data_len=%d|data=%s|logfile='%s'"),
 		EffectiveShippedLogOffset, CapturedOffset, NumCapturedLines, WorkerNextPayload.Len(), *ITLConvertUTF8(WorkerNextPayload.GetData(), WorkerNextPayload.Len()), *SourceLogFile);
 #else
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|payload is ready to process|offset=%ld|payload_input_size=%d|captured_lines=%d|data_len=%d|logfile='%s'"),
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerInternalDoFlush|payload is ready to process|offset=%ld|payload_input_size=%d|captured_lines=%d|data_len=%d|logfile='%s'"),
 		EffectiveShippedLogOffset, CapturedOffset, NumCapturedLines, WorkerNextPayload.Len(), *SourceLogFile);
 #endif
 	if (NumCapturedLines > 0)
 	{
 		if (!WorkerCompressPayload())
 		{
-			UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: Failed to compress payload: mode=%d"), (int)Settings->CompressionMode);
+			UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER: Failed to compress payload: mode=%d"), (int)Settings->CompressionMode);
 			return false;
 		}
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|Begin processing payload"));
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerInternalDoFlush|Begin processing payload"));
 		if (!PayloadProcessor->ProcessPayload(WorkerNextEncodedPayload, WorkerNextEncodedPayload.Num(), WorkerNextPayload.Len(), Settings->CompressionMode, this))
 		{
-			UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER: Failed to process payload: offset=%ld, num_read=%d, payload_input_size=%d, logfile='%s'"), EffectiveShippedLogOffset, NumToRead, CapturedOffset, *SourceLogFile);
+			UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER: Failed to process payload: offset=%ld, num_read=%d, payload_input_size=%d, logfile='%s'"), EffectiveShippedLogOffset, NumToRead, CapturedOffset, *SourceLogFile);
 			WorkerLastFailedFlushPayloadSize = NumToRead;
 			return false;
 		}
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|Finished processing payload|PayloadInputSize=%ld"), CapturedOffset);
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerInternalDoFlush|Finished processing payload|PayloadInputSize=%ld"), CapturedOffset);
 	}
 	int ProcessedOffset = CapturedOffset;
 
@@ -1151,13 +1152,13 @@ bool FitlightningReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippe
 	{
 		OutFlushProcessedEverything = true;
 	}
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerInternalDoFlush|END|FlushProcessedEverything=%d"), OutFlushProcessedEverything);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerInternalDoFlush|END|FlushProcessedEverything=%d"), OutFlushProcessedEverything);
 	return true;
 }
 
-bool FitlightningReadAndStreamToCloud::WorkerDoFlush()
+bool FsparklogsReadAndStreamToCloud::WorkerDoFlush()
 {
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerDoFlush|BEGIN"));
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerDoFlush|BEGIN"));
 	int64 ShippedNewLogOffset = 0;
 	bool FlushProcessedEverything = false;
 	bool Result = WorkerInternalDoFlush(ShippedNewLogOffset, FlushProcessedEverything);
@@ -1168,7 +1169,7 @@ bool FitlightningReadAndStreamToCloud::WorkerDoFlush()
 		LastFlushProcessedEverything.AtomicSet(false);
 		// Increment this counter after the retry interval is calculated
 		WorkerNumConsecutiveFlushFailures++;
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerDoFlush|internal flush failed|WorkerMinNextFlushPlatformTime=%.3lf|NumConsecutiveFlushFailures=%d"), WorkerMinNextFlushPlatformTime, WorkerNumConsecutiveFlushFailures);
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerDoFlush|internal flush failed|WorkerMinNextFlushPlatformTime=%.3lf|NumConsecutiveFlushFailures=%d"), WorkerMinNextFlushPlatformTime, WorkerNumConsecutiveFlushFailures);
 	}
 	else
 	{
@@ -1180,35 +1181,35 @@ bool FitlightningReadAndStreamToCloud::WorkerDoFlush()
 		WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds() + Settings->ProcessingIntervalSecs;
 		LastFlushProcessedEverything.AtomicSet(FlushProcessedEverything);
 		FlushSuccessOpCounter.Increment();
-		ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerDoFlush|internal flush succeeded|ShippedNewLogOffset=%d|WorkerMinNextFlushPlatformTime=%.3lf|FlushProcessedEverything=%d"), (int)ShippedNewLogOffset, WorkerMinNextFlushPlatformTime, FlushProcessedEverything ? 1 : 0);
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerDoFlush|internal flush succeeded|ShippedNewLogOffset=%d|WorkerMinNextFlushPlatformTime=%.3lf|FlushProcessedEverything=%d"), (int)ShippedNewLogOffset, WorkerMinNextFlushPlatformTime, FlushProcessedEverything ? 1 : 0);
 	}
 	FlushOpCounter.Increment();
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerDoFlush|END|Result=%d"), Result ? 1 : 0);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerDoFlush|END|Result=%d"), Result ? 1 : 0);
 	return Result;
 }
 
-double FitlightningReadAndStreamToCloud::WorkerGetRetrySecs()
+double FsparklogsReadAndStreamToCloud::WorkerGetRetrySecs()
 {
 	double RetrySecs = Settings->RetryIntervalSecs * (WorkerNumConsecutiveFlushFailures + 1);
 	if (RetrySecs > Settings->MaxRetryIntervalSecs)
 	{
 		RetrySecs = Settings->MaxRetryIntervalSecs;
 	}
-	ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("STREAMER|WorkerGetRetrySecs=%.3lf"), RetrySecs);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerGetRetrySecs=%.3lf"), RetrySecs);
 	return RetrySecs;
 }
 
-// =============== FitlightningModule ===============================================================================
+// =============== FsparklogsModule ===============================================================================
 
-FitlightningModule::FitlightningModule()
+FsparklogsModule::FsparklogsModule()
 	: LoggingActive(false)
-	, Settings(new FitlightningSettings())
+	, Settings(new FsparklogsSettings())
 {
 }
 
-void FitlightningModule::StartupModule()
+void FsparklogsModule::StartupModule()
 {
-	FCoreDelegates::OnPostEngineInit.AddRaw(this, &FitlightningModule::OnPostEngineInit);
+	FCoreDelegates::OnPostEngineInit.AddRaw(this, &FsparklogsModule::OnPostEngineInit);
 	// TODO: does it matter if we are loaded later and miss a bunch of log entries during engine initialization?
 	// TODO: Should run plugin earlier and check command line to determine if this is running in an editor with
 	//       similar logic to FEngineLoop::PreInitPreStartupScreen [LaunchEngineLoop.cpp] (GIsEditor not available earlier).
@@ -1220,7 +1221,7 @@ void FitlightningModule::StartupModule()
 		FString DefaultEngineIniPath = FPaths::ProjectConfigDir() + TEXT("DefaultEngine.ini");
 		FString CurrentLogTimesValue = GConfig->GetStr(TEXT("LogFiles"), TEXT("LogTimes"), DefaultEngineIniPath).TrimStartAndEnd();
 		if (CurrentLogTimesValue.Len() > 0 && CurrentLogTimesValue != TEXT("UTC") && CurrentLogTimesValue != TEXT("Local")) {
-			UE_LOG(LogPluginITLightning, Warning, TEXT("Timestamps in log messages are required (LogTimes must be UTC or Local). Changing DefaultEngine.ini so [LogFiles]LogTimes=UTC"));
+			UE_LOG(LogPluginSparkLogs, Warning, TEXT("Timestamps in log messages are required (LogTimes must be UTC or Local). Changing DefaultEngine.ini so [LogFiles]LogTimes=UTC"));
 			GConfig->SetString(TEXT("LogFiles"), TEXT("LogTimes"), TEXT("UTC"), DefaultEngineIniPath);
 			GPrintLogTimes = ELogTimes::UTC;
 			if (ICVar)
@@ -1237,7 +1238,7 @@ void FitlightningModule::StartupModule()
 			ELogTimes::Type CurrentValue = (ELogTimes::Type)ICVar->GetInt();
 			if (CurrentValue != ELogTimes::UTC && CurrentValue != ELogTimes::Local)
 			{
-				UE_LOG(LogPluginITLightning, Warning, TEXT("ITLightningPlugin: log.Timestamp not set to either Local or UTC; forcing to UTC"));
+				UE_LOG(LogPluginSparkLogs, Warning, TEXT("SparkLogsPlugin: log.Timestamp not set to either Local or UTC; forcing to UTC"));
 				ICVar->Set((int)ELogTimes::UTC, ECVF_SetByCode);
 			}
 		}
@@ -1246,15 +1247,15 @@ void FitlightningModule::StartupModule()
 	Settings->LoadSettings();
 	if (Settings->AutoStart)
 	{
-		StartShippingEngine(NULL, NULL, NULL, false);
+		StartShippingEngine(NULL, NULL, NULL, NULL, false);
 	}
 	else
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("AutoStart is disabled. Waiting for call to FitlightningModule::GetModule().StartShippingEngine(...)"));
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("AutoStart is disabled. Waiting for call to FsparklogsModule::GetModule().StartShippingEngine(...)"));
 	}
 }
 
-void FitlightningModule::ShutdownModule()
+void FsparklogsModule::ShutdownModule()
 {
 	FCoreDelegates::OnPostEngineInit.RemoveAll(this);
 	FCoreDelegates::OnExit.RemoveAll(this);
@@ -1266,16 +1267,17 @@ void FitlightningModule::ShutdownModule()
 	StopShippingEngine();
 }
 
-bool FitlightningModule::StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideComputerName, bool AlwaysStart)
+bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, bool AlwaysStart)
 {
 	if (LoggingActive)
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("Logging is already active. Ignoring call to StartShippingEngine."));
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("Logging is already active. Ignoring call to StartShippingEngine."));
 		return true;
 	}
 
 	FString EffectiveAgentID = Settings->AgentID;
 	FString EffectiveAgentAuthToken = Settings->AgentAuthToken;
+	FString EffectiveHttpAuthorizationHeaderValue = Settings->HttpAuthorizationHeaderValue;
 	if (NULL != OverrideAgentID && FPlatformString::Strlen(OverrideAgentID) > 0)
 	{
 		EffectiveAgentID = OverrideAgentID;
@@ -1284,22 +1286,26 @@ bool FitlightningModule::StartShippingEngine(const TCHAR* OverrideAgentID, const
 	{
 		EffectiveAgentAuthToken = OverrideAgentAuthToken;
 	}
-
-	if (EffectiveAgentID.IsEmpty() || EffectiveAgentAuthToken.IsEmpty())
+	if (NULL != OverrideHttpAuthorizationHeaderValue && FPlatformString::Strlen(OverrideHttpAuthorizationHeaderValue) > 0)
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("Not yet configured for this launch configuration. In plugin settings for %s launch configuration, configure Agent ID and Agent Auth Token to enable. Consider using a different agent for Editor vs Client vs Server."), *GetITLINISettingPrefix());
-		return false;
+		EffectiveHttpAuthorizationHeaderValue = OverrideHttpAuthorizationHeaderValue;
 	}
+
 	FString EffectiveHttpEndpointURI = Settings->GetEffectiveHttpEndpointURI();
 	if (EffectiveHttpEndpointURI.IsEmpty())
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("Not yet configured for this launch configuration. In plugin settings for %s launch configuration, configure CloudRegion to 'us' or 'eu' (or in advanced situations configure HttpEndpointURI to the appropriate endpoint, such as https://ingest-<REGION>.engine.itlightning.app/ingest/v1)"), *GetITLINISettingPrefix());
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("Not yet configured for this launch configuration. In plugin settings for %s launch configuration, configure CloudRegion to 'us' or 'eu' for your SparkLogs cloud region (or if you are sending data to your own HTTP service, configure HttpEndpointURI to the appropriate endpoint, such as https://ingestlogs.myservice.com/ingest/v1)"), *GetITLINISettingPrefix());
+		return false;
+	}
+	if ((EffectiveAgentID.IsEmpty() || EffectiveAgentAuthToken.IsEmpty()) && EffectiveHttpAuthorizationHeaderValue.IsEmpty())
+	{
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("Not yet configured for this launch configuration. In plugin settings for %s launch configuration, configure authentication credentials to enable. Consider using credentials for Editor vs Client vs Server."), *GetITLINISettingPrefix());
 		return false;
 	}
 
 	if (!FPlatformProcess::SupportsMultithreading())
 	{
-		UE_LOG(LogPluginITLightning, Warning, TEXT("This plugin cannot run on this platform. This platform does not multithreading."));
+		UE_LOG(LogPluginSparkLogs, Warning, TEXT("This plugin cannot run on this platform. This platform does not multithreading."));
 		return false;
 	}
 
@@ -1307,34 +1313,42 @@ bool FitlightningModule::StartShippingEngine(const TCHAR* OverrideAgentID, const
 	LoggingActive = DiceRoll < Settings->ActivationPercentage;
 	if (LoggingActive)
 	{
-		// Log all IT Lightning messages to the ITL operations log
+		// Log all plugin messages to the ITL operations log
 		GLog->AddOutputDevice(GetITLInternalOpsLog().LogDevice.Get());
 		// Log all engine messages to an internal log just for this plugin, which we will then read from the file as we push log data to the cloud
 		GLog->AddOutputDevice(GetITLInternalGameLog().LogDevice.Get());
 	}
-	UE_LOG(LogPluginITLightning, Log, TEXT("Starting up: LaunchConfiguration=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s"), GetITLLaunchConfiguration(true), *EffectiveHttpEndpointURI, *EffectiveAgentID, Settings->ActivationPercentage, DiceRoll, LoggingActive ? TEXT("yes") : TEXT("no"));
+	UE_LOG(LogPluginSparkLogs, Log, TEXT("Starting up: LaunchConfiguration=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s"), GetITLLaunchConfiguration(true), *EffectiveHttpEndpointURI, *EffectiveAgentID, Settings->ActivationPercentage, DiceRoll, LoggingActive ? TEXT("yes") : TEXT("no"));
 	if (LoggingActive)
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("Ingestion parameters: RequestTimeoutSecs=%lf, BytesPerRequest=%d, ProcessingIntervalSecs=%lf, RetryIntervalSecs=%lf"), Settings->RequestTimeoutSecs, Settings->BytesPerRequest, Settings->ProcessingIntervalSecs, Settings->RetryIntervalSecs);
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("Ingestion parameters: RequestTimeoutSecs=%lf, BytesPerRequest=%d, ProcessingIntervalSecs=%lf, RetryIntervalSecs=%lf"), Settings->RequestTimeoutSecs, Settings->BytesPerRequest, Settings->ProcessingIntervalSecs, Settings->RetryIntervalSecs);
 		FString SourceLogFile = GetITLInternalGameLog().LogFilePath;
-		FString AuthorizationHeader = FString::Format(TEXT("Bearer {0}:{1}"), { *EffectiveAgentID, *EffectiveAgentAuthToken });
-		CloudPayloadProcessor = TSharedPtr<FitlightningWriteHTTPPayloadProcessor>(new FitlightningWriteHTTPPayloadProcessor(*EffectiveHttpEndpointURI, *AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests));
-		CloudStreamer = MakeUnique<FitlightningReadAndStreamToCloud>(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, OverrideComputerName);
-		FCoreDelegates::OnExit.AddRaw(this, &FitlightningModule::OnEngineExit);
+		FString AuthorizationHeader;
+		if (EffectiveHttpAuthorizationHeaderValue.IsEmpty())
+		{
+			AuthorizationHeader = FString::Format(TEXT("Bearer {0}:{1}"), { *EffectiveAgentID, *EffectiveAgentAuthToken });
+		}
+		else
+		{
+			AuthorizationHeader = EffectiveHttpAuthorizationHeaderValue;
+		}
+		CloudPayloadProcessor = TSharedPtr<FsparklogsWriteHTTPPayloadProcessor>(new FsparklogsWriteHTTPPayloadProcessor(*EffectiveHttpEndpointURI, *AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests));
+		CloudStreamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, OverrideComputerName);
+		FCoreDelegates::OnExit.AddRaw(this, &FsparklogsModule::OnEngineExit);
 
 		if (Settings->StressTestGenerateIntervalSecs > 0)
 		{
-			StressGenerator = MakeUnique<FitlightningStressGenerator>(Settings);
+			StressGenerator = MakeUnique<FsparklogsStressGenerator>(Settings);
 		}
 	}
 	return LoggingActive;
 }
 
-void FitlightningModule::StopShippingEngine()
+void FsparklogsModule::StopShippingEngine()
 {
 	if (LoggingActive || CloudStreamer.IsValid())
 	{
-		UE_LOG(LogPluginITLightning, Log, TEXT("Shutting down and flushing logs to cloud..."));
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("Shutting down and flushing logs to cloud..."));
 		GLog->Flush();
 		if (StressGenerator.IsValid())
 		{
@@ -1350,25 +1364,25 @@ void FitlightningModule::StopShippingEngine()
 				CloudPayloadProcessor->SetTimeoutSecs(FMath::Min(Settings->RequestTimeoutSecs, 6.0));
 			}
 			bool LastFlushProcessedEverything = false;
-			if (CloudStreamer->FlushAndWait(2, true, true, true, FitlightningSettings::WaitForFlushToCloudOnShutdown, LastFlushProcessedEverything))
+			if (CloudStreamer->FlushAndWait(2, true, true, true, FsparklogsSettings::WaitForFlushToCloudOnShutdown, LastFlushProcessedEverything))
 			{
 				FString LogFilePath = GetITLInternalGameLog().LogFilePath;
-				UE_LOG(LogPluginITLightning, Log, TEXT("Flushed logs successfully. LastFlushedEverything=%d"), (int)LastFlushProcessedEverything);
-				// Purge the IT Lightning logfile and delete the progress marker (fully flushed shutdown should start with an empty log next game session).
+				UE_LOG(LogPluginSparkLogs, Log, TEXT("Flushed logs successfully. LastFlushedEverything=%d"), (int)LastFlushProcessedEverything);
+				// Purge this plugin's logfile and delete the progress marker (fully flushed shutdown should start with an empty log next game session).
 				FOutputDevice* LogDevice = GetITLInternalGameLog().LogDevice.Get();
 				GLog->RemoveOutputDevice(LogDevice);
 				LogDevice->Flush();
 				LogDevice->TearDown();
 				if (LastFlushProcessedEverything)
 				{
-					UE_LOG(LogPluginITLightning, Log, TEXT("All logs fully shipped. Removing progress marker and local logfile %s"), *LogFilePath);
+					UE_LOG(LogPluginSparkLogs, Log, TEXT("All logs fully shipped. Removing progress marker and local logfile %s"), *LogFilePath);
 					IFileManager::Get().Delete(*LogFilePath, false, false, false);
 					CloudStreamer->DeleteProgressMarker();
 				}
 			}
 			else
 			{
-				UE_LOG(LogPluginITLightning, Log, TEXT("Flush failed or timed out."));
+				UE_LOG(LogPluginSparkLogs, Log, TEXT("Flush failed or timed out."));
 				// NOTE: the progress marker would not have been updated, so we'll keep trying the next time
 				// the game engine starts right from where we left off, so we shouldn't lose anything.
 			}
@@ -1376,12 +1390,12 @@ void FitlightningModule::StopShippingEngine()
 		}
 		CloudPayloadProcessor.Reset();
 		StressGenerator.Reset();
-		UE_LOG(LogPluginITLightning, Log, TEXT("Shutdown."));
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("Shutdown."));
 		LoggingActive = false;
 	}
 }
 
-void FitlightningModule::OnPostEngineInit()
+void FsparklogsModule::OnPostEngineInit()
 {
 	if (UObjectInitialized())
 	{
@@ -1390,31 +1404,31 @@ void FitlightningModule::OnPostEngineInit()
 	}
 }
 
-void FitlightningModule::OnEngineExit()
+void FsparklogsModule::OnEngineExit()
 {
-	UE_LOG(LogPluginITLightning, Log, TEXT("OnEngineExit. Will shutdown the log shipping engine..."));
+	UE_LOG(LogPluginSparkLogs, Log, TEXT("OnEngineExit. Will shutdown the log shipping engine..."));
 	StopShippingEngine();
 }
 
-void FitlightningModule::RegisterSettings()
+void FsparklogsModule::RegisterSettings()
 {
 	if (ISettingsModule* SettingsModule = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
 	{
-		SettingsModule->RegisterSettings("Project", "Plugins", "ITLightning",
-			LOCTEXT("RuntimeSettingsName", "IT Lightning"),
-			LOCTEXT("RuntimeSettingsDescription", "Configure the IT Lightning plugin"),
-			GetMutableDefault<UITLightningRuntimeSettings>());
+		SettingsModule->RegisterSettings("Project", "Plugins", "SparkLogs",
+			LOCTEXT("RuntimeSettingsName", "SparkLogs"),
+			LOCTEXT("RuntimeSettingsDescription", "Configure the SparkLogs plugin"),
+			GetMutableDefault<USparkLogsRuntimeSettings>());
 	}
 }
 
-void FitlightningModule::UnregisterSettings()
+void FsparklogsModule::UnregisterSettings()
 {
 	if (ISettingsModule* SettingsModule = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
 	{
-		SettingsModule->UnregisterSettings("Project", "Plugins", TEXT("ITLightning"));
+		SettingsModule->UnregisterSettings("Project", "Plugins", TEXT("SparkLogs"));
 	}
 }
 
 #undef LOCTEXT_NAMESPACE
 
-IMPLEMENT_MODULE(FitlightningModule, itlightning)
+IMPLEMENT_MODULE(FsparklogsModule, sparklogs)

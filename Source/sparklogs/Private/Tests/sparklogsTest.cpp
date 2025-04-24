@@ -1,4 +1,4 @@
-﻿// Copyright (C) 2024 IT Lightning, LLC. All rights reserved.
+﻿// Copyright (C) 2024-2025 IT Lightning, LLC. All rights reserved.
 // Licensed software - see LICENSE
 
 #include "Misc/AutomationTest.h"
@@ -8,7 +8,7 @@
 #include "Templates/UniquePtr.h"
 #include "Templates/SharedPointer.h"
 #include "Algo/Compare.h"
-#include "itlightning.h"
+#include "sparklogs.h"
 
 class FTempDirectory
 {
@@ -53,25 +53,25 @@ static void ITLWriteStringToFile(TSharedRef<IFileHandle> FileHandle, const TCHAR
 }
 
 /** A payload processor that keeps the payload in memory. */
-class FitlightningStoreInMemPayloadProcessor : public IitlightningPayloadProcessor
+class FsparklogsStoreInMemPayloadProcessor : public IsparklogsPayloadProcessor
 {
 public:
     bool FailProcessing;
     TArray<FString> Payloads;
     int LastOriginalPayloadLen;
-    FitlightningStoreInMemPayloadProcessor() : FailProcessing(false) { }
-    virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FitlightningReadAndStreamToCloud* Streamer) override
+    FsparklogsStoreInMemPayloadProcessor() : FailProcessing(false) { }
+    virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FsparklogsReadAndStreamToCloud* Streamer) override
     {
         LastOriginalPayloadLen = OriginalPayloadLen;
         if (FailProcessing)
         {
-            ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("TEST: forcefully failing processing of payload of length %d"), PayloadLen);
+            ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("TEST: forcefully failing processing of payload of length %d"), PayloadLen);
             return false;
         }
         TArray<uint8> DecompressedData;
         if (!ITLDecompressData(CompressionMode, JSONPayloadInUTF8.GetData(), PayloadLen, OriginalPayloadLen, DecompressedData))
         {
-            UE_LOG(LogPluginITLightning, Warning, TEXT("TEST: failed to decompress data in payload: mode=%d, len=%d, original_len=%d"), (int)CompressionMode, PayloadLen, OriginalPayloadLen);
+            UE_LOG(LogPluginSparkLogs, Warning, TEXT("TEST: failed to decompress data in payload: mode=%d, len=%d, original_len=%d"), (int)CompressionMode, PayloadLen, OriginalPayloadLen);
             return false;
         }
         Payloads.Add(ITLConvertUTF8(DecompressedData.GetData(), DecompressedData.Num()));
@@ -106,15 +106,15 @@ static void SetupCompressionModes(TArray<FString>& OutBeautifiedNames, TArray <F
     OutTestCommands.Add(FString::FromInt((int)ITLCompressionMode::LZ4));
 }
 
-IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestSkipByteMarker, "itlightning.UnitTests.SkipByteMarker", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
-void FitlightningPluginUnitTestSkipByteMarker::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestSkipByteMarker, "sparklogs.UnitTests.SkipByteMarker", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestSkipByteMarker::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
     SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
 }
-bool FitlightningPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters)
+bool FsparklogsPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
-    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
     
     TArray<FString> ExpectedPayloads;
 
@@ -124,11 +124,11 @@ bool FitlightningPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters
     ITLWriteStringToFile(LogWriter, TEXT("Hello world!!"));
     LogWriter->Flush();
 
-    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
-    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
-    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16*1024, nullptr);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16*1024, nullptr);
     bool FlushedEverything=false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[1] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
@@ -146,25 +146,25 @@ bool FitlightningPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters
     return true;
 }
 
-IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestSkipEmptyPayloads, "itlightning.UnitTests.SkipEmptyPayloads", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
-void FitlightningPluginUnitTestSkipEmptyPayloads::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestSkipEmptyPayloads, "sparklogs.UnitTests.SkipEmptyPayloads", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestSkipEmptyPayloads::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
     SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
 }
-bool FitlightningPluginUnitTestSkipEmptyPayloads::RunTest(const FString& Parameters)
+bool FsparklogsPluginUnitTestSkipEmptyPayloads::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
-    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
 
     TSharedRef<IFileHandle> LogWriter(FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*TestLogFile, true, true));
     
-    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
-    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
-    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
     // Test completely empty file
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, 10.0, FlushedEverything));
@@ -199,15 +199,15 @@ bool FitlightningPluginUnitTestSkipEmptyPayloads::RunTest(const FString& Paramet
     return true;
 }
 
-IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestMultiline, "itlightning.UnitTests.Multiline", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
-void FitlightningPluginUnitTestMultiline::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestMultiline, "sparklogs.UnitTests.Multiline", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestMultiline::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
     SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
 }
-bool FitlightningPluginUnitTestMultiline::RunTest(const FString& Parameters)
+bool FsparklogsPluginUnitTestMultiline::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
-    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
 
@@ -215,11 +215,11 @@ bool FitlightningPluginUnitTestMultiline::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nSecond line is longer\r\n3\r\n   fourth line    \t\r\n"));
     LogWriter->Flush();
 
-    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
-    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
-    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Second line is longer\"},{\"message\":\"3\"},{\"message\":\"   fourth line    \\t\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
@@ -230,15 +230,15 @@ bool FitlightningPluginUnitTestMultiline::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestNewlines, "itlightning.UnitTests.Newlines", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
-void FitlightningPluginUnitTestNewlines::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestNewlines, "sparklogs.UnitTests.Newlines", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestNewlines::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
     SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
 }
-bool FitlightningPluginUnitTestNewlines::RunTest(const FString& Parameters)
+bool FsparklogsPluginUnitTestNewlines::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
-    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
 
@@ -246,11 +246,11 @@ bool FitlightningPluginUnitTestNewlines::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("\t\n\n\r\n\nlinux\nskip\rslash\rR\n \r\n \n"));
     LogWriter->Flush();
 
-    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
-    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
-    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"\\t\"},{\"message\":\"linux\"},{\"message\":\"skip\\rslash\\rR\"},{\"message\":\" \"},{\"message\":\" \"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
@@ -261,15 +261,15 @@ bool FitlightningPluginUnitTestNewlines::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestControlChars, "itlightning.UnitTests.ControlChars", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
-void FitlightningPluginUnitTestControlChars::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestControlChars, "sparklogs.UnitTests.ControlChars", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestControlChars::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
     SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
 }
-bool FitlightningPluginUnitTestControlChars::RunTest(const FString& Parameters)
+bool FsparklogsPluginUnitTestControlChars::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
-    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
 
@@ -277,11 +277,11 @@ bool FitlightningPluginUnitTestControlChars::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("line 1\t\b\f\r\nline 2 \"hello\"\r\nline 3 \\world\\\r\n"));
     LogWriter->Flush();
 
-    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
-    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
-    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"line 1\\t\\b\\f\"},{\"message\":\"line 2 \\\"hello\\\"\"},{\"message\":\"line 3 \\\\world\\\\\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
@@ -292,15 +292,15 @@ bool FitlightningPluginUnitTestControlChars::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestUnicode, "itlightning.UnitTests.Unicode", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
-void FitlightningPluginUnitTestUnicode::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestUnicode, "sparklogs.UnitTests.Unicode", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestUnicode::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
     SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
 }
-bool FitlightningPluginUnitTestUnicode::RunTest(const FString& Parameters)
+bool FsparklogsPluginUnitTestUnicode::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
-    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
 
@@ -309,11 +309,11 @@ bool FitlightningPluginUnitTestUnicode::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, *FString::Format(TEXT("{0}\r\n"), { TestPayload1 }));
     LogWriter->Flush();
 
-    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
-    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
-    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
     ExpectedPayloads.Add(FString::Format(TEXT("[{\"message\":\"{0}\"}]"), { TestPayload1 }));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
@@ -324,15 +324,15 @@ bool FitlightningPluginUnitTestUnicode::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestMaxLineSize, "itlightning.UnitTests.MaxLineSize", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
-void FitlightningPluginUnitTestMaxLineSize::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestMaxLineSize, "sparklogs.UnitTests.MaxLineSize", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestMaxLineSize::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
     SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
 }
-bool FitlightningPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
+bool FsparklogsPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
-    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
     constexpr int MaxLineSize = 8;
@@ -342,11 +342,11 @@ bool FitlightningPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("1234567812345678\r\n1234"));
     LogWriter->Flush();
 
-    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
-    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
-    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, MaxLineSize, nullptr);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, MaxLineSize, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"12345678\"},{\"message\":\"12345678\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, 10.0, FlushedEverything));
@@ -365,15 +365,15 @@ bool FitlightningPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestMaxLineSizeUnicode, "itlightning.UnitTests.MaxLineSizeUnicode", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
-void FitlightningPluginUnitTestMaxLineSizeUnicode::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestMaxLineSizeUnicode, "sparklogs.UnitTests.MaxLineSizeUnicode", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestMaxLineSizeUnicode::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
     SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
 }
-bool FitlightningPluginUnitTestMaxLineSizeUnicode::RunTest(const FString& Parameters)
+bool FsparklogsPluginUnitTestMaxLineSizeUnicode::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
-    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
     // IMPORTANT: this is in *bytes* and we do not split a line in the middle of a Unicode character
@@ -385,11 +385,11 @@ bool FitlightningPluginUnitTestMaxLineSizeUnicode::RunTest(const FString& Parame
     ITLWriteStringToFile(LogWriter, TEXT("1234ππ5678π34\r\n1π4"));
     LogWriter->Flush();
 
-    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
-    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
-    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, MaxLineSize, nullptr);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, MaxLineSize, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"1234\"},{\"message\":\"ππ5678\"},{\"message\":\"π34\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, 10.0, FlushedEverything));
@@ -409,15 +409,15 @@ bool FitlightningPluginUnitTestMaxLineSizeUnicode::RunTest(const FString& Parame
     return true;
 }
 
-IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestStopAndResume, "itlightning.UnitTests.StopAndResume", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
-void FitlightningPluginUnitTestStopAndResume::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestStopAndResume, "sparklogs.UnitTests.StopAndResume", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestStopAndResume::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
     SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
 }
-bool FitlightningPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
+bool FsparklogsPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
-    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
 
@@ -425,11 +425,11 @@ bool FitlightningPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nLine 2\r\n1234"));
     LogWriter->Flush();
 
-    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
-    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
-    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[1-FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
@@ -442,8 +442,8 @@ bool FitlightningPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
     Streamer.Reset();
     
     // When we resume, it should remember that we already processed the first two lines and not generate a new payload
-    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor2(new FitlightningStoreInMemPayloadProcessor());
-    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer2 = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor2, 16 * 1024, nullptr);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor2(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer2 = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor2, 16 * 1024, nullptr);
     TArray<FString> ExpectedPayloads2;
     TestTrue(TEXT("FlushAndWait[2-1] should succeed"), Streamer2->FlushAndWait(2, false, false, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[2-1] payloads should match"), ITLComparePayloads(this, PayloadProcessor2->Payloads, ExpectedPayloads2));
@@ -461,15 +461,15 @@ bool FitlightningPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestHandleLogRotation, "itlightning.UnitTests.HandleLogRotation", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
-void FitlightningPluginUnitTestHandleLogRotation::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestHandleLogRotation, "sparklogs.UnitTests.HandleLogRotation", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestHandleLogRotation::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
     SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
 }
-bool FitlightningPluginUnitTestHandleLogRotation::RunTest(const FString& Parameters)
+bool FsparklogsPluginUnitTestHandleLogRotation::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
-    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
 
@@ -477,11 +477,11 @@ bool FitlightningPluginUnitTestHandleLogRotation::RunTest(const FString& Paramet
     ITLWriteStringToFile(LogWriter, TEXT("123456789012345678901234567890\r\n"));
     LogWriter->Flush();
 
-    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
-    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
-    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"123456789012345678901234567890\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(2, false, false, false, 10.0, FlushedEverything));
@@ -495,7 +495,7 @@ bool FitlightningPluginUnitTestHandleLogRotation::RunTest(const FString& Paramet
     LogWriter->Seek(0);
     LogWriter->Truncate(0);
     LogWriter->Flush();
-    ITL_DBG_UE_LOG(LogPluginITLightning, Display, TEXT("Truncated logfile size to %ld. logfile='%s'"), IFileManager::Get().FileSize(*TestLogFile), *TestLogFile);
+    ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("Truncated logfile size to %ld. logfile='%s'"), IFileManager::Get().FileSize(*TestLogFile), *TestLogFile);
     TestEqual(TEXT("Logfile should now have 0 size"), IFileManager::Get().FileSize(*TestLogFile), (int64)0);
     ITLWriteStringToFile(LogWriter, TEXT("Line 2\r\n"));
     LogWriter->Flush();
@@ -511,15 +511,15 @@ bool FitlightningPluginUnitTestHandleLogRotation::RunTest(const FString& Paramet
     return true;
 }
 
-IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestRetryDelay, "itlightning.UnitTests.RetryDelay", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
-void FitlightningPluginUnitTestRetryDelay::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestRetryDelay, "sparklogs.UnitTests.RetryDelay", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestRetryDelay::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
     SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
 }
-bool FitlightningPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
+bool FsparklogsPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
-    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
 
@@ -527,7 +527,7 @@ bool FitlightningPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nLine 2\r\n1234"));
     LogWriter->Flush();
 
-    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     // Setup so that we process success requests very quickly, but delay a long time after a failure
@@ -535,8 +535,8 @@ bool FitlightningPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
     constexpr double TestRetryIntervalSecs = 3.0;
     Settings->ProcessingIntervalSecs = TestProcessingIntervalSecs;
     Settings->RetryIntervalSecs = TestRetryIntervalSecs;
-    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
-    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, TestProcessingIntervalSecs * 5, FlushedEverything));
@@ -571,15 +571,15 @@ bool FitlightningPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestRetrySamePayloadSize, "itlightning.UnitTests.RetrySamePayloadSize", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
-void FitlightningPluginUnitTestRetrySamePayloadSize::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestRetrySamePayloadSize, "sparklogs.UnitTests.RetrySamePayloadSize", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestRetrySamePayloadSize::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
     SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
 }
-bool FitlightningPluginUnitTestRetrySamePayloadSize::RunTest(const FString& Parameters)
+bool FsparklogsPluginUnitTestRetrySamePayloadSize::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
-    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
 
@@ -587,7 +587,7 @@ bool FitlightningPluginUnitTestRetrySamePayloadSize::RunTest(const FString& Para
     ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nLine 2\r\n1234"));
     LogWriter->Flush();
 
-    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     // Setup so that we process success requests and retry requests very quickly.
@@ -595,8 +595,8 @@ bool FitlightningPluginUnitTestRetrySamePayloadSize::RunTest(const FString& Para
     constexpr double TestRetryIntervalSecs = 0.1;
     Settings->ProcessingIntervalSecs = TestProcessingIntervalSecs;
     Settings->RetryIntervalSecs = TestRetryIntervalSecs;
-    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
-    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, TestProcessingIntervalSecs * 5, FlushedEverything));
@@ -647,15 +647,15 @@ bool FitlightningPluginUnitTestRetrySamePayloadSize::RunTest(const FString& Para
     return true;
 }
 
-IMPLEMENT_COMPLEX_AUTOMATION_TEST(FitlightningPluginUnitTestClearRetryTimer, "itlightning.UnitTests.ClearRetryTimer", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
-void FitlightningPluginUnitTestClearRetryTimer::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestClearRetryTimer, "sparklogs.UnitTests.ClearRetryTimer", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestClearRetryTimer::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
     SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
 }
-bool FitlightningPluginUnitTestClearRetryTimer::RunTest(const FString& Parameters)
+bool FsparklogsPluginUnitTestClearRetryTimer::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
-    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-itlightning.log"));
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
 
@@ -663,7 +663,7 @@ bool FitlightningPluginUnitTestClearRetryTimer::RunTest(const FString& Parameter
     ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nLine 2\r\n1234"));
     LogWriter->Flush();
 
-    TSharedRef<FitlightningSettings> Settings(new FitlightningSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     // Setup so that we process success requests very quickly, but delay a long time after a failure
@@ -671,8 +671,8 @@ bool FitlightningPluginUnitTestClearRetryTimer::RunTest(const FString& Parameter
     constexpr double TestRetryIntervalSecs = 3.0;
     Settings->ProcessingIntervalSecs = TestProcessingIntervalSecs;
     Settings->RetryIntervalSecs = TestRetryIntervalSecs;
-    TSharedRef<FitlightningStoreInMemPayloadProcessor> PayloadProcessor(new FitlightningStoreInMemPayloadProcessor());
-    TUniquePtr<FitlightningReadAndStreamToCloud> Streamer = MakeUnique<FitlightningReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, TestProcessingIntervalSecs * 5, FlushedEverything));
