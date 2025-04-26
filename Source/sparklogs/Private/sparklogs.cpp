@@ -186,6 +186,18 @@ bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InData, int InDataL
 	}
 }
 
+SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length)
+{
+	const FString Charset = TEXT("abcdefghijklmnopqrstuvwxyz0123456789");
+	FString Result;
+	Result.Reserve(Length);
+	for (int i = 0; i < Length; ++i)
+	{
+		Result.AppendChar(Charset[FMath::RandRange(0, Charset.Len() - 1)]);
+	}
+	return Result;
+}
+
 // =============== FsparklogsSettings ===============================================================================
 
 const TCHAR* FsparklogsSettings::PluginStateSection = TEXT("PluginState");
@@ -200,16 +212,20 @@ FsparklogsSettings::FsparklogsSettings()
 	, DebugLogRequests(DefaultDebugLogRequests)
 	, AutoStart(DefaultAutoStart)
 	, CompressionMode(ITLCompressionMode::Default)
+	, AddRandomGameInstanceID(DefaultAddRandomGameInstanceID)
 	, StressTestGenerateIntervalSecs(0.0)
 	, StressTestNumEntriesPerTick(0)
 {
 }
 
-/** Gets the effective HTTP endpoint URI (either using the HttpEndpointURI if configured, or the CloudRegion). Returns empty if not configured. */
-FString FsparklogsSettings::GetEffectiveHttpEndpointURI()
+FString FsparklogsSettings::GetEffectiveHttpEndpointURI(const TCHAR* OverrideHTTPEndpointURI)
 {
 	CloudRegion.TrimStartAndEndInline();
 	HttpEndpointURI.TrimStartAndEndInline();
+	if (OverrideHTTPEndpointURI != NULL && FPlatformString::Strlen(OverrideHTTPEndpointURI) > 0)
+	{
+		return FString(OverrideHTTPEndpointURI);
+	}
 	if (HttpEndpointURI.Len() > 0)
 	{
 		return HttpEndpointURI;
@@ -220,9 +236,13 @@ FString FsparklogsSettings::GetEffectiveHttpEndpointURI()
 		// Send to the local DEBUG container
 		return TEXT("http://localhost:8082/ingest/v1");
 	}
-	else
+	else if (!CloudRegionLower.IsEmpty())
 	{
 		return FString::Format(TEXT("https://ingest-{0}.engine.sparklogs.app/ingest/v1"), { CloudRegionLower });
+	}
+	else
+	{
+		return FString();
 	}
 }
 
@@ -282,6 +302,10 @@ void FsparklogsSettings::LoadSettings()
 	if (!GConfig->GetBool(*Section, *(SettingPrefix + TEXT("AutoStart")), AutoStart, GEngineIni))
 	{
 		AutoStart = DefaultAutoStart;
+	}
+	if (!GConfig->GetBool(*Section, *(SettingPrefix + TEXT("AddRandomGameInstanceID")), AddRandomGameInstanceID, GEngineIni))
+	{
+		AddRandomGameInstanceID = DefaultAddRandomGameInstanceID;
 	}
 
 	FString CompressionModeStr = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("CompressionMode")), GEngineIni).ToLower();
@@ -455,19 +479,19 @@ bool FsparklogsWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayl
 				}
 				else if (EHttpResponseCodes::TooManyRequests == ResponseCode || ResponseCode >= EHttpResponseCodes::ServerError)
 				{
-					UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Retryable HTTP response: status=%d, msg=%s"), (int)ResponseCode, *ResponseBody);
+					UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Retryable HTTP response: status=%d, msg=%s"), (int)ResponseCode, *ResponseBody.TrimStartAndEnd());
 					RequestSucceeded.AtomicSet(false);
 					RetryableFailure.AtomicSet(true);
 				}
 				else if (EHttpResponseCodes::BadRequest == ResponseCode)
 				{
 					// Something about this input was unable to be processed -- drop this input and pretend success so we can continue, but warn about it
-					UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: HTTP response indicates input cannot be processed. Will skip this payload! status=%d, msg=%s"), (int)ResponseCode, *ResponseBody);
+					UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: HTTP response indicates input cannot be processed. Will skip this payload! status=%d, msg=%s"), (int)ResponseCode, *ResponseBody.TrimStartAndEnd());
 					RequestSucceeded.AtomicSet(true);
 				}
 				else
 				{
-					UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Non-Retryable HTTP response: status=%d, msg=%s"), (int)ResponseCode, *ResponseBody);
+					UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Non-Retryable HTTP response: status=%d, msg=%s"), (int)ResponseCode, *ResponseBody.TrimStartAndEnd());
 					RequestSucceeded.AtomicSet(false);
 					RetryableFailure.AtomicSet(false);
 				}
@@ -616,33 +640,59 @@ void FsparklogsStressGenerator::Stop()
 
 const TCHAR* FsparklogsReadAndStreamToCloud::ProgressMarkerValue = TEXT("ShippedLogOffset");
 
-void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON()
+void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMetadata, TMap<FString, FString>* AdditionalAttributes)
 {
-	FString EffectiveComputerName;
-	if (OverrideComputerName.IsEmpty())
+	FString CommonEventJSON;
+
+	if (IncludeCommonMetadata)
 	{
-		EffectiveComputerName = FPlatformProcess::ComputerName();
-	}
-	else
-	{
-		EffectiveComputerName = OverrideComputerName;
+		FString EffectiveComputerName;
+		if (OverrideComputerName.IsEmpty())
+		{
+			EffectiveComputerName = FPlatformProcess::ComputerName();
+		}
+		else
+		{
+			EffectiveComputerName = OverrideComputerName;
+		}
+
+		CommonEventJSON.Appendf(TEXT("\"hostname\": %s, \"pid\": %d"), *EscapeJsonString(EffectiveComputerName), FPlatformProcess::GetCurrentProcessId());
+		FString ProjectName = FApp::GetProjectName();
+		if (ProjectName.Len() > 0 && ProjectName != "None")
+		{
+			CommonEventJSON.Appendf(TEXT(", \"app\": %s"), *EscapeJsonString(ProjectName));
+		}
+
+		if (Settings->AddRandomGameInstanceID)
+		{
+			FString GameInstanceID = ITLGenerateRandomAlphaNumID(16);
+			CommonEventJSON.Appendf(TEXT(", \"game_instance_id\": %s"), *EscapeJsonString(GameInstanceID));
+		}
 	}
 
-	FString CommonEventJSON;
-	CommonEventJSON.Appendf(TEXT("\"hostname\": %s, \"pid\": %d"), *EscapeJsonString(EffectiveComputerName), FPlatformProcess::GetCurrentProcessId());
-	FString ProjectName = FApp::GetProjectName();
-	if (ProjectName.Len() > 0 && ProjectName != "None")
+	if (nullptr != AdditionalAttributes)
 	{
-		CommonEventJSON.Appendf(TEXT(", \"app\": %s"), *EscapeJsonString(FApp::GetProjectName()));
+		for (const TPair<FString, FString>& Pair : *AdditionalAttributes)
+		{
+			if (!CommonEventJSON.IsEmpty())
+			{
+				CommonEventJSON.Append(TEXT(","));
+			}
+			CommonEventJSON.Appendf(TEXT("%s:%s"), *EscapeJsonString(Pair.Key), *EscapeJsonString(Pair.Value));
+		}
 	}
-	UE_LOG(LogPluginSparkLogs, Log, TEXT("Common event JSON computed. unreal_engine_common_event_data={%s}"), *CommonEventJSON)
-	int64 CommonEventJSONLen = FTCHARToUTF8_Convert::ConvertedLength(*CommonEventJSON, CommonEventJSON.Len());
-	CommonEventJSONData.SetNum(0, false);
-	CommonEventJSONData.AddUninitialized(CommonEventJSONLen);
-	FTCHARToUTF8_Convert::Convert(CommonEventJSONData.GetData(), CommonEventJSONLen, *CommonEventJSON, CommonEventJSON.Len());
+
+	if (!CommonEventJSON.IsEmpty())
+	{
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("Common event JSON computed. unreal_engine_common_event_data={%s}"), *CommonEventJSON);
+		int64 CommonEventJSONLen = FTCHARToUTF8_Convert::ConvertedLength(*CommonEventJSON, CommonEventJSON.Len());
+		CommonEventJSONData.SetNum(0, false);
+		CommonEventJSONData.AddUninitialized(CommonEventJSONLen);
+		FTCHARToUTF8_Convert::Convert(CommonEventJSONData.GetData(), CommonEventJSONLen, *CommonEventJSON, CommonEventJSON.Len());
+	}
 }
 
-FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const TCHAR* InSourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName)
+FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const TCHAR* InSourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName, TMap<FString, FString>* AdditionalAttributes)
 	: Settings(InSettings)
 	, PayloadProcessor(InPayloadProcessor)
 	, SourceLogFile(InSourceLogFile)
@@ -655,10 +705,7 @@ FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const TCHAR* InSo
 	, WorkerLastFailedFlushPayloadSize(0)
 {
 	ProgressMarkerPath = FPaths::Combine(FPaths::GetPath(InSourceLogFile), GetITLPluginStateFilename());
-	if (Settings->IncludeCommonMetadata)
-	{
-		ComputeCommonEventJSON();
-	}
+	ComputeCommonEventJSON(Settings->IncludeCommonMetadata, AdditionalAttributes);
 
 	WorkerBuffer.AddUninitialized(Settings->BytesPerRequest);
 	int BufferSize = Settings->BytesPerRequest + 4096 + (Settings->BytesPerRequest / 10);
@@ -1247,7 +1294,7 @@ void FsparklogsModule::StartupModule()
 	Settings->LoadSettings();
 	if (Settings->AutoStart)
 	{
-		StartShippingEngine(NULL, NULL, NULL, NULL, false);
+		StartShippingEngine(NULL, NULL, NULL, NULL, NULL, NULL, false);
 	}
 	else
 	{
@@ -1267,7 +1314,7 @@ void FsparklogsModule::ShutdownModule()
 	StopShippingEngine();
 }
 
-bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, bool AlwaysStart)
+bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHTTPEndpointURI, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, TMap<FString, FString>* AdditionalAttributes, bool AlwaysStart)
 {
 	if (LoggingActive)
 	{
@@ -1291,16 +1338,32 @@ bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAgentID, const T
 		EffectiveHttpAuthorizationHeaderValue = OverrideHttpAuthorizationHeaderValue;
 	}
 
-	FString EffectiveHttpEndpointURI = Settings->GetEffectiveHttpEndpointURI();
+	bool UsingSparkLogsCloud = !Settings->CloudRegion.IsEmpty();
+	FString EffectiveHttpEndpointURI = Settings->GetEffectiveHttpEndpointURI(OverrideHTTPEndpointURI);
 	if (EffectiveHttpEndpointURI.IsEmpty())
 	{
-		UE_LOG(LogPluginSparkLogs, Log, TEXT("Not yet configured for this launch configuration. In plugin settings for %s launch configuration, configure CloudRegion to 'us' or 'eu' for your SparkLogs cloud region (or if you are sending data to your own HTTP service, configure HttpEndpointURI to the appropriate endpoint, such as https://ingestlogs.myservice.com/ingest/v1)"), *GetITLINISettingPrefix());
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("Not yet configured for this launch configuration. In plugin settings for %s launch configuration, configure CloudRegion to 'us' or 'eu' for your SparkLogs cloud region (or if you are sending data to your own HTTP service, configure HttpEndpointURI to the appropriate endpoint, such as http://localhost:9880/ or https://ingestlogs.myservice.com/ingest/v1)"), *GetITLINISettingPrefix());
 		return false;
 	}
-	if ((EffectiveAgentID.IsEmpty() || EffectiveAgentAuthToken.IsEmpty()) && EffectiveHttpAuthorizationHeaderValue.IsEmpty())
+	if (UsingSparkLogsCloud && (EffectiveAgentID.IsEmpty() || EffectiveAgentAuthToken.IsEmpty()))
 	{
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Not yet configured for this launch configuration. In plugin settings for %s launch configuration, configure authentication credentials to enable. Consider using credentials for Editor vs Client vs Server."), *GetITLINISettingPrefix());
 		return false;
+	}
+
+	// If we're sending data to the SparkLogs cloud then use lz4 compression by default, otherwise use none as lz4 support is nonstandard.
+	if (Settings->CompressionMode == ITLCompressionMode::Default)
+	{
+		if (UsingSparkLogsCloud || (!EffectiveAgentID.IsEmpty() && !EffectiveAgentAuthToken.IsEmpty()))
+		{
+			UE_LOG(LogPluginSparkLogs, Log, TEXT("Sending data to SparkLogs cloud, so using lz4 as default compression mode."));
+			Settings->CompressionMode = ITLCompressionMode::LZ4;
+		}
+		else
+		{
+			UE_LOG(LogPluginSparkLogs, Log, TEXT("Sending data to custom HTTP destination, so using none as default compression mode."));
+			Settings->CompressionMode = ITLCompressionMode::None;
+		}
 	}
 
 	if (!FPlatformProcess::SupportsMultithreading())
@@ -1333,7 +1396,7 @@ bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAgentID, const T
 			AuthorizationHeader = EffectiveHttpAuthorizationHeaderValue;
 		}
 		CloudPayloadProcessor = TSharedPtr<FsparklogsWriteHTTPPayloadProcessor>(new FsparklogsWriteHTTPPayloadProcessor(*EffectiveHttpEndpointURI, *AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests));
-		CloudStreamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, OverrideComputerName);
+		CloudStreamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, OverrideComputerName, AdditionalAttributes);
 		FCoreDelegates::OnExit.AddRaw(this, &FsparklogsModule::OnEngineExit);
 
 		if (Settings->StressTestGenerateIntervalSecs > 0)

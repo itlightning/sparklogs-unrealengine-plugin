@@ -41,6 +41,7 @@ enum class SPARKLOGS_API ITLCompressionMode
 
 SPARKLOGS_API bool ITLCompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, TArray<uint8>& OutData);
 SPARKLOGS_API bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, int InOriginalDataLen, TArray<uint8>& OutData);
+SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length);
 
 /**
  * Manages plugin settings.
@@ -67,6 +68,7 @@ public:
 	static constexpr bool DefaultIncludeCommonMetadata = true;
 	static constexpr bool DefaultDebugLogRequests = false;
 	static constexpr bool DefaultAutoStart = true;
+	static constexpr bool DefaultAddRandomGameInstanceID = true;
 
 	/** The cloud region we want to send logs to, such as 'us' or 'eu' */
 	FString CloudRegion;
@@ -96,6 +98,8 @@ public:
 	bool AutoStart;
 	/** The type of data compression to use on the log payload. */
 	ITLCompressionMode CompressionMode;
+	/** Whether or not to automatically add a game_instance_id field with a random ID (set once at engine startup) */
+	bool AddRandomGameInstanceID;
 
 	/** If non-zero, then will generate fake logs periodically */
 	double StressTestGenerateIntervalSecs;
@@ -107,8 +111,8 @@ public:
 	/** Loads the settings from the game engine INI section appropriate for this launch configuration (editor, client, server, etc). */
 	void LoadSettings();
 
-	/** Gets the effective HTTP endpoint URI (either using the HttpEndpointURI if configured, or the CloudRegion). Returns empty if not configured. */
-	FString GetEffectiveHttpEndpointURI();
+	/** Gets the effective HTTP endpoint URI (either using the overridden HTTP endpoint URI if non-empty, or using the HttpEndpointURI if configured, or the CloudRegion). Returns empty if not configured. */
+	FString GetEffectiveHttpEndpointURI(const TCHAR* OverrideHTTPEndpointURI);
 
 protected:
 	/** Enforces constraints upon any loaded setting values. */
@@ -127,16 +131,24 @@ public:
 	// ------------------------------------------ SERVER LAUNCH CONFIGURATION SETTINGS
 	
 	// Set to 'us' or 'eu' based on what your SparkLogs workspace is provisioned to use.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Cloud Region")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "SparkLogs Cloud Region")
 	FString ServerCloudRegion;
 
 	// For authentication: ID of the cloud agent that will receive the ingested log data.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Agent ID")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "SparkLogs Agent ID")
 	FString ServerAgentID;
 
 	// For authentication: Auth token associated with the cloud agent receiving the log data.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Agent Auth Token")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "SparkLogs Agent Auth Token")
 	FString ServerAgentAuthToken;
+
+	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., http://localhost:9880/ or https://ingestlogs.myservice.com/ingest/v1
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Custom HTTP Endpoint URI")
+	FString ServerHTTPEndpointURI;
+
+	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue */
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Custom HTTP Authorization Header Value")
+	FString ServerHTTPAuthorizationHeaderValue;
 
 	// Whether or not to automatically start the log shipping engine. If disabled, you must manually start the engine by calling FsparklogsModule::GetModule().StartShippingEngine(...);
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Auto Start")
@@ -150,19 +162,30 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Request Timeout in Seconds")
 	float ServerRequestTimeoutSecs = FsparklogsSettings::DefaultRequestTimeoutSecs;
 
+	// Whether or not to automatically add a random game_instance_id field (ID randomly chosen at engine startup).
+	bool ServerAddRandomGameInstanceID = FsparklogsSettings::DefaultAddRandomGameInstanceID;
+
 	// ------------------------------------------ EDITOR LAUNCH CONFIGURATION SETTINGS
 
 	// Set to 'us' or 'eu' based on what your SparkLogs workspace is provisioned to use. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Cloud Region")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "SparkLogs Cloud Region")
 	FString EditorCloudRegion;
 
 	// For authentication: ID of the cloud agent that will receive the ingested log data. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName="Agent ID")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName="SparkLogs Agent ID")
 	FString EditorAgentID;
 
 	// For authentication: Auth token associated with the cloud agent receiving the log data. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName="Agent Auth Token")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName="SparkLogs Agent Auth Token")
 	FString EditorAgentAuthToken;
+
+	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., http://localhost:9880/ or https://ingestlogs.myservice.com/ingest/v1 [EDITOR RESTART REQUIRED]
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Custom HTTP Endpoint URI")
+	FString EditorHTTPEndpointURI;
+
+	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue [EDITOR RESTART REQUIRED] */
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", DisplayName = "Custom HTTP Authorization Header Value")
+	FString EditorHTTPAuthorizationHeaderValue;
 
 	// Whether or not to automatically start the log shipping engine. If disabled, you must manually start the engine by calling FsparklogsModule::GetModule().StartShippingEngine(...); [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Auto Start")
@@ -176,19 +199,30 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Request Timeout in Seconds")
 	float EditorRequestTimeoutSecs = FsparklogsSettings::DefaultRequestTimeoutSecs;
 
+	// Whether or not to automatically add a random game_instance_id field (ID randomly chosen at engine startup). [EDITOR RESTART REQUIRED]
+	bool EditorAddRandomGameInstanceID = FsparklogsSettings::DefaultAddRandomGameInstanceID;
+
 	// ------------------------------------------ CLIENT LAUNCH CONFIGURATION SETTINGS
 
 	// Set to 'us' or 'eu' based on what your SparkLogs workspace is provisioned to use.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Cloud Region")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "SparkLogs Cloud Region")
 	FString ClientCloudRegion;
 
 	// For authentication: ID of the cloud agent that will receive the ingested log data.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Agent ID")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "SparkLogs Agent ID")
 	FString ClientAgentID;
 
 	// For authentication: Auth token associated with the cloud agent receiving the log data.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Agent Auth Token")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "SparkLogs Agent Auth Token")
 	FString ClientAgentAuthToken;
+
+	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., http://localhost:9880/ or https://ingestlogs.myservice.com/ingest/v1
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Custom HTTP Endpoint URI")
+	FString ClientHTTPEndpointURI;
+
+	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue */
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Custom HTTP Authorization Header Value")
+	FString ClientHTTPAuthorizationHeaderValue;
 
 	// Whether or not to automatically start the log shipping engine. If disabled, you must manually start the engine by calling FsparklogsModule::GetModule().StartShippingEngine(...);
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Auto Start")
@@ -201,6 +235,9 @@ public:
 	// HTTP request timeout in seconds.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Request Timeout in Seconds")
 	float ClientRequestTimeoutSecs = FsparklogsSettings::DefaultRequestTimeoutSecs;
+
+	// Whether or not to automatically add a random game_instance_id field (ID randomly chosen at engine startup). [EDITOR RESTART REQUIRED]
+	bool ClientAddRandomGameInstanceID = FsparklogsSettings::DefaultAddRandomGameInstanceID;
 
 	// ------------------------------------------ SERVER LAUNCH CONFIGURATION ADVANCED SETTINGS
 
@@ -220,15 +257,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Include Common Metadata")
 	bool ServerIncludeCommonMetadata = FsparklogsSettings::DefaultIncludeCommonMetadata;
 
-	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., https://ingestlogs.myservice.com/ingest/v1
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Override HTTP Endpoint URI")
-	FString ServerHTTPEndpointURI;
-
-	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue */
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Override HTTP Authorization Header Value")
-	FString ServerHTTPAuthorizationHeaderValue;
-
-	// How to compress the payload. Use 'lz4' or 'none'. 'lz4' is normally more CPU efficient as it reduces the size of the TLS payload.
+	// How to compress the payload. Use 'lz4' or 'none'. Defaults to lz4. 'lz4' is normally more CPU efficient as it reduces the size of the TLS payload.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Compression Mode")
 	FString ServerCompressionMode;
 
@@ -254,15 +283,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Include Common Metadata")
 	bool EditorIncludeCommonMetadata = FsparklogsSettings::DefaultIncludeCommonMetadata;
 
-	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., https://ingestlogs.myservice.com/ingest/v1 [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Override HTTP Endpoint URI")
-	FString EditorHTTPEndpointURI;
-
-	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue [EDITOR RESTART REQUIRED] */
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", DisplayName = "Override HTTP Authorization Header Value")
-	FString EditorHTTPAuthorizationHeaderValue;
-
-	// How to compress the payload. Use 'lz4' or 'none'. 'lz4' is normally more CPU efficient as it reduces the size of the TLS payload. [EDITOR RESTART REQUIRED]
+	// How to compress the payload. Use 'lz4' or 'none'. Defaults to lz4. 'lz4' is normally more CPU efficient as it reduces the size of the TLS payload. [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Compression Mode")
 	FString EditorCompressionMode;
 
@@ -288,15 +309,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Include Common Metadata")
 	bool ClientIncludeCommonMetadata = FsparklogsSettings::DefaultIncludeCommonMetadata;
 
-	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., https://ingestlogs.myservice.com/ingest/v1
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Override HTTP Endpoint URI")
-	FString ClientHTTPEndpointURI;
-
-	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue */
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Override HTTP Authorization Header Value")
-	FString ClientHTTPAuthorizationHeaderValue;
-
-	// How to compress the payload. Use 'lz4' or 'none'. 'lz4' is normally more CPU efficient as it reduces the size of the TLS payload.
+	// How to compress the payload. Use 'lz4' or 'none'. Defaults to lz4. 'lz4' is normally more CPU efficient as it reduces the size of the TLS payload.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Compression Mode")
 	FString ClientCompressionMode;
 
@@ -421,11 +434,11 @@ protected:
 	/** Whether or not the next flush platform time is because of a failure. */
 	FThreadSafeBool WorkerLastFlushFailed;
 
-	virtual void ComputeCommonEventJSON();
+	virtual void ComputeCommonEventJSON(bool IncludeCommonMetadata, TMap<FString, FString>* AdditionalAttributes);
 
 public:
 
-	FsparklogsReadAndStreamToCloud(const TCHAR* SourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName);
+	FsparklogsReadAndStreamToCloud(const TCHAR* SourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName, TMap<FString, FString>* AdditionalAttributes);
 	~FsparklogsReadAndStreamToCloud();
 
 	//~ Begin FRunnable Interface
@@ -490,19 +503,26 @@ public:
 	//~ End IModuleInterface Interface
 
 	/**
-	 * Starts the log shipping engine if it has not yet started. You can override the agent ID and/or agent auth token
-	 * by specifying non-empty values. (Alternatively you can override the authentication header value directly, which
-	 * can be useful if you're using the plugin with your own HTTP endpoint.)
+	 * Starts the log shipping engine if it has not yet started.
+	 * 
+	 * You can override the agent ID and/or agent auth token by specifying non-empty values.
+	 *
+	 * If you are sending data to your own HTTP endpoint URI instead of the SparkLogs cloud,
+	 * then you can choose to override the destination HTTP endpoint and/or override the
+	 * authentication header value directly.
+	 * 
 	 * You can also optionally override the compute name that will be used in the metadata
 	 * sent with all log agents -- the default is to use FPlatformProcess::ComputerName().
 	 * (If NULL or empty values are passed for override strings, then the default values will be used, etc.)
+	 * 
+	 * You can optionally pass additional custom attributes that will be added to all shipped events.
 	 * 
 	 * This will still only activate if a random roll of the dice passed the "ActivationPercentage" check, or pass
 	 * AlwaysStart as true to force the engine to start regardless of this setting.
 	 *
 	 * Returns true if the shipping engine was activated (may be false if diceroll + ActivationPercentage caused it to not start).
 	 */
-	bool StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, bool AlwaysStart);
+	bool StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHTTPEndpointURI, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, TMap<FString, FString>* AdditionalAttributes, bool AlwaysStart);
 
 	/** Stops the log shipping engine. It will not start again unless StartShippingEngine is manually called. */
 	void StopShippingEngine();
