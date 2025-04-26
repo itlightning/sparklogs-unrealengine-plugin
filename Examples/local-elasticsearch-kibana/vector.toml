@@ -1,0 +1,11 @@
+# vector.toml
+
+[sources.http_logs]
+type = "http_server"
+address = "0.0.0.0:9880"
+decoding.codec = "json"
+
+[sinks.elasticsearch]
+type = "elasticsearch"
+inputs = ["http_logs"]
+endpoints = ["http://elasticsearch:9200"]

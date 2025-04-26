@@ -1,0 +1,130 @@
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.8.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false # disable HTTPS (local dev machine)
+      - ES_JAVA_OPTS=-Xmx512m -Xms512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data:rw
+    networks:
+      - elk
+    mem_limit: 1g
+    cpus: 3
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+  
+  elasticsearch-init:
+    image: curlimages/curl:7.85.0
+    container_name: elasticsearch-init
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - elk
+    entrypoint: |
+      sh -c '
+        echo "Creating elasticsearch vector index template";
+        curl -s -X PUT http://elasticsearch:9200/_index_template/vector_template \
+          -H "Content-Type: application/json" \
+          -d "{
+              \"index_patterns\": [\"vector-*\"],
+              \"priority\": 50,
+              \"template\": {
+                \"settings\": {
+                  \"index\": {
+                    \"codec\": \"best_compression\"
+                  }
+                },
+                \"mappings\": {
+                  \"dynamic\": true,
+                  \"properties\": {
+                    \"timestamp\": { \"type\": \"date\" },
+                    \"message\": { \"type\": \"text\" },
+                    \"hostname\": { \"type\": \"keyword\" },
+                    \"app\": { \"type\": \"keyword\" },
+                    \"game_instance_id\": { \"type\": \"keyword\" }
+                  },
+                  \"dynamic_templates\": [
+                    {
+                      \"strings_as_keywords\": {
+                        \"match_mapping_type\": \"string\",
+                        \"mapping\": { \"type\": \"keyword\", \"ignore_above\": 1024 }
+                      }
+                    }
+                  ]
+                }
+              }
+            }";
+        echo "Done.";
+      '
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.8.0
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - TELEMETRY_OPTIN=false
+      - TELEMETRY_ALLOWCHANGINGOPTINSTATUS=false
+      - TELEMETRY_BANNER=false
+      - SECURITY_SHOWINSECURECLUSTERWARNING=false
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch-init
+    networks:
+      - elk
+    mem_limit: 768m
+    cpus: 3
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  
+  kibana-init:
+    image: curlimages/curl:7.85.0
+    container_name: kibana-init
+    depends_on:
+      kibana:
+        condition: service_healthy
+    networks:
+      - elk
+    entrypoint: |
+      sh -c '
+        echo "Creating Kibana data view vector --> vector-*";
+        curl -s -X POST http://kibana:5601/api/saved_objects/index-pattern/vector?overwrite=true \
+          -H "kbn-xsrf: true" \
+          -H "Content-Type: application/json" \
+          -d "{\"attributes\":{\"title\":\"vector-*\",\"timeFieldName\":\"timestamp\"}}";
+        echo "Done.";
+      '
+
+  vector:
+    image: timberio/vector:latest-alpine
+    container_name: vector
+    ports:
+      - "9880:9880"
+    volumes:
+      - ./vector.toml:/etc/vector/vector.toml:ro
+    command: ["--config", "/etc/vector/vector.toml"]
+    depends_on:
+      - elasticsearch-init
+    networks:
+      - elk
+
+volumes:
+  esdata:
+    driver: local
+
+networks:
+  elk:
+    driver: bridge
