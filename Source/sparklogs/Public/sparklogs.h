@@ -10,6 +10,7 @@
 #include "HAL/Runnable.h"
 #include "Interfaces/IHttpResponse.h"
 #include "HttpModule.h"
+#include "Misc/OutputDeviceFile.h"
 #include "sparklogs.generated.h"
 
 #define ITL_CONFIG_SECTION_NAME TEXT("/Script/sparklogs.SparkLogsRuntimeSettings")
@@ -30,6 +31,12 @@ DECLARE_LOG_CATEGORY_EXTERN(LogPluginSparkLogs, Log, All);
 
 /** Convenience function to convert UTF8 data to an FString. Can incur allocations so use sparingly or only on debug paths. */
 SPARKLOGS_API FString ITLConvertUTF8(const void* Data, int Len);
+
+/** Trim all instances of given character from start and end of given string, inline. Returns true if anything was removed. */
+SPARKLOGS_API bool ITLFStringTrimCharStartEndInline(FString & s, TCHAR c);
+
+/** Returns a text encoding of the given severity that will be a severity level recognized by the SparkLogs cloud. */
+SPARKLOGS_API const TCHAR* ITLSeverityToString(ELogVerbosity::Type Verbosity);
 
 /** The type of data compression to use. */
 enum class SPARKLOGS_API ITLCompressionMode
@@ -70,6 +77,20 @@ public:
 	static constexpr bool DefaultAutoStart = true;
 	static constexpr bool DefaultAddRandomGameInstanceID = true;
 
+	static constexpr bool DefaultServerCollectAnalytics = true;
+	static constexpr bool DefaultServerCollectLogs = true;
+	static constexpr bool DefaultEditorCollectAnalytics = true;
+	static constexpr bool DefaultEditorCollectLogs = true;
+	static constexpr bool DefaultClientCollectAnalytics = true;
+	static constexpr bool DefaultClientCollectLogs = false;
+
+	/** The game ID to use for game analytics. If set, will also be added to log events. */
+	FString AnalyticsGameID;
+
+	/** Whether or not game analytic events are collected */
+	bool CollectAnalytics;
+	/** Whether or not logs are collected */
+	bool CollectLogs;
 	/** The cloud region we want to send logs to, such as 'us' or 'eu' */
 	FString CloudRegion;
 	/** Overrides the URI of the endpoint to push log payloads to */
@@ -94,7 +115,7 @@ public:
 	bool IncludeCommonMetadata;
 	/** Whether or not to log requests */
 	bool DebugLogRequests;
-	/** Whether or not to automatically start the log shipping engine. */
+	/** Whether or not to automatically start the log/event shipping engine. */
 	bool AutoStart;
 	/** The type of data compression to use on the log payload. */
 	ITLCompressionMode CompressionMode;
@@ -128,8 +149,22 @@ class SPARKLOGS_API USparkLogsRuntimeSettings : public UObject
 	GENERATED_BODY()
 
 public:
-	// ------------------------------------------ SERVER LAUNCH CONFIGURATION SETTINGS
+	// ------------------------------------------ GAME ANALYTICS
 	
+	// ID to identify this game when storing game analytics (can be any arbitrary string, e.g., "my_platformer_game"). Required for game analytics data to be sent.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Game Analytics", DisplayName = "Game ID")
+	FString AnalyticsGameID;
+
+	// ------------------------------------------ SERVER LAUNCH CONFIGURATION SETTINGS
+
+	// Whether or not to collect game analytics on server launch configurations. Defaults to true; however, on server, session and client identity are not automatic -- you must manually specify the session ID and user ID with each event you ingest.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Enable Analytics")
+	bool ServerCollectAnalytics = FsparklogsSettings::DefaultServerCollectAnalytics;
+
+	// Whether or not to collect logs on server launch configurations. Defaults to true.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Auto Start")
+	bool ServerCollectLogs = FsparklogsSettings::DefaultServerCollectLogs;
+
 	// Set to 'us' or 'eu' based on what your SparkLogs workspace is provisioned to use.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "SparkLogs Cloud Region")
 	FString ServerCloudRegion;
@@ -150,7 +185,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Custom HTTP Authorization Header Value")
 	FString ServerHTTPAuthorizationHeaderValue;
 
-	// Whether or not to automatically start the log shipping engine. If disabled, you must manually start the engine by calling FsparklogsModule::GetModule().StartShippingEngine(...);
+	// Whether or not to automatically start the log/event shipping engine. If disabled, you must manually start the engine by calling FsparklogsModule::GetModule().StartShippingEngine(...);
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Auto Start")
 	bool ServerAutoStart = FsparklogsSettings::DefaultAutoStart;
 
@@ -166,6 +201,14 @@ public:
 	bool ServerAddRandomGameInstanceID = FsparklogsSettings::DefaultAddRandomGameInstanceID;
 
 	// ------------------------------------------ EDITOR LAUNCH CONFIGURATION SETTINGS
+
+	// Whether or not to collect game analytics on editor launch configurations. Defaults to true. [EDITOR RESTART REQUIRED]
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", DisplayName = "Enable Analytics")
+	bool EditorCollectAnalytics = FsparklogsSettings::DefaultEditorCollectAnalytics;
+
+	// Whether or not to collect logs on editor launch configurations. Defaults to true. [EDITOR RESTART REQUIRED]
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", DisplayName = "Auto Start")
+	bool EditorCollectLogs = FsparklogsSettings::DefaultEditorCollectLogs;
 
 	// Set to 'us' or 'eu' based on what your SparkLogs workspace is provisioned to use. [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "SparkLogs Cloud Region")
@@ -187,7 +230,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", DisplayName = "Custom HTTP Authorization Header Value")
 	FString EditorHTTPAuthorizationHeaderValue;
 
-	// Whether or not to automatically start the log shipping engine. If disabled, you must manually start the engine by calling FsparklogsModule::GetModule().StartShippingEngine(...); [EDITOR RESTART REQUIRED]
+	// Whether or not to automatically start the log/event shipping engine. If disabled, you must manually start the engine by calling FsparklogsModule::GetModule().StartShippingEngine(...); [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Auto Start")
 	bool EditorAutoStart = FsparklogsSettings::DefaultAutoStart;
 
@@ -203,6 +246,14 @@ public:
 	bool EditorAddRandomGameInstanceID = FsparklogsSettings::DefaultAddRandomGameInstanceID;
 
 	// ------------------------------------------ CLIENT LAUNCH CONFIGURATION SETTINGS
+
+	// Whether or not to collect game analytics on client launch configurations. Defaults to true.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Enable Analytics")
+	bool ClientCollectAnalytics = FsparklogsSettings::DefaultClientCollectAnalytics;
+
+	// Whether or not to collect logs on client launch configurations. Defaults to false.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Auto Start")
+	bool ClientCollectLogs = FsparklogsSettings::DefaultClientCollectLogs;
 
 	// Set to 'us' or 'eu' based on what your SparkLogs workspace is provisioned to use.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "SparkLogs Cloud Region")
@@ -224,7 +275,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Custom HTTP Authorization Header Value")
 	FString ClientHTTPAuthorizationHeaderValue;
 
-	// Whether or not to automatically start the log shipping engine. If disabled, you must manually start the engine by calling FsparklogsModule::GetModule().StartShippingEngine(...);
+	// Whether or not to automatically start the log/event shipping engine. If disabled, you must manually start the engine by calling FsparklogsModule::GetModule().StartShippingEngine(...);
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Auto Start")
 	bool ClientAutoStart = FsparklogsSettings::DefaultAutoStart;
 
@@ -434,11 +485,11 @@ protected:
 	/** Whether or not the next flush platform time is because of a failure. */
 	FThreadSafeBool WorkerLastFlushFailed;
 
-	virtual void ComputeCommonEventJSON(bool IncludeCommonMetadata, TMap<FString, FString>* AdditionalAttributes);
+	virtual void ComputeCommonEventJSON(bool IncludeCommonMetadata, const TCHAR* GameInstanceID, TMap<FString, FString>* AdditionalAttributes);
 
 public:
 
-	FsparklogsReadAndStreamToCloud(const TCHAR* SourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName, TMap<FString, FString>* AdditionalAttributes);
+	FsparklogsReadAndStreamToCloud(const TCHAR* SourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName, const TCHAR* GameInstanceID, TMap<FString, FString>* AdditionalAttributes);
 	~FsparklogsReadAndStreamToCloud();
 
 	//~ Begin FRunnable Interface
@@ -474,6 +525,80 @@ protected:
 };
 
 /**
+* Custom log file output device for SparkLogs plugin. Special behaviors vs regular file output:
+*  - Certain categories can be forced to log to the file even if (!ALLOW_LOG_FILE || NO_LOGGING). Used for analytics event encoding.
+*  - Will encode the default log severity explicitly to make sure messages are not auto-detected as something else.
+*  - Always UTF-8 and always append-only. Never backs up old logfiles.
+*/
+class SPARKLOGS_API FsparklogsOutputDeviceFile : public FOutputDevice
+{
+public:
+	/** Constructor. InFilename is required. If the file already exists, data will be appended to it. */
+	FsparklogsOutputDeviceFile(const TCHAR* InFilename);
+
+	/** Deconstructor that performs cleanup. */
+	~FsparklogsOutputDeviceFile();
+
+	//~ Begin FOutputDevice Interface.
+	/**
+	* Closes output device and cleans up. This can't happen in the destructor
+	* as we have to call "delete" which cannot be done for static/ global
+	* objects.
+	*/
+	void TearDown() override;
+
+	/**
+	* Flush the write cache so the file isn't truncated in case we crash right
+	* after calling this function.
+	*/
+	void Flush() override;
+
+	virtual void Serialize(const TCHAR* Data, ELogVerbosity::Type Verbosity, const class FName& Category, const double Time) override;
+	virtual void Serialize(const TCHAR* Data, ELogVerbosity::Type Verbosity, const class FName& Category) override;
+	virtual bool CanBeUsedOnAnyThread() const override
+	{
+		return true;
+	}
+	//~ End FOutputDevice Interface.
+
+	/** Returns the filename that output data will be appended to. */
+	const FString GetFilename() const { return Filename; }
+
+	/** Returns True if the output file is open and ready to receive appended data. */
+	bool IsOpened() const { return AsyncWriter != nullptr; }
+
+	/** Add a category name to the "always logged" filter. */
+	void AddAlwaysLoggedCategory(const class FName& InCategoryName) { AlwaysLoggedCategories.Add(InCategoryName); }
+
+	/** Thread safe method to add one new event to the queue. Raw JSON can be specified (should be the contents of an
+	  * encoded JSON object, but *without* the surrounding {}) as well as optional message text. Returns true on success. */
+	bool AddRawEvent(const TCHAR* RawJSON, const TCHAR* Message);
+
+protected:
+	/** Whether or not we've hit a failure that causes future writes to fail. */
+	bool Failed;
+	/** Whether or not to force a log flush after every log message. */
+	bool ForceLogFlush;
+	/** The path to the file we are writing to. */
+	FString Filename;
+	/** The async writer we use to actually write the file data. */
+	FAsyncWriter* AsyncWriter;
+	/** The output archive used by the async writer. */
+	FArchive* WriterArchive;
+	/** The categories that are always logged to the file, even if (!ALLOW_LOG_FILE || NO_LOGGING). */
+	TSet<FName> AlwaysLoggedCategories;
+
+	/** If the writer is not yet created, attempts to create it. On failure, sets Failed to True and returns false. */
+	bool CreateAsyncWriter();
+	
+	/** Returns whether or not we are allowed to log a message with the given category.
+	  * if (ALLOW_LOG_FILE && !NO_LOGGING) then this will always return true. Otherwise,
+	  * it will return true only if the category name is in the always logged category set.
+	  */
+	bool ShouldLogCategory(const class FName& InCategoryName);
+};
+
+/**
 * Main plugin module. Reads settings and handles startup/shutdown.
 */
 class SPARKLOGS_API FsparklogsModule : public IModuleInterface
@@ -502,8 +627,14 @@ public:
 	virtual void ShutdownModule() override;
 	//~ End IModuleInterface Interface
 
+	/** Returns the random game_instance_id used for this run of the engine.
+	  * There may be multiple game analytics sessions during a single game instance.
+	  * This is available after the module has started (even before the shipping
+	  * engine is started.*/
+	FString GetGameInstanceID();
+
 	/**
-	 * Starts the log shipping engine if it has not yet started.
+	 * Starts the log/event shipping engine if it has not yet started.
 	 * 
 	 * You can override the agent ID and/or agent auth token by specifying non-empty values.
 	 *
@@ -511,11 +642,11 @@ public:
 	 * then you can choose to override the destination HTTP endpoint and/or override the
 	 * authentication header value directly.
 	 * 
-	 * You can also optionally override the compute name that will be used in the metadata
+	 * You can also optionally override the computer name that will be used in the metadata
 	 * sent with all log agents -- the default is to use FPlatformProcess::ComputerName().
 	 * (If NULL or empty values are passed for override strings, then the default values will be used, etc.)
 	 * 
-	 * You can optionally pass additional custom attributes that will be added to all shipped events.
+	 * You can optionally pass additional custom attributes that will be added to all shipped log/analytics events.
 	 * 
 	 * This will still only activate if a random roll of the dice passed the "ActivationPercentage" check, or pass
 	 * AlwaysStart as true to force the engine to start regardless of this setting.
@@ -524,7 +655,7 @@ public:
 	 */
 	bool StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHTTPEndpointURI, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, TMap<FString, FString>* AdditionalAttributes, bool AlwaysStart);
 
-	/** Stops the log shipping engine. It will not start again unless StartShippingEngine is manually called. */
+	/** Stops the log/event shipping engine. Any active game analytics session (if any) will end. It will not start again unless StartShippingEngine is manually called. */
 	void StopShippingEngine();
 
 protected:
@@ -535,7 +666,8 @@ protected:
 
 private:
 
-	bool LoggingActive;
+	FString GameInstanceID;
+	bool EngineActive;
 	TSharedRef<FsparklogsSettings> Settings;
 	TUniquePtr<FsparklogsReadAndStreamToCloud> CloudStreamer;
 	TUniquePtr<FsparklogsStressGenerator> StressGenerator;

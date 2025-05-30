@@ -10,6 +10,27 @@
 #include "Algo/Compare.h"
 #include "sparklogs.h"
 
+template<typename T>
+class FScopedValueSetter
+{
+public:
+    FScopedValueSetter(T& Target, T TemporaryValue)
+        : Reference(Target)
+        , OriginalValue(Target)
+    {
+        Reference = TemporaryValue;
+    }
+
+    ~FScopedValueSetter()
+    {
+        Reference = OriginalValue;
+    }
+
+private:
+    T& Reference;
+    T OriginalValue;
+};
+
 class FTempDirectory
 {
 public:
@@ -128,7 +149,7 @@ bool FsparklogsPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters)
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16*1024, nullptr, nullptr);
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr);
     bool FlushedEverything=false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[1] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
@@ -164,7 +185,7 @@ bool FsparklogsPluginUnitTestSkipEmptyPayloads::RunTest(const FString& Parameter
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr);
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr);
     // Test completely empty file
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, 10.0, FlushedEverything));
@@ -199,12 +220,12 @@ bool FsparklogsPluginUnitTestSkipEmptyPayloads::RunTest(const FString& Parameter
     return true;
 }
 
-IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestMultiline, "sparklogs.UnitTests.Multiline", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
-void FsparklogsPluginUnitTestMultiline::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestMultipleEvents, "sparklogs.UnitTests.MultipleEvents", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestMultipleEvents::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
     SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
 }
-bool FsparklogsPluginUnitTestMultiline::RunTest(const FString& Parameters)
+bool FsparklogsPluginUnitTestMultipleEvents::RunTest(const FString& Parameters)
 {
     FTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
@@ -219,7 +240,7 @@ bool FsparklogsPluginUnitTestMultiline::RunTest(const FString& Parameters)
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr);
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Second line is longer\"},{\"message\":\"3\"},{\"message\":\"   fourth line    \\t\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
@@ -250,7 +271,7 @@ bool FsparklogsPluginUnitTestNewlines::RunTest(const FString& Parameters)
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr);
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"\\t\"},{\"message\":\"linux\"},{\"message\":\"skip\\rslash\\rR\"},{\"message\":\" \"},{\"message\":\" \"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
@@ -281,7 +302,7 @@ bool FsparklogsPluginUnitTestControlChars::RunTest(const FString& Parameters)
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr);
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"line 1\\t\\b\\f\"},{\"message\":\"line 2 \\\"hello\\\"\"},{\"message\":\"line 3 \\\\world\\\\\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
@@ -313,7 +334,7 @@ bool FsparklogsPluginUnitTestUnicode::RunTest(const FString& Parameters)
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr);
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr);
     ExpectedPayloads.Add(FString::Format(TEXT("[{\"message\":\"{0}\"}]"), { TestPayload1 }));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
@@ -346,7 +367,7 @@ bool FsparklogsPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, MaxLineSize, nullptr, nullptr);
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, MaxLineSize, nullptr, nullptr, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"12345678\"},{\"message\":\"12345678\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, 10.0, FlushedEverything));
@@ -389,7 +410,7 @@ bool FsparklogsPluginUnitTestMaxLineSizeUnicode::RunTest(const FString& Paramete
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, MaxLineSize, nullptr, nullptr);
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, MaxLineSize, nullptr, nullptr, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"1234\"},{\"message\":\"ππ5678\"},{\"message\":\"π34\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, 10.0, FlushedEverything));
@@ -429,7 +450,7 @@ bool FsparklogsPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr);
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[1-FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
@@ -443,7 +464,7 @@ bool FsparklogsPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
     
     // When we resume, it should remember that we already processed the first two lines and not generate a new payload
     TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor2(new FsparklogsStoreInMemPayloadProcessor());
-    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer2 = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor2, 16 * 1024, nullptr, nullptr);
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer2 = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor2, 16 * 1024, nullptr, nullptr, nullptr);
     TArray<FString> ExpectedPayloads2;
     TestTrue(TEXT("FlushAndWait[2-1] should succeed"), Streamer2->FlushAndWait(2, false, false, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[2-1] payloads should match"), ITLComparePayloads(this, PayloadProcessor2->Payloads, ExpectedPayloads2));
@@ -481,7 +502,7 @@ bool FsparklogsPluginUnitTestHandleLogRotation::RunTest(const FString& Parameter
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr);
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"123456789012345678901234567890\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(2, false, false, false, 10.0, FlushedEverything));
@@ -536,7 +557,7 @@ bool FsparklogsPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
     Settings->ProcessingIntervalSecs = TestProcessingIntervalSecs;
     Settings->RetryIntervalSecs = TestRetryIntervalSecs;
     TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr);
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, TestProcessingIntervalSecs * 5, FlushedEverything));
@@ -596,7 +617,7 @@ bool FsparklogsPluginUnitTestRetrySamePayloadSize::RunTest(const FString& Parame
     Settings->ProcessingIntervalSecs = TestProcessingIntervalSecs;
     Settings->RetryIntervalSecs = TestRetryIntervalSecs;
     TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr);
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, TestProcessingIntervalSecs * 5, FlushedEverything));
@@ -672,7 +693,7 @@ bool FsparklogsPluginUnitTestClearRetryTimer::RunTest(const FString& Parameters)
     Settings->ProcessingIntervalSecs = TestProcessingIntervalSecs;
     Settings->RetryIntervalSecs = TestRetryIntervalSecs;
     TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr);
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, TestProcessingIntervalSecs * 5, FlushedEverything));
@@ -705,6 +726,39 @@ bool FsparklogsPluginUnitTestClearRetryTimer::RunTest(const FString& Parameters)
     return true;
 }
 
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestGameInstanceID, "sparklogs.UnitTests.GameInstanceID", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestGameInstanceID::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
+bool FsparklogsPluginUnitTestGameInstanceID::RunTest(const FString& Parameters)
+{
+    FTempDirectory TempDir(ITLGetTestDir());
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
+
+    TArray<FString> ExpectedPayloads;
+
+    TSharedRef<IFileHandle> LogWriter(FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*TestLogFile, true, true));
+    const TCHAR* TestPayload1 = TEXT("Hello world");
+    ITLWriteStringToFile(LogWriter, *FString::Format(TEXT("{0}\r\n"), { TestPayload1 }));
+    LogWriter->Flush();
+
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    Settings->IncludeCommonMetadata = false;
+    Settings->AddRandomGameInstanceID = true;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, TEXT("abcd_1234_EFGH"), nullptr);
+    ExpectedPayloads.Add(FString::Format(TEXT("[{\"game_instance_id\": \"abcd_1234_EFGH\",\"message\":\"{0}\"}]"), { TestPayload1 }));
+    bool FlushedEverything = false;
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
+    TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
+
+    Streamer.Reset();
+    return true;
+}
+
 IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestAdditionalAttributes, "sparklogs.UnitTests.AdditionalAttributes", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
 void FsparklogsPluginUnitTestAdditionalAttributes::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
@@ -729,8 +783,161 @@ bool FsparklogsPluginUnitTestAdditionalAttributes::RunTest(const FString& Parame
     TMap<FString, FString> AdditionalAttributes;
     AdditionalAttributes.Add(TEXT("game_version"), TEXT("v1.2.3"));
     AdditionalAttributes.Add(TEXT("game_name"), TEXT("hello world"));
-    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, &AdditionalAttributes);
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, &AdditionalAttributes);
     ExpectedPayloads.Add(FString::Format(TEXT("[{\"game_version\":\"v1.2.3\",\"game_name\":\"hello world\",\"message\":\"{0}\"}]"), { TestPayload1 }));
+    bool FlushedEverything = false;
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
+    TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
+
+    Streamer.Reset();
+    return true;
+}
+
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginIntegrationTestInfoMessage, "sparklogs.IntegrationTests.InfoMessage", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginIntegrationTestInfoMessage::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
+bool FsparklogsPluginIntegrationTestInfoMessage::RunTest(const FString& Parameters)
+{
+    FScopedValueSetter<ELogTimes::Type> DoNotPrintTimes(GPrintLogTimes, ELogTimes::None);
+    FTempDirectory TempDir(ITLGetTestDir());
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
+
+    TArray<FString> ExpectedPayloads;
+
+    FsparklogsOutputDeviceFile OutputDevice(*TestLogFile);
+    OutputDevice.SetSuppressEventTag(false);
+    // Newlines of any type get converted into a single \n. Newlines at the start or end get trimmed.
+    OutputDevice.Log(TEXT("hello world"));
+    OutputDevice.Flush();
+    OutputDevice.TearDown();
+
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    Settings->IncludeCommonMetadata = false;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr);
+    ExpectedPayloads.Add(TEXT("[{\"severity\": \"Info\",\"message\":\"hello world\"}]"));
+    bool FlushedEverything = false;
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
+    TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
+
+    Streamer.Reset();
+    return true;
+}
+
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginIntegrationTestInfoMessageNoTags, "sparklogs.IntegrationTests.InfoMessageNoTags", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginIntegrationTestInfoMessageNoTags::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
+bool FsparklogsPluginIntegrationTestInfoMessageNoTags::RunTest(const FString& Parameters)
+{
+    FTempDirectory TempDir(ITLGetTestDir());
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
+
+    TArray<FString> ExpectedPayloads;
+
+    FsparklogsOutputDeviceFile OutputDevice(*TestLogFile);
+    OutputDevice.SetSuppressEventTag(true);
+    // Newlines of any type get converted into a single \n. Newlines at the start or end get trimmed.
+    OutputDevice.Serialize(TEXT("hello world"), ELogVerbosity::Warning, NAME_None);
+    OutputDevice.Flush();
+    OutputDevice.TearDown();
+
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    Settings->IncludeCommonMetadata = false;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr);
+    ExpectedPayloads.Add(TEXT("[{\"severity\": \"Warning\",\"message\":\"hello world\"}]"));
+    bool FlushedEverything = false;
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
+    TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
+
+    Streamer.Reset();
+    return true;
+}
+
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginIntegrationTestMultiline, "sparklogs.IntegrationTests.Multiline", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginIntegrationTestMultiline::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
+bool FsparklogsPluginIntegrationTestMultiline::RunTest(const FString& Parameters)
+{
+    FScopedValueSetter<ELogTimes::Type> DoNotPrintTimes(GPrintLogTimes, ELogTimes::None);
+    FTempDirectory TempDir(ITLGetTestDir());
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
+
+    TArray<FString> ExpectedPayloads;
+
+    FsparklogsOutputDeviceFile OutputDevice(*TestLogFile);
+    OutputDevice.SetSuppressEventTag(false);
+    // Newlines of any type get converted into a single \n. Newlines at the start or end get trimmed.
+    OutputDevice.Serialize(TEXT("Line 1\r\nSecond line is longer\n3\r\n   fourth line    \t\r\n"), ELogVerbosity::Warning, NAME_None);
+    OutputDevice.Flush();
+    OutputDevice.TearDown();
+
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    Settings->IncludeCommonMetadata = false;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr);
+    ExpectedPayloads.Add(TEXT("[{\"message\":\"Warning: Line 1\\nSecond line is longer\\n3\\n   fourth line    \\t\"}]"));
+    bool FlushedEverything = false;
+    TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
+    TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
+
+    Streamer.Reset();
+    return true;
+}
+
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginIntegrationTestAddRawEvent, "sparklogs.IntegrationTests.AddRawEvent", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginIntegrationTestAddRawEvent::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
+bool FsparklogsPluginIntegrationTestAddRawEvent::RunTest(const FString& Parameters)
+{
+    FTempDirectory TempDir(ITLGetTestDir());
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
+
+    TArray<FString> ExpectedPayloads;
+
+    FsparklogsOutputDeviceFile OutputDevice(*TestLogFile);
+    // Newlines of any type get converted into a single \n. Newlines at the start or end get trimmed.
+    OutputDevice.AddRawEvent(TEXT(""), TEXT("hello world"));
+    OutputDevice.AddRawEvent(nullptr, TEXT("second event"));
+    OutputDevice.AddRawEvent(nullptr, TEXT("first line\nsecond line\nthird line\nfourth line"));
+    // all blank lines at the end are trimmed, blank lines at the start are not trimmed...
+    OutputDevice.AddRawEvent(nullptr, TEXT("\n\n\ntrim test\n \n\n"));
+    OutputDevice.AddRawEvent(TEXT("\"custom_field\": \"string\""), TEXT(""));
+    OutputDevice.AddRawEvent(TEXT("\"custom_field\": \"string\", \"f2\": {\"int\": 25, \"b\": true}"), nullptr);
+    OutputDevice.AddRawEvent(TEXT("\"f3\": \"v1\", \"f4\": \"v2\""), TEXT("combined test"));
+    OutputDevice.Flush();
+    OutputDevice.TearDown();
+
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    Settings->IncludeCommonMetadata = false;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    TUniquePtr<FsparklogsReadAndStreamToCloud> Streamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr);
+    FString Payload = TEXT("[");
+    Payload += TEXT("{\"message\":\"hello world\"}");
+    Payload += TEXT(",{\"message\":\"second event\"}");
+    Payload += TEXT(",{\"message\":\"first line\\nsecond line\\nthird line\\nfourth line\"}");
+    Payload += TEXT(",{\"message\":\"\\n\\n\\ntrim test\\n \"}");
+    Payload += TEXT(",{\"custom_field\": \"string\",\"message\":\"\"}");
+    Payload += TEXT(",{\"custom_field\": \"string\", \"f2\": {\"int\": 25, \"b\": true},\"message\":\"\"}");
+    Payload += TEXT(",{\"f3\": \"v1\", \"f4\": \"v2\",\"message\":\"combined test\"}");
+    Payload += TEXT("]");
+    ExpectedPayloads.Add(Payload);
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
