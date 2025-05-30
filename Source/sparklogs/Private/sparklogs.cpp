@@ -2,10 +2,17 @@
 // Licensed software - see LICENSE
 
 #include "sparklogs.h"
+#include "CoreGlobals.h"
 #include "GenericPlatform/GenericPlatformOutputDevices.h"
+#include "Misc/AssertionMacros.h"
 #include "Misc/OutputDeviceFile.h"
+#include "Misc/OutputDeviceHelper.h"
 #include "ISettingsModule.h"
 #include "HAL/ThreadManager.h"
+
+#ifndef ALLOW_LOG_FILE
+#define ALLOW_LOG_FILE 1
+#endif
 
 /*
 #if UE_BUILD_SHIPPING
@@ -28,6 +35,12 @@ DEFINE_LOG_CATEGORY(LogPluginSparkLogs);
 constexpr int GMaxLineLength = 16 * 1024;
 
 static uint8 UTF8ByteOrderMark[3] = {0xEF, 0xBB, 0xBF};
+constexpr uint8 CharInternalNewline = 0x1E; // Control code: RS (Record Separator)
+constexpr uint8 CharInternalJSONStart = 0x16; // Control code: SYN (Synchronous Idle)
+constexpr uint8 CharInternalJSONEnd = 0x17; // Control code: ETB (End of Transmission Block)
+static const TCHAR* StrCharInternalNewline = TEXT("\x1E");
+static const TCHAR* StrCharInternalJSONStart = TEXT("\x16");
+static const TCHAR* StrCharInternalJSONEnd = TEXT("\x17");
 
 #if !NO_LOGGING
 const FName SparkLogsCategoryName(LogPluginSparkLogs.GetCategoryName());
@@ -41,23 +54,65 @@ FString ITLConvertUTF8(const void* Data, int Len)
 	return FString(Converter.Length(), Converter.Get());
 }
 
+bool ITLFStringTrimCharStartEndInline(FString& s, TCHAR c)
+{
+	int32 Start = 0, NewLength = s.Len();
+	bool Removed = false;
+	while (NewLength > 0)
+	{
+		if (s[NewLength - 1] != c)
+		{
+			break;
+		}
+		NewLength--;
+		Removed = true;
+	}
+	for (Start = 0; Start < NewLength; Start++)
+	{
+		if (s[Start] != c)
+		{
+			break;
+		}
+		Removed = true;
+	}
+	if (Removed)
+	{
+		s.MidInline(Start, NewLength - Start, false);
+	}
+	return Removed;
+}
+
+const TCHAR* ITLSeverityToString(ELogVerbosity::Type Verbosity)
+{
+	if (Verbosity == ELogVerbosity::Log)
+	{
+		return TEXT("Info");
+	}
+	return ToString(Verbosity);
+}
+
+const TCHAR* INISectionForEditor = TEXT("Editor");
+const TCHAR* INISectionForCommandlet = TEXT("Commandlet");
+const TCHAR* INISectionForServer = TEXT("Server");
+const TCHAR* INISectionForClient = TEXT("Client");
+
 const TCHAR* GetITLLaunchConfiguration(bool ForINISection)
 {
 	if (GIsEditor)
 	{
-		return ForINISection ? TEXT("Editor") : TEXT("editor");
+		return ForINISection ? INISectionForEditor : TEXT("editor");
 	}
 	else if (IsRunningCommandlet())
 	{
-		return ForINISection ? TEXT("Commandlet") : TEXT("commandlet");
+		return ForINISection ? INISectionForCommandlet : TEXT("commandlet");
 	}
 	else if (IsRunningDedicatedServer())
 	{
-		return ForINISection ? TEXT("Server") : TEXT("server");
+		return ForINISection ? INISectionForServer : TEXT("server");
 	}
 	else
 	{
-		return ForINISection ? TEXT("Client") : TEXT("client");
+		return ForINISection ? INISectionForClient : TEXT("client");
 	}
 }
 
@@ -65,6 +120,26 @@ FString GetITLINISettingPrefix()
 {
 	const TCHAR* LaunchConfiguration = GetITLLaunchConfiguration(true);
 	return FString(LaunchConfiguration);
+}
+
+template <typename T> T GetValueForLaunchConfiguration(T ServerValue, T EditorValue, T ClientValue, T OtherValue) {
+	FString Config = GetITLLaunchConfiguration(true);
+	if (Config == INISectionForServer)
+	{
+		return ServerValue;
+	}
+	else if (Config == INISectionForEditor)
+	{
+		return EditorValue;
+	}
+	else if (Config == INISectionForClient)
+	{
+		return ClientValue;
+	}
+	else
+	{
+		return OtherValue;
+	}
 }
 
 FString GetITLLogFileName(const TCHAR* LogTypeName)
@@ -83,7 +158,7 @@ FString GetITLPluginStateFilename()
 	return Name;
 }
 
-class FITLLogOutputDeviceInitializer
+class FITLLogOutputDeviceFileInitializer
 {
 public:
 	TUniquePtr<FOutputDeviceFile> LogDevice;
@@ -104,17 +179,38 @@ public:
 	}
 };
 
-FITLLogOutputDeviceInitializer& GetITLInternalGameLog()
+class FITLSparkLogsLogOutputDeviceFileInitializer
 {
-	static FITLLogOutputDeviceInitializer Singleton;
+public:
+	TUniquePtr<FsparklogsOutputDeviceFile> LogDevice;
+	FString LogFilePath;
+	bool InitLogDevice(const TCHAR* Filename)
+	{
+		if (!LogDevice)
+		{
+			FString ParentDir = FPaths::GetPath(FPaths::ConvertRelativePathToFull(FGenericPlatformOutputDevices::GetAbsoluteLogFilename()));
+			LogFilePath = FPaths::Combine(ParentDir, Filename);
+			LogDevice = MakeUnique<FsparklogsOutputDeviceFile>(*LogFilePath);
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
+};
+
+FITLSparkLogsLogOutputDeviceFileInitializer& GetITLInternalGameLog()
+{
+	static FITLSparkLogsLogOutputDeviceFileInitializer Singleton;
 	FString LogFileName = GetITLLogFileName(TEXT("run"));
 	Singleton.InitLogDevice(*LogFileName);
 	return Singleton;
 }
 
-FITLLogOutputDeviceInitializer& GetITLInternalOpsLog()
+FITLLogOutputDeviceFileInitializer& GetITLInternalOpsLog()
 {
-	static FITLLogOutputDeviceInitializer Singleton;
+	static FITLLogOutputDeviceFileInitializer Singleton;
 	FString LogFileName = GetITLLogFileName(TEXT("ops"));
 	if (Singleton.InitLogDevice(*LogFileName))
 	{
@@ -250,6 +346,21 @@ void FsparklogsSettings::LoadSettings()
 {
 	FString Section = ITL_CONFIG_SECTION_NAME;
 	FString SettingPrefix = GetITLINISettingPrefix();
+	
+	// Settings that are common across any launch configuration
+
+	AnalyticsGameID = GConfig->GetStr(*Section, TEXT("AnalyticsGameID"), GEngineIni);
+
+	// Settings specific to this launch configuration
+
+	if (!GConfig->GetBool(*Section, *(SettingPrefix + TEXT("CollectAnalytics")), CollectAnalytics, GEngineIni))
+	{
+		CollectAnalytics = GetValueForLaunchConfiguration(DefaultServerCollectAnalytics, DefaultEditorCollectAnalytics, DefaultClientCollectAnalytics, false);
+	}
+	if (!GConfig->GetBool(*Section, *(SettingPrefix + TEXT("CollectLogs")), CollectLogs, GEngineIni))
+	{
+		CollectLogs = GetValueForLaunchConfiguration(DefaultServerCollectLogs, DefaultEditorCollectLogs, DefaultClientCollectLogs, false);
+	}
 
 	CloudRegion = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("CloudRegion")), GEngineIni);
 	HttpEndpointURI = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("HTTPEndpointURI")), GEngineIni);
@@ -640,7 +751,7 @@ void FsparklogsStressGenerator::Stop()
 
 const TCHAR* FsparklogsReadAndStreamToCloud::ProgressMarkerValue = TEXT("ShippedLogOffset");
 
-void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMetadata, TMap<FString, FString>* AdditionalAttributes)
+void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMetadata, const TCHAR* GameInstanceID, TMap<FString, FString>* AdditionalAttributes)
 {
 	FString CommonEventJSON;
 
@@ -662,12 +773,25 @@ void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMe
 		{
 			CommonEventJSON.Appendf(TEXT(", \"app\": %s"), *EscapeJsonString(ProjectName));
 		}
+	}
 
-		if (Settings->AddRandomGameInstanceID)
+	if (Settings->AddRandomGameInstanceID && GameInstanceID != nullptr && *GameInstanceID != 0)
+	{
+		if (!CommonEventJSON.IsEmpty())
 		{
-			FString GameInstanceID = ITLGenerateRandomAlphaNumID(16);
-			CommonEventJSON.Appendf(TEXT(", \"game_instance_id\": %s"), *EscapeJsonString(GameInstanceID));
+			CommonEventJSON.Append(TEXT(", "));
 		}
+		CommonEventJSON.Appendf(TEXT("\"game_instance_id\": %s"), *EscapeJsonString(GameInstanceID));
+	}
+
+	// If game_id is set we should always include it regardless, it's required for good analytics data.
+	if (!Settings->AnalyticsGameID.IsEmpty())
+	{
+		if (!CommonEventJSON.IsEmpty())
+		{
+			CommonEventJSON.Append(TEXT(", "));
+		}
+		CommonEventJSON.Appendf(TEXT("\"game_id\": %s"), *EscapeJsonString(Settings->AnalyticsGameID));
 	}
 
 	if (nullptr != AdditionalAttributes)
@@ -692,7 +816,7 @@ void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMe
 	}
 }
 
-FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const TCHAR* InSourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName, TMap<FString, FString>* AdditionalAttributes)
+FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const TCHAR* InSourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName, const TCHAR* GameInstanceID, TMap<FString, FString>* AdditionalAttributes)
 	: Settings(InSettings)
 	, PayloadProcessor(InPayloadProcessor)
 	, SourceLogFile(InSourceLogFile)
@@ -705,7 +829,7 @@ FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const TCHAR* InSo
 	, WorkerLastFailedFlushPayloadSize(0)
 {
 	ProgressMarkerPath = FPaths::Combine(FPaths::GetPath(InSourceLogFile), GetITLPluginStateFilename());
-	ComputeCommonEventJSON(Settings->IncludeCommonMetadata, AdditionalAttributes);
+	ComputeCommonEventJSON(Settings->IncludeCommonMetadata, GameInstanceID, AdditionalAttributes);
 
 	WorkerBuffer.AddUninitialized(Settings->BytesPerRequest);
 	int BufferSize = Settings->BytesPerRequest + 4096 + (Settings->BytesPerRequest / 10);
@@ -917,6 +1041,8 @@ bool FindFirstByte(const uint8* Haystack, uint8 Needle, int MaxToSearch, int& Ou
 	return false;
 }
 
+/** Append UTF-8 encoded string data as an escaped JSON string value. Also convert the
+  * special encoded newline (CharInternalNewline) to a real newline. */
 void AppendUTF8AsEscapedJsonString(TITLJSONStringBuilder& Builder, const ANSICHAR* String, int N)
 {
 	ANSICHAR ControlFormatBuf[16];
@@ -935,6 +1061,9 @@ void AppendUTF8AsEscapedJsonString(TITLJSONStringBuilder& Builder, const ANSICHA
 			Builder.Append("\\t", 2 /* string length */);
 			break;
 		case '\n':
+			Builder.Append("\\n", 2 /* string length */);
+			break;
+		case static_cast<ANSICHAR>(CharInternalNewline):
 			Builder.Append("\\n", 2 /* string length */);
 			break;
 		case '\f':
@@ -1081,7 +1210,7 @@ bool FsparklogsReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int& 
 			// We expect the FoundIndex to be the *first* non-newline character, and ExtraToSkip set to the number of newline chars to skip.
 			// Check if the previous character is a newline character, and if so, skip capturing it.
 			uint8 c = *(BufferData + NextOffset + FoundIndex - 1);
-			if (c == '\n' || c == '\r')
+			if (c == '\n' || c == '\r' || c == CharInternalNewline)
 			{
 				ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerBuildNextPayload|character at NextOffset=%d, FoundIndex=%d is newline, will skip it"), NextOffset, FoundIndex);
 				ExtraToSkip++;
@@ -1116,6 +1245,21 @@ bool FsparklogsReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int& 
 		{
 			WorkerNextPayload.Append((const ANSICHAR*)(CommonEventJSONData.GetData()), CommonEventJSONData.Num());
 			WorkerNextPayload.Append(',');
+		}
+		// If we have raw JSON in the payload extract that portion and append it, setting up just the message text to remain for appending...
+		if (FoundIndex > 2 && *(BufferData + NextOffset) == CharInternalJSONStart)
+		{
+			int FoundJSONEndIndex = 0;
+			if (FindFirstByte(BufferData + NextOffset + 1, CharInternalJSONEnd, FoundIndex - 1, FoundJSONEndIndex))
+			{
+				WorkerNextPayload.Append((const ANSICHAR*)(BufferData + NextOffset + 1), FoundJSONEndIndex);
+				if (FoundJSONEndIndex > 0)
+				{
+					WorkerNextPayload.Append(',');
+				}
+				NextOffset += (FoundJSONEndIndex + 2);
+				FoundIndex -= (FoundJSONEndIndex + 2);
+			}
 		}
 		WorkerNextPayload.Append("\"message\":", 10 /* length of `"message":` */);
 		AppendUTF8AsEscapedJsonString(WorkerNextPayload, (const ANSICHAR*)(BufferData + NextOffset), FoundIndex);
@@ -1246,12 +1390,231 @@ double FsparklogsReadAndStreamToCloud::WorkerGetRetrySecs()
 	return RetrySecs;
 }
 
+// =============== FsparklogsOutputDeviceFile ===============================================================================
+
+FsparklogsOutputDeviceFile::FsparklogsOutputDeviceFile(const TCHAR* InFilename)
+: Failed(false)
+, ForceLogFlush(false)
+, AsyncWriter(nullptr)
+, WriterArchive(nullptr)
+{
+	Filename = InFilename;
+	ForceLogFlush = FParse::Param(FCommandLine::Get(), TEXT("FORCELOGFLUSH"));
+}
+
+FsparklogsOutputDeviceFile::~FsparklogsOutputDeviceFile()
+{
+	TearDown();
+}
+
+void FsparklogsOutputDeviceFile::TearDown()
+{
+	if (AsyncWriter)
+	{
+		FAsyncWriter* DeletedAsyncWriter = AsyncWriter;
+		AsyncWriter = nullptr;
+		delete DeletedAsyncWriter;
+	}
+	if (WriterArchive)
+	{
+		FArchive* DeletedWriterArchive = WriterArchive;
+		WriterArchive = nullptr;
+		delete DeletedWriterArchive;
+	}
+	Filename = FString();
+}
+
+void FsparklogsOutputDeviceFile::Flush()
+{
+	if (AsyncWriter)
+	{
+		AsyncWriter->Flush();
+	}
+}
+
+void FsparklogsOutputDeviceFile::Serialize(const TCHAR* Data, ELogVerbosity::Type Verbosity, const class FName& Category, const double Time)
+{
+	if (!ShouldLogCategory(Category) || Verbosity == ELogVerbosity::SetColor)
+	{
+		return;
+	}
+
+	static bool WithinCriticalError = false;
+	if (GIsCriticalError && !WithinCriticalError)
+	{
+		WithinCriticalError = true;
+		Serialize(Data, Verbosity, Category, Time);
+		WithinCriticalError = false;
+	}
+	else
+	{
+		if (!AsyncWriter && !Failed)
+		{
+			CreateAsyncWriter();
+		}
+		if (AsyncWriter)
+		{
+			if (WithinCriticalError)
+			{
+				// Minimize unnecessary allocations or processing and just try to log while we possibly still can.
+				FOutputDeviceHelper::FormatCastAndSerializeLine(*AsyncWriter, Data, Verbosity, Category, Time, bSuppressEventTag, bAutoEmitLineTerminator);
+			}
+			else
+			{
+				// When writing to our internal log we transform the data in the following ways:
+				// - Convert any multi-line log messages to use CharInternalNewline so that each log event is logged as a single line of text.
+				// - Remove any completely blank lines at the start and end.
+				// - Prepend extra JSON to explicitly specify the log verbosity (overrides what AutoExtract might detect, especially for "Log" level messages where UE does not explicitly log the severity).
+				FString DataStr = Data;
+				// Replace windows or linux style newlines with a single StrCharInternalNewline character.
+				DataStr.ReplaceCharInline(TEXT('\n'), StrCharInternalNewline[0], ESearchCase::CaseSensitive);
+				DataStr.ReplaceInline(TEXT("\r"), TEXT(""), ESearchCase::CaseSensitive);
+				ITLFStringTrimCharStartEndInline(DataStr, StrCharInternalNewline[0]);
+				FString ExtraJSON;
+				ExtraJSON.Reserve(31);
+				ExtraJSON.AppendChar(StrCharInternalJSONStart[0]);
+				if (Verbosity == ELogVerbosity::Log || !GPrintLogVerbosity || bSuppressEventTag)
+				{
+					// Treat UE log severity as authoritative and make sure it's explicitly encoded if it's not already implicitly encoded in the log text.
+					if (ExtraJSON.Len() > 1)
+					{
+						ExtraJSON += ", ";
+					}
+					ExtraJSON += "\"severity\": \"";
+					ExtraJSON += ITLSeverityToString(Verbosity);
+					ExtraJSON += "\"";
+				}
+				if (ExtraJSON.Len() > 1)
+				{
+					ExtraJSON.AppendChar(StrCharInternalJSONEnd[0]);
+					DataStr.InsertAt(0, ExtraJSON);
+				}
+
+				// Format the transformed log line instead of the original
+				FOutputDeviceHelper::FormatCastAndSerializeLine(*AsyncWriter, *DataStr, Verbosity, Category, Time, bSuppressEventTag, bAutoEmitLineTerminator);
+			}
+			if (ForceLogFlush)
+			{
+				Flush();
+			}
+		}
+	}
+}
+
+void FsparklogsOutputDeviceFile::Serialize(const TCHAR* Data, ELogVerbosity::Type Verbosity, const class FName& Category)
+{
+	Serialize(Data, Verbosity, Category, -1.0);
+}
+
+bool FsparklogsOutputDeviceFile::AddRawEvent(const TCHAR* RawJSON, const TCHAR* Message)
+{
+	if (!AsyncWriter && !Failed)
+	{
+		CreateAsyncWriter();
+	}
+	if (!AsyncWriter)
+	{
+		return false;
+	}
+
+	if (RawJSON != nullptr && *RawJSON == 0)
+	{
+		RawJSON = nullptr;
+	}
+	if (Message != nullptr && *Message == 0)
+	{
+		Message = nullptr;
+	}
+
+	// In general, make logs follow Windows convention
+#if PLATFORM_UNIX
+	static const TCHAR* Terminator = TEXT("\r\n");
+#else
+	static const TCHAR* Terminator = LINE_TERMINATOR;
+#endif // PLATFORM_UNIX
+	static const int32 TerminatorLength = FCString::Strlen(Terminator);
+	static const int32 ConvertedTerminatorLength = FTCHARToUTF8_Convert::ConvertedLength(Terminator, TerminatorLength);
+
+	const int32 RawJSONLength = (RawJSON == nullptr) ? 0 : FCString::Strlen(RawJSON);
+	int32 ConvertedRawJSONLength = (RawJSON == nullptr) ? 0 : FTCHARToUTF8_Convert::ConvertedLength(RawJSON, RawJSONLength);
+	if (ConvertedRawJSONLength > 0)
+	{
+		// Add room for the starting and ending marker characters
+		ConvertedRawJSONLength += 2;
+	}
+
+	const int32 MessageLength = (Message == nullptr) ? 0 : FCString::Strlen(Message);
+	const int32 ConvertedMessageLength = (Message == nullptr) ? 0 : FTCHARToUTF8_Convert::ConvertedLength(Message, MessageLength);
+
+	TArray<ANSICHAR, TInlineAllocator<2 * DEFAULT_STRING_CONVERSION_SIZE>> ConvertedEventData;
+	ConvertedEventData.AddUninitialized(ConvertedRawJSONLength + ConvertedMessageLength + ConvertedTerminatorLength);
+	if (ConvertedRawJSONLength > 0)
+	{
+		ConvertedEventData.GetData()[0] = CharInternalJSONStart;
+		FTCHARToUTF8_Convert::Convert(ConvertedEventData.GetData() + 1, ConvertedRawJSONLength - 2, RawJSON, RawJSONLength);
+		ConvertedEventData.GetData()[ConvertedRawJSONLength - 1] = CharInternalJSONEnd;
+	}
+	if (ConvertedMessageLength > 0)
+	{
+		FTCHARToUTF8_Convert::Convert(ConvertedEventData.GetData() + ConvertedRawJSONLength, ConvertedMessageLength, Message, MessageLength);
+	}
+	FTCHARToUTF8_Convert::Convert(ConvertedEventData.GetData() + ConvertedRawJSONLength + ConvertedMessageLength, ConvertedTerminatorLength, Terminator, TerminatorLength);
+
+	// Any newline characters in the actual message must be replaced with the placeholder character to preserve multi-line log messages.
+	ANSICHAR* EventDataBuffer = ConvertedEventData.GetData();
+	for (int Index = ConvertedRawJSONLength; Index < (ConvertedRawJSONLength + ConvertedMessageLength); Index++)
+	{
+		if (EventDataBuffer[Index] == '\n')
+		{
+			EventDataBuffer[Index] = CharInternalNewline;
+		}
+	}
+
+	AsyncWriter->Serialize(ConvertedEventData.GetData(), ConvertedEventData.Num() * sizeof(ANSICHAR));
+	return true;
+}
+
+bool FsparklogsOutputDeviceFile::CreateAsyncWriter()
+{
+	if (IsOpened())
+	{
+		return true;
+	}
+	
+	// Make sure it's a silent filewriter so we don't generate log messages on failure, generating an infinite feedback loop.
+	uint32 Flags = FILEWRITE_Silent | FILEWRITE_AllowRead | FILEWRITE_Append;
+	FArchive* Ar = IFileManager::Get().CreateFileWriter(*Filename, Flags);
+	if (!Ar)
+	{
+		Failed = true;
+		return false;
+	}
+
+	WriterArchive = Ar;
+	AsyncWriter = new FAsyncWriter(*WriterArchive);
+	// We always write UTF-8 to the logfile, make sure the file is interpreted properly as UTF-8
+	AsyncWriter->Serialize((void*)UTF8ByteOrderMark, sizeof(UTF8ByteOrderMark));
+	IFileManager::Get().SetTimeStamp(*Filename, FDateTime::UtcNow());
+	Failed = false;
+	return true;
+}
+
+bool FsparklogsOutputDeviceFile::ShouldLogCategory(const class FName& Category)
+{
+#if ALLOW_LOG_FILE && !NO_LOGGING
+	return true;
+#else
+	return AlwaysLoggedCategories.Contains(Category);
+#endif
+}
+
 // =============== FsparklogsModule ===============================================================================
 
 FsparklogsModule::FsparklogsModule()
-	: LoggingActive(false)
+	: EngineActive(false)
 	, Settings(new FsparklogsSettings())
 {
+	GameInstanceID = ITLGenerateRandomAlphaNumID(16);
 }
 
 void FsparklogsModule::StartupModule()
@@ -1314,11 +1677,16 @@ void FsparklogsModule::ShutdownModule()
 	StopShippingEngine();
 }
 
+FString FsparklogsModule::GetGameInstanceID()
+{
+	return GameInstanceID;
+}
+
 bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHTTPEndpointURI, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, TMap<FString, FString>* AdditionalAttributes, bool AlwaysStart)
 {
-	if (LoggingActive)
+	if (EngineActive)
 	{
-		UE_LOG(LogPluginSparkLogs, Log, TEXT("Logging is already active. Ignoring call to StartShippingEngine."));
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("Event shipping engine is already active. Ignoring call to StartShippingEngine."));
 		return true;
 	}
 
@@ -1373,16 +1741,16 @@ bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAgentID, const T
 	}
 
 	float DiceRoll = AlwaysStart ? 10000.0 : FMath::FRandRange(0.0, 100.0);
-	LoggingActive = DiceRoll < Settings->ActivationPercentage;
-	if (LoggingActive)
+	EngineActive = DiceRoll < Settings->ActivationPercentage;
+	if (EngineActive)
 	{
 		// Log all plugin messages to the ITL operations log
 		GLog->AddOutputDevice(GetITLInternalOpsLog().LogDevice.Get());
 		// Log all engine messages to an internal log just for this plugin, which we will then read from the file as we push log data to the cloud
 		GLog->AddOutputDevice(GetITLInternalGameLog().LogDevice.Get());
 	}
-	UE_LOG(LogPluginSparkLogs, Log, TEXT("Starting up: LaunchConfiguration=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s"), GetITLLaunchConfiguration(true), *EffectiveHttpEndpointURI, *EffectiveAgentID, Settings->ActivationPercentage, DiceRoll, LoggingActive ? TEXT("yes") : TEXT("no"));
-	if (LoggingActive)
+	UE_LOG(LogPluginSparkLogs, Log, TEXT("Starting up: LaunchConfiguration=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s"), GetITLLaunchConfiguration(true), *EffectiveHttpEndpointURI, *EffectiveAgentID, Settings->ActivationPercentage, DiceRoll, EngineActive ? TEXT("yes") : TEXT("no"));
+	if (EngineActive)
 	{
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Ingestion parameters: RequestTimeoutSecs=%lf, BytesPerRequest=%d, ProcessingIntervalSecs=%lf, RetryIntervalSecs=%lf"), Settings->RequestTimeoutSecs, Settings->BytesPerRequest, Settings->ProcessingIntervalSecs, Settings->RetryIntervalSecs);
 		FString SourceLogFile = GetITLInternalGameLog().LogFilePath;
@@ -1396,7 +1764,7 @@ bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAgentID, const T
 			AuthorizationHeader = EffectiveHttpAuthorizationHeaderValue;
 		}
 		CloudPayloadProcessor = TSharedPtr<FsparklogsWriteHTTPPayloadProcessor>(new FsparklogsWriteHTTPPayloadProcessor(*EffectiveHttpEndpointURI, *AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests));
-		CloudStreamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, OverrideComputerName, AdditionalAttributes);
+		CloudStreamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, OverrideComputerName, *GameInstanceID, AdditionalAttributes);
 		FCoreDelegates::OnExit.AddRaw(this, &FsparklogsModule::OnEngineExit);
 
 		if (Settings->StressTestGenerateIntervalSecs > 0)
@@ -1404,12 +1772,12 @@ bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAgentID, const T
 			StressGenerator = MakeUnique<FsparklogsStressGenerator>(Settings);
 		}
 	}
-	return LoggingActive;
+	return EngineActive;
 }
 
 void FsparklogsModule::StopShippingEngine()
 {
-	if (LoggingActive || CloudStreamer.IsValid())
+	if (EngineActive || CloudStreamer.IsValid())
 	{
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Shutting down and flushing logs to cloud..."));
 		GLog->Flush();
@@ -1454,7 +1822,7 @@ void FsparklogsModule::StopShippingEngine()
 		CloudPayloadProcessor.Reset();
 		StressGenerator.Reset();
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Shutdown."));
-		LoggingActive = false;
+		EngineActive = false;
 	}
 }
 
