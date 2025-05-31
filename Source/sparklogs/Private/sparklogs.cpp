@@ -32,7 +32,7 @@ DEFINE_LOG_CATEGORY(LogPluginSparkLogs);
 
 // =============== Globals ===============================================================================
 
-constexpr int GMaxLineLength = 16 * 1024;
+constexpr int GMaxLineLength = 512 * 1024;
 
 static uint8 UTF8ByteOrderMark[3] = {0xEF, 0xBB, 0xBF};
 constexpr uint8 CharInternalNewline = 0x1E; // Control code: RS (Record Separator)
@@ -184,13 +184,13 @@ class FITLSparkLogsLogOutputDeviceFileInitializer
 public:
 	TUniquePtr<FsparklogsOutputDeviceFile> LogDevice;
 	FString LogFilePath;
-	bool InitLogDevice(const TCHAR* Filename)
+	bool InitLogDevice(const TCHAR* Filename, TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> CloudStreamer)
 	{
 		if (!LogDevice)
 		{
 			FString ParentDir = FPaths::GetPath(FPaths::ConvertRelativePathToFull(FGenericPlatformOutputDevices::GetAbsoluteLogFilename()));
 			LogFilePath = FPaths::Combine(ParentDir, Filename);
-			LogDevice = MakeUnique<FsparklogsOutputDeviceFile>(*LogFilePath);
+			LogDevice = MakeUnique<FsparklogsOutputDeviceFile>(*LogFilePath, CloudStreamer);
 			return true;
 		}
 		else
@@ -200,11 +200,11 @@ public:
 	}
 };
 
-FITLSparkLogsLogOutputDeviceFileInitializer& GetITLInternalGameLog()
+FITLSparkLogsLogOutputDeviceFileInitializer& GetITLInternalGameLog(TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> CloudStreamer)
 {
 	static FITLSparkLogsLogOutputDeviceFileInitializer Singleton;
 	FString LogFileName = GetITLLogFileName(TEXT("run"));
-	Singleton.InitLogDevice(*LogFileName);
+	Singleton.InitLogDevice(*LogFileName, CloudStreamer);
 	return Singleton;
 }
 
@@ -302,8 +302,9 @@ FsparklogsSettings::FsparklogsSettings()
 	: RequestTimeoutSecs(DefaultRequestTimeoutSecs)
 	, ActivationPercentage(DefaultActivationPercentage)
 	, BytesPerRequest(DefaultBytesPerRequest)
-	, ProcessingIntervalSecs(DefaultProcessingIntervalSecs)
+	, ProcessingIntervalSecs(DefaultServerProcessingIntervalSecs)
 	, RetryIntervalSecs(DefaultRetryIntervalSecs)
+	, UnflushedBytesToAutoFlush(DefaultUnflushedBytesToAutoFlush)
 	, IncludeCommonMetadata(DefaultIncludeCommonMetadata)
 	, DebugLogRequests(DefaultDebugLogRequests)
 	, AutoStart(DefaultAutoStart)
@@ -395,11 +396,19 @@ void FsparklogsSettings::LoadSettings()
 	}
 	if (!GConfig->GetDouble(*Section, *(SettingPrefix + TEXT("ProcessingIntervalSecs")), ProcessingIntervalSecs, GEngineIni))
 	{
-		ProcessingIntervalSecs = DefaultProcessingIntervalSecs;
+		ProcessingIntervalSecs = GetValueForLaunchConfiguration<double>(DefaultServerProcessingIntervalSecs, DefaultEditorProcessingIntervalSecs, DefaultClientProcessingIntervalSecs, 2);
 	}
 	if (!GConfig->GetDouble(*Section, *(SettingPrefix + TEXT("RetryIntervalSecs")), RetryIntervalSecs, GEngineIni))
 	{
 		RetryIntervalSecs = DefaultRetryIntervalSecs;
+	}
+	if (!GConfig->GetInt(*Section, *(SettingPrefix + TEXT("UnflushedBytesToAutoFlush")), UnflushedBytesToAutoFlush, GEngineIni))
+	{
+		UnflushedBytesToAutoFlush = DefaultUnflushedBytesToAutoFlush;
+	}
+	if (!GConfig->GetDouble(*Section, *(SettingPrefix + TEXT("MinIntervalBetweenFlushes")), MinIntervalBetweenFlushes, GEngineIni))
+	{
+		MinIntervalBetweenFlushes = DefaultMinIntervalBetweenFlushes;
 	}
 
 	if (!GConfig->GetBool(*Section, *(SettingPrefix + TEXT("IncludeCommonMetadata")), IncludeCommonMetadata, GEngineIni))
@@ -482,6 +491,14 @@ void FsparklogsSettings::EnforceConstraints()
 	{
 		RetryIntervalSecs = MaxRetryIntervalSecs;
 	}
+	if (UnflushedBytesToAutoFlush < MinUnflushedBytesToAutoFlush)
+	{
+		UnflushedBytesToAutoFlush = MinUnflushedBytesToAutoFlush;
+	}
+	if (MinIntervalBetweenFlushes < MinMinIntervalBetweenFlushes)
+	{
+		MinIntervalBetweenFlushes = MinMinIntervalBetweenFlushes;
+	}
 	if (StressTestGenerateIntervalSecs > 0 && StressTestNumEntriesPerTick < 1)
 	{
 		StressTestNumEntriesPerTick = 1;
@@ -492,7 +509,7 @@ void FsparklogsSettings::EnforceConstraints()
 
 FsparklogsWriteNDJSONPayloadProcessor::FsparklogsWriteNDJSONPayloadProcessor(FString InOutputFilePath) : OutputFilePath(InOutputFilePath) { }
 
-bool FsparklogsWriteNDJSONPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FsparklogsReadAndStreamToCloud* Streamer)
+bool FsparklogsWriteNDJSONPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, TWeakPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> StreamerWeakPtr)
 {
 	TUniquePtr<IFileHandle> DebugJSONWriter;
 	DebugJSONWriter.Reset(FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*OutputFilePath, true, true));
@@ -531,7 +548,7 @@ void FsparklogsWriteHTTPPayloadProcessor::SetTimeoutSecs(double InTimeoutSecs)
 	TimeoutMillisec.Set((int32)(InTimeoutSecs * 1000.0));
 }
 
-bool FsparklogsWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FsparklogsReadAndStreamToCloud* Streamer)
+bool FsparklogsWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, TWeakPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> StreamerWeakPtr)
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_FsparklogsWriteHTTPPayloadProcessor_ProcessPayload);
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|BEGIN"));
@@ -609,7 +626,11 @@ bool FsparklogsWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayl
 			}
 			else
 			{
-				UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: General HTTP request failure; will retry; retry_seconds=%.3lf"), Streamer->WorkerGetRetrySecs());
+				TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> StreamerPtr = StreamerWeakPtr.Pin();
+				if (StreamerPtr.IsValid())
+				{
+					UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: General HTTP request failure; will retry; retry_seconds=%.3lf"), StreamerPtr->WorkerGetRetrySecs());
+				}
 				RequestSucceeded.AtomicSet(false);
 				RetryableFailure.AtomicSet(true);
 			}
@@ -638,10 +659,11 @@ bool FsparklogsWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayl
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|After request finished|RequestSucceeded=%d|RetryableFailure=%d"), RequestSucceeded ? 1 : 0, RetryableFailure ? 1 : 0);
 	if (!RequestSucceeded && !RetryableFailure)
 	{
-		if (Streamer != nullptr)
+		TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> StreamerPtr = StreamerWeakPtr.Pin();
+		if (StreamerPtr.IsValid())
 		{
 			UE_LOG(LogPluginSparkLogs, Error, TEXT("HTTPPayloadProcessor::ProcessPayload: stopping log streaming service after non-retryable failure"));
-			Streamer->Stop();
+			StreamerPtr->Stop();
 		}
 	}
 
@@ -816,7 +838,7 @@ void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMe
 	}
 }
 
-FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const TCHAR* InSourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName, const TCHAR* GameInstanceID, TMap<FString, FString>* AdditionalAttributes)
+FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const TCHAR* InSourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor, ESPMode::ThreadSafe> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName, const TCHAR* GameInstanceID, TMap<FString, FString>* AdditionalAttributes)
 	: Settings(InSettings)
 	, PayloadProcessor(InPayloadProcessor)
 	, SourceLogFile(InSourceLogFile)
@@ -827,6 +849,8 @@ FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const TCHAR* InSo
 	, WorkerMinNextFlushPlatformTime(0)
 	, WorkerNumConsecutiveFlushFailures(0)
 	, WorkerLastFailedFlushPayloadSize(0)
+	, LastFlushPlatformTime(0)
+	, BytesQueuedSinceLastFlush(0)
 {
 	ProgressMarkerPath = FPaths::Combine(FPaths::GetPath(InSourceLogFile), GetITLPluginStateFilename());
 	ComputeCommonEventJSON(Settings->IncludeCommonMetadata, GameInstanceID, AdditionalAttributes);
@@ -900,6 +924,37 @@ void FsparklogsReadAndStreamToCloud::Stop()
 {
 	int32 NewValue = StopRequestCounter.Increment();
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Stop|StopRequestCounter=%d"), (int)NewValue);
+}
+
+bool FsparklogsReadAndStreamToCloud::AccrueWrittenBytes(int N)
+{
+	int64 Result = N + BytesQueuedSinceLastFlush.fetch_add((int64)N);
+	if (Result >= Settings->UnflushedBytesToAutoFlush)
+	{
+		double Now = FPlatformTime::Seconds();
+		if ((Now - LastFlushPlatformTime.load()) >= Settings->MinIntervalBetweenFlushes)
+		{
+			// Even though flush hasn't started, we will initiate it, so do not attempt more auto-flushes until the interval has passed again.
+			BytesQueuedSinceLastFlush.store(0);
+			LastFlushPlatformTime.store(Now);
+			RequestFlush();
+			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|AccrueWrittenBytes|Automatically requesting a flush after the min interval and queued bytes..."));
+			return true;
+		}
+	}
+	return false;
+}
+
+bool FsparklogsReadAndStreamToCloud::RequestFlush()
+{
+	// If we've already requested a stop, a flush is impossible
+	if (StopRequestCounter.GetValue() > 0)
+	{
+		return false;
+	}
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|RequestFlush|Initiating flush by incrementing counter..."));
+	FlushRequestCounter.Increment();
+	return true;
 }
 
 bool FsparklogsReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer, bool InitiateStop, bool OnMainGameThread, double TimeoutSec, bool& OutLastFlushProcessedEverything)
@@ -1104,8 +1159,19 @@ bool FsparklogsReadAndStreamToCloud::WorkerReadNextPayload(int& OutNumToRead, in
 	WorkerReader.Reset(FPlatformFileManager::Get().GetPlatformFile().OpenRead(*SourceLogFile, true));
 	if (WorkerReader == nullptr)
 	{
-		UE_LOG(LogPluginSparkLogs, Warning, TEXT("STREAMER: Failed to open logfile='%s'"), *SourceLogFile);
-		return false;
+		if (!FPaths::FileExists(SourceLogFile))
+		{
+			OutEffectiveShippedLogOffset = 0;
+			OutNumToRead = 0;
+			OutRemainingBytes = 0;
+			ITL_DBG_UE_LOG(LogPluginSparkLogs, Log, TEXT("STREAMER|WorkerReadNextPayload|Logfile does not yet exist, nothing to read|logfile='%s'"), *SourceLogFile);
+			return true;
+		}
+		else
+		{
+			UE_LOG(LogPluginSparkLogs, Warning, TEXT("STREAMER: Failed to open logfile='%s'"), *SourceLogFile);
+			return false;
+		}
 	}
 	int64 FileSize = WorkerReader->Size();
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerReadNextPayload|opened log file|last_offset=%ld|current_file_size=%ld|logfile='%s'"), OutEffectiveShippedLogOffset, FileSize, *SourceLogFile);
@@ -1290,6 +1356,8 @@ bool FsparklogsReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippedL
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerInternalDoFlush|BEGIN"));
 	OutNewShippedLogOffset = WorkerShippedLogOffset;
 	OutFlushProcessedEverything = false;
+	LastFlushPlatformTime.store(FPlatformTime::Seconds());
+	BytesQueuedSinceLastFlush.store(0);
 	
 	int NumToRead = 0;
 	int64 EffectiveShippedLogOffset = WorkerShippedLogOffset, RemainingBytes;
@@ -1327,7 +1395,7 @@ bool FsparklogsReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippedL
 			return false;
 		}
 		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerInternalDoFlush|Begin processing payload"));
-		if (!PayloadProcessor->ProcessPayload(WorkerNextEncodedPayload, WorkerNextEncodedPayload.Num(), WorkerNextPayload.Len(), Settings->CompressionMode, this))
+		if (!PayloadProcessor->ProcessPayload(WorkerNextEncodedPayload, WorkerNextEncodedPayload.Num(), WorkerNextPayload.Len(), Settings->CompressionMode, WeakThisPtr))
 		{
 			UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER: Failed to process payload: offset=%ld, num_read=%d, payload_input_size=%d, logfile='%s'"), EffectiveShippedLogOffset, NumToRead, CapturedOffset, *SourceLogFile);
 			WorkerLastFailedFlushPayloadSize = NumToRead;
@@ -1392,11 +1460,12 @@ double FsparklogsReadAndStreamToCloud::WorkerGetRetrySecs()
 
 // =============== FsparklogsOutputDeviceFile ===============================================================================
 
-FsparklogsOutputDeviceFile::FsparklogsOutputDeviceFile(const TCHAR* InFilename)
+FsparklogsOutputDeviceFile::FsparklogsOutputDeviceFile(const TCHAR* InFilename, TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> CloudStreamer)
 : Failed(false)
 , ForceLogFlush(false)
 , AsyncWriter(nullptr)
 , WriterArchive(nullptr)
+, CloudStreamerWeakPtr(CloudStreamer)
 {
 	Filename = InFilename;
 	ForceLogFlush = FParse::Param(FCommandLine::Get(), TEXT("FORCELOGFLUSH"));
@@ -1405,6 +1474,11 @@ FsparklogsOutputDeviceFile::FsparklogsOutputDeviceFile(const TCHAR* InFilename)
 FsparklogsOutputDeviceFile::~FsparklogsOutputDeviceFile()
 {
 	TearDown();
+}
+
+void FsparklogsOutputDeviceFile::SetCloudStreamer(TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> CloudStreamer)
+{
+	CloudStreamerWeakPtr = TWeakPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(CloudStreamer);
 }
 
 void FsparklogsOutputDeviceFile::TearDown()
@@ -1458,6 +1532,7 @@ void FsparklogsOutputDeviceFile::Serialize(const TCHAR* Data, ELogVerbosity::Typ
 			{
 				// Minimize unnecessary allocations or processing and just try to log while we possibly still can.
 				FOutputDeviceHelper::FormatCastAndSerializeLine(*AsyncWriter, Data, Verbosity, Category, Time, bSuppressEventTag, bAutoEmitLineTerminator);
+				// Do not accrue written bytes in this situation
 			}
 			else
 			{
@@ -1471,12 +1546,11 @@ void FsparklogsOutputDeviceFile::Serialize(const TCHAR* Data, ELogVerbosity::Typ
 				DataStr.ReplaceInline(TEXT("\r"), TEXT(""), ESearchCase::CaseSensitive);
 				ITLFStringTrimCharStartEndInline(DataStr, StrCharInternalNewline[0]);
 				FString ExtraJSON;
-				ExtraJSON.Reserve(31);
-				ExtraJSON.AppendChar(StrCharInternalJSONStart[0]);
 				if (Verbosity == ELogVerbosity::Log || !GPrintLogVerbosity || bSuppressEventTag)
 				{
+					ExtraJSON.Reserve(31);
 					// Treat UE log severity as authoritative and make sure it's explicitly encoded if it's not already implicitly encoded in the log text.
-					if (ExtraJSON.Len() > 1)
+					if (ExtraJSON.Len() > 0)
 					{
 						ExtraJSON += ", ";
 					}
@@ -1484,14 +1558,10 @@ void FsparklogsOutputDeviceFile::Serialize(const TCHAR* Data, ELogVerbosity::Typ
 					ExtraJSON += ITLSeverityToString(Verbosity);
 					ExtraJSON += "\"";
 				}
-				if (ExtraJSON.Len() > 1)
-				{
-					ExtraJSON.AppendChar(StrCharInternalJSONEnd[0]);
-					DataStr.InsertAt(0, ExtraJSON);
-				}
 
 				// Format the transformed log line instead of the original
-				FOutputDeviceHelper::FormatCastAndSerializeLine(*AsyncWriter, *DataStr, Verbosity, Category, Time, bSuppressEventTag, bAutoEmitLineTerminator);
+				FsparklogsOutputDeviceFile::InternalAddMessageEvent(*AsyncWriter, ExtraJSON, *DataStr, Verbosity, Category, Time, bSuppressEventTag);
+				AccrueWrittenBytes(DataStr.Len() + 32);
 			}
 			if (ForceLogFlush)
 			{
@@ -1504,6 +1574,57 @@ void FsparklogsOutputDeviceFile::Serialize(const TCHAR* Data, ELogVerbosity::Typ
 void FsparklogsOutputDeviceFile::Serialize(const TCHAR* Data, ELogVerbosity::Type Verbosity, const class FName& Category)
 {
 	Serialize(Data, Verbosity, Category, -1.0);
+}
+
+void FsparklogsOutputDeviceFile::InternalAddMessageEvent(FArchive& Output, FString& RawJSON, const TCHAR* Message, ELogVerbosity::Type Verbosity, const class FName& Category, const double Time, bool bSuppressEventTag)
+{
+	// In general, make logs follow Windows convention
+#if PLATFORM_UNIX
+	static const TCHAR* Terminator = TEXT("\r\n");
+#else
+	static const TCHAR* Terminator = LINE_TERMINATOR;
+#endif // PLATFORM_UNIX
+	static const int32 TerminatorLength = FCString::Strlen(Terminator);
+	static const int32 ConvertedTerminatorLength = FTCHARToUTF8_Convert::ConvertedLength(Terminator, TerminatorLength);
+
+	const int32 RawJSONLength = RawJSON.Len();
+	int32 ConvertedRawJSONLength = FTCHARToUTF8_Convert::ConvertedLength(*RawJSON, RawJSONLength);
+	if (ConvertedRawJSONLength > 0)
+	{
+		// Add room for the starting and ending marker characters
+		ConvertedRawJSONLength += 2;
+	}
+
+	FString EventTag;
+	if (!bSuppressEventTag)
+	{
+		EventTag = FOutputDeviceHelper::FormatLogLine(Verbosity, Category, nullptr, GPrintLogTimes, Time);
+	}
+	const int32 EventTagLength = EventTag.Len();
+	const int32 ConvertedEventTagLength = FTCHARToUTF8_Convert::ConvertedLength(*EventTag, EventTagLength);
+
+	const int32 MessageLength = (Message == nullptr) ? 0 : FCString::Strlen(Message);
+	const int32 ConvertedMessageLength = (Message == nullptr) ? 0 : FTCHARToUTF8_Convert::ConvertedLength(Message, MessageLength);
+
+	TArray<ANSICHAR, TInlineAllocator<2 * DEFAULT_STRING_CONVERSION_SIZE>> ConvertedEventData;
+	ConvertedEventData.AddUninitialized(ConvertedRawJSONLength + ConvertedEventTagLength + ConvertedMessageLength + ConvertedTerminatorLength);
+	if (ConvertedRawJSONLength > 0)
+	{
+		ConvertedEventData.GetData()[0] = CharInternalJSONStart;
+		FTCHARToUTF8_Convert::Convert(ConvertedEventData.GetData() + 1, ConvertedRawJSONLength - 2, *RawJSON, RawJSONLength);
+		ConvertedEventData.GetData()[ConvertedRawJSONLength - 1] = CharInternalJSONEnd;
+	}
+	if (ConvertedEventTagLength > 0)
+	{
+		FTCHARToUTF8_Convert::Convert(ConvertedEventData.GetData() + ConvertedRawJSONLength, ConvertedEventTagLength, *EventTag, EventTagLength);
+	}
+	if (ConvertedMessageLength > 0)
+	{
+		FTCHARToUTF8_Convert::Convert(ConvertedEventData.GetData() + ConvertedRawJSONLength + ConvertedEventTagLength, ConvertedMessageLength, Message, MessageLength);
+	}
+	FTCHARToUTF8_Convert::Convert(ConvertedEventData.GetData() + ConvertedRawJSONLength + ConvertedEventTagLength + ConvertedMessageLength, ConvertedTerminatorLength, Terminator, TerminatorLength);
+
+	Output.Serialize(ConvertedEventData.GetData(), ConvertedEventData.Num() * sizeof(ANSICHAR));
 }
 
 bool FsparklogsOutputDeviceFile::AddRawEvent(const TCHAR* RawJSON, const TCHAR* Message)
@@ -1571,6 +1692,7 @@ bool FsparklogsOutputDeviceFile::AddRawEvent(const TCHAR* RawJSON, const TCHAR* 
 	}
 
 	AsyncWriter->Serialize(ConvertedEventData.GetData(), ConvertedEventData.Num() * sizeof(ANSICHAR));
+	AccrueWrittenBytes(ConvertedEventData.Num() * sizeof(ANSICHAR));
 	return true;
 }
 
@@ -1606,6 +1728,20 @@ bool FsparklogsOutputDeviceFile::ShouldLogCategory(const class FName& Category)
 #else
 	return AlwaysLoggedCategories.Contains(Category);
 #endif
+}
+
+bool FsparklogsOutputDeviceFile::AccrueWrittenBytes(int N)
+{
+	TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> CloudStreamer = CloudStreamerWeakPtr.Pin();
+	if (CloudStreamer.IsValid())
+	{
+		if (CloudStreamer->AccrueWrittenBytes(N))
+		{
+			Flush();
+			return true;
+		}
+	}
+	return false;
 }
 
 // =============== FsparklogsModule ===============================================================================
@@ -1747,13 +1883,13 @@ bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAgentID, const T
 		// Log all plugin messages to the ITL operations log
 		GLog->AddOutputDevice(GetITLInternalOpsLog().LogDevice.Get());
 		// Log all engine messages to an internal log just for this plugin, which we will then read from the file as we push log data to the cloud
-		GLog->AddOutputDevice(GetITLInternalGameLog().LogDevice.Get());
+		GLog->AddOutputDevice(GetITLInternalGameLog(nullptr).LogDevice.Get());
 	}
 	UE_LOG(LogPluginSparkLogs, Log, TEXT("Starting up: LaunchConfiguration=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s"), GetITLLaunchConfiguration(true), *EffectiveHttpEndpointURI, *EffectiveAgentID, Settings->ActivationPercentage, DiceRoll, EngineActive ? TEXT("yes") : TEXT("no"));
 	if (EngineActive)
 	{
-		UE_LOG(LogPluginSparkLogs, Log, TEXT("Ingestion parameters: RequestTimeoutSecs=%lf, BytesPerRequest=%d, ProcessingIntervalSecs=%lf, RetryIntervalSecs=%lf"), Settings->RequestTimeoutSecs, Settings->BytesPerRequest, Settings->ProcessingIntervalSecs, Settings->RetryIntervalSecs);
-		FString SourceLogFile = GetITLInternalGameLog().LogFilePath;
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("Ingestion parameters: RequestTimeoutSecs=%lf, BytesPerRequest=%d, ProcessingIntervalSecs=%lf, RetryIntervalSecs=%lf, UnflushedBytesToAutoFlush=%d, MinIntervalBetweenFlushes=%lf"), Settings->RequestTimeoutSecs, Settings->BytesPerRequest, Settings->ProcessingIntervalSecs, Settings->RetryIntervalSecs, (int)Settings->UnflushedBytesToAutoFlush, Settings->MinIntervalBetweenFlushes);
+		FString SourceLogFile = GetITLInternalGameLog(nullptr).LogFilePath;
 		FString AuthorizationHeader;
 		if (EffectiveHttpAuthorizationHeaderValue.IsEmpty())
 		{
@@ -1763,9 +1899,11 @@ bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAgentID, const T
 		{
 			AuthorizationHeader = EffectiveHttpAuthorizationHeaderValue;
 		}
-		CloudPayloadProcessor = TSharedPtr<FsparklogsWriteHTTPPayloadProcessor>(new FsparklogsWriteHTTPPayloadProcessor(*EffectiveHttpEndpointURI, *AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests));
-		CloudStreamer = MakeUnique<FsparklogsReadAndStreamToCloud>(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, OverrideComputerName, *GameInstanceID, AdditionalAttributes);
+		CloudPayloadProcessor = TSharedPtr<FsparklogsWriteHTTPPayloadProcessor, ESPMode::ThreadSafe>(new FsparklogsWriteHTTPPayloadProcessor(*EffectiveHttpEndpointURI, *AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests));
+		CloudStreamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, OverrideComputerName, *GameInstanceID, AdditionalAttributes));
+		CloudStreamer->SetWeakThisPtr(CloudStreamer);
 		FCoreDelegates::OnExit.AddRaw(this, &FsparklogsModule::OnEngineExit);
+		GetITLInternalGameLog(CloudStreamer).LogDevice->SetCloudStreamer(CloudStreamer);
 
 		if (Settings->StressTestGenerateIntervalSecs > 0)
 		{
@@ -1797,10 +1935,10 @@ void FsparklogsModule::StopShippingEngine()
 			bool LastFlushProcessedEverything = false;
 			if (CloudStreamer->FlushAndWait(2, true, true, true, FsparklogsSettings::WaitForFlushToCloudOnShutdown, LastFlushProcessedEverything))
 			{
-				FString LogFilePath = GetITLInternalGameLog().LogFilePath;
+				FString LogFilePath = GetITLInternalGameLog(nullptr).LogFilePath;
 				UE_LOG(LogPluginSparkLogs, Log, TEXT("Flushed logs successfully. LastFlushedEverything=%d"), (int)LastFlushProcessedEverything);
 				// Purge this plugin's logfile and delete the progress marker (fully flushed shutdown should start with an empty log next game session).
-				FOutputDevice* LogDevice = GetITLInternalGameLog().LogDevice.Get();
+				FOutputDevice* LogDevice = GetITLInternalGameLog(nullptr).LogDevice.Get();
 				GLog->RemoveOutputDevice(LogDevice);
 				LogDevice->Flush();
 				LogDevice->TearDown();

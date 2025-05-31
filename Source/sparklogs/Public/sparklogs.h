@@ -64,8 +64,11 @@ public:
 	static constexpr double DefaultActivationPercentage = 100.0;
 	static constexpr int DefaultBytesPerRequest = 3 * 1024 * 1024;
 	static constexpr int MinBytesPerRequest = 1024 * 128;
-	static constexpr int MaxBytesPerRequest = 1024 * 1024 * 4;
-	static constexpr double DefaultProcessingIntervalSecs = 2.0;
+	static constexpr int MaxBytesPerRequest = 1024 * 1024 * 6;
+	static constexpr int DefaultUnflushedBytesToAutoFlush = 1024 * 128;
+	static constexpr int MinUnflushedBytesToAutoFlush = 1024 * 16;
+	static constexpr double MinMinIntervalBetweenFlushes = 1.0;
+	static constexpr double DefaultMinIntervalBetweenFlushes = 2.0;
 	static constexpr double MinProcessingIntervalSecs = 0.5;
 	static constexpr double DefaultRetryIntervalSecs = 30.0;
 	static constexpr double MinRetryIntervalSecs = 15.0;
@@ -76,6 +79,11 @@ public:
 	static constexpr bool DefaultDebugLogRequests = false;
 	static constexpr bool DefaultAutoStart = true;
 	static constexpr bool DefaultAddRandomGameInstanceID = true;
+
+	static constexpr double DefaultServerProcessingIntervalSecs = 2.0;
+	static constexpr double DefaultEditorProcessingIntervalSecs = 2.0;
+	// There could be millions of clients, so give more time for data to queue up before flushing...
+	static constexpr double DefaultClientProcessingIntervalSecs = 60.0 * 10;
 
 	static constexpr bool DefaultServerCollectAnalytics = true;
 	static constexpr bool DefaultServerCollectLogs = true;
@@ -111,6 +119,10 @@ public:
 	double ProcessingIntervalSecs;
 	/** The amount of time to wait after a failed request before retrying. */
 	double RetryIntervalSecs;
+	/** If there are at least this many unflushed bytes and it's been at least MinIntervalBetweenFlushes time, it will automatically trigger a flush. */
+	int32 UnflushedBytesToAutoFlush;
+	/** The minimum amount of time between automatic size-triggered flushes */
+	double MinIntervalBetweenFlushes;
 	/** Whether or not to include common metadata in each log event. */
 	bool IncludeCommonMetadata;
 	/** Whether or not to log requests */
@@ -298,11 +310,19 @@ public:
 
 	// Target seconds between attempts to read and process a chunk.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Processing Interval in Seconds")
-	float ServerProcessingIntervalSecs = FsparklogsSettings::DefaultProcessingIntervalSecs;
+	float ServerProcessingIntervalSecs = FsparklogsSettings::DefaultServerProcessingIntervalSecs;
 
 	// The amount of time to wait after a failed request before retrying.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Retry Interval in Seconds")
 	float ServerRetryIntervalSecs = FsparklogsSettings::DefaultRetryIntervalSecs;
+
+	// If there are at least this many unflushed bytes and it's been at least MinIntervalBetweenFlushes time, it will automatically trigger a flush.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Unflushed Bytes To Auto Flush")
+	int32 ServerUnflushedBytesToAutoFlush = FsparklogsSettings::DefaultUnflushedBytesToAutoFlush;
+
+	// The minimum number of seconds between automatic size-triggered flushes
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Min Interval Between Flushes in Seconds")
+	float ServerMinIntervalBetweenFlushes = FsparklogsSettings::DefaultMinIntervalBetweenFlushes;
 
 	// Whether or not to include common metadata (hostname, game name) in each log event.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Include Common Metadata")
@@ -324,11 +344,19 @@ public:
 
 	// Target seconds between attempts to read and process a chunk. [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Processing Interval in Seconds")
-	float EditorProcessingIntervalSecs = FsparklogsSettings::DefaultProcessingIntervalSecs;
+	float EditorProcessingIntervalSecs = FsparklogsSettings::DefaultEditorProcessingIntervalSecs;
 
 	// The amount of time to wait after a failed request before retrying. [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Retry Interval in Seconds")
 	float EditorRetryIntervalSecs = FsparklogsSettings::DefaultRetryIntervalSecs;
+
+	// If there are at least this many unflushed bytes and it's been at least MinIntervalBetweenFlushes time, it will automatically trigger a flush. [EDITOR RESTART REQUIRED]
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", DisplayName = "Unflushed Bytes To Auto Flush")
+	int32 EditorUnflushedBytesToAutoFlush = FsparklogsSettings::DefaultUnflushedBytesToAutoFlush;
+
+	// The minimum number of seconds between automatic size-triggered flushes. [EDITOR RESTART REQUIRED]
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", DisplayName = "Min Interval Between Flushes in Seconds")
+	float EditorMinIntervalBetweenFlushes = FsparklogsSettings::DefaultMinIntervalBetweenFlushes;
 
 	// Whether or not to include common metadata (hostname, game name) in each log event. [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Include Common Metadata")
@@ -350,11 +378,19 @@ public:
 
 	// Target seconds between attempts to read and process a chunk.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Processing Interval in Seconds")
-	float ClientProcessingIntervalSecs = FsparklogsSettings::DefaultProcessingIntervalSecs;
+	float ClientProcessingIntervalSecs = FsparklogsSettings::DefaultClientProcessingIntervalSecs;
 
 	// The amount of time to wait after a failed request before retrying.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Retry Interval in Seconds")
 	float ClientRetryIntervalSecs = FsparklogsSettings::DefaultRetryIntervalSecs;
+
+	// If there are at least this many unflushed bytes and it's been at least MinIntervalBetweenFlushes time, it will automatically trigger a flush.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Unflushed Bytes To Auto Flush")
+	int32 ClientUnflushedBytesToAutoFlush = FsparklogsSettings::DefaultUnflushedBytesToAutoFlush;
+
+	// The minimum number of seconds between automatic size-triggered flushes.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Min Interval Between Flushes in Seconds")
+	float ClientMinIntervalBetweenFlushes = FsparklogsSettings::DefaultMinIntervalBetweenFlushes;
 
 	// Whether or not to include common metadata (hostname, game name) in each log event.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Include Common Metadata")
@@ -379,7 +415,7 @@ class SPARKLOGS_API IsparklogsPayloadProcessor
 public:
 	virtual ~IsparklogsPayloadProcessor() = default;
 	/** Processes the JSON payload, and returns true on success or false on failure. */
-	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FsparklogsReadAndStreamToCloud* Streamer) = 0;
+	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, TWeakPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> StreamerWeakPtr) = 0;
 };
 
 /** A payload processor that writes the data to a local file (for DEBUG purposes only). */
@@ -389,7 +425,7 @@ protected:
 	FString OutputFilePath;
 public:
 	FsparklogsWriteNDJSONPayloadProcessor(FString InOutputFilePath);
-	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FsparklogsReadAndStreamToCloud* Streamer) override;
+	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, TWeakPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> StreamerWeakPtr) override;
 };
 
 /** A payload processor that synchronously POSTs the data to an HTTP(S) endpoint. */
@@ -402,7 +438,7 @@ protected:
 	bool LogRequests;
 public:
 	FsparklogsWriteHTTPPayloadProcessor(const TCHAR* InEndpointURI, const TCHAR* InAuthorizationHeader, double InTimeoutSecs, bool InLogRequests);
-	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, FsparklogsReadAndStreamToCloud* Streamer) override;
+	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, TWeakPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> StreamerWeakPtr) override;
 	void SetTimeoutSecs(double InTimeoutSecs);
 
 protected:
@@ -444,8 +480,9 @@ class SPARKLOGS_API FsparklogsReadAndStreamToCloud : public FRunnable
 protected:
 	static const TCHAR* ProgressMarkerValue;
 
+	TWeakPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> WeakThisPtr;
 	TSharedRef<FsparklogsSettings> Settings;
-	TSharedRef<IsparklogsPayloadProcessor> PayloadProcessor;
+	TSharedRef<IsparklogsPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor;
 	FString ProgressMarkerPath;
 	FString SourceLogFile;
 	int MaxLineLength;
@@ -485,18 +522,35 @@ protected:
 	/** Whether or not the next flush platform time is because of a failure. */
 	FThreadSafeBool WorkerLastFlushFailed;
 
+	/** The time of the initiation of the last flush (or 0 if we have never flushed). */
+	std::atomic<double> LastFlushPlatformTime;
+	/** The amount of bytes queued up since last flush. */
+	std::atomic<int64> BytesQueuedSinceLastFlush;
+
 	virtual void ComputeCommonEventJSON(bool IncludeCommonMetadata, const TCHAR* GameInstanceID, TMap<FString, FString>* AdditionalAttributes);
 
 public:
 
-	FsparklogsReadAndStreamToCloud(const TCHAR* SourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName, const TCHAR* GameInstanceID, TMap<FString, FString>* AdditionalAttributes);
+	FsparklogsReadAndStreamToCloud(const TCHAR* SourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor, ESPMode::ThreadSafe> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName, const TCHAR* GameInstanceID, TMap<FString, FString>* AdditionalAttributes);
 	~FsparklogsReadAndStreamToCloud();
+
+	// After constructing this object you must give it a weak pointer to itself before running it. Needed to pass to payload processor.
+	void SetWeakThisPtr(TWeakPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> P) {
+		WeakThisPtr = P;
+	}
 
 	//~ Begin FRunnable Interface
 	virtual bool Init();
 	virtual uint32 Run();
 	virtual void Stop();
 	//~ End FRunnable Interface
+
+	/** Thread-safe. Recognize that N bytes was just queued up (written to the backing file), and trigger a flush if appropriate
+	  * (it's been at least X bytes since the last flush and it's been at least Y seconds). Returns true if flush happened. */
+	virtual bool AccrueWrittenBytes(int N);
+
+	/** Request that a Flush is initiated if possible. Does not wait for the flush to finish. Returns true if flush was initiated. */
+	virtual bool RequestFlush();
 
 	/** Initiate Flush up to N times, optionally clear retry timer to try again immediately, optionally initiate Stop, and wait up through a timeout for each flush to complete. Returns false on timeout or if the flush failed. */
 	virtual bool FlushAndWait(int N, bool ClearRetryTimer, bool InitiateStop, bool OnMainGameThread, double TimeoutSec, bool& OutLastFlushProcessedEverything);
@@ -529,15 +583,18 @@ protected:
 *  - Certain categories can be forced to log to the file even if (!ALLOW_LOG_FILE || NO_LOGGING). Used for analytics event encoding.
 *  - Will encode the default log severity explicitly to make sure messages are not auto-detected as something else.
 *  - Always UTF-8 and always append-only. Never backs up old logfiles.
+*  - Will accrue bytes with the FsparklogsReadAndStreamToCloud to automatically trigger a flush if appropriate.
 */
 class SPARKLOGS_API FsparklogsOutputDeviceFile : public FOutputDevice
 {
 public:
 	/** Constructor. InFilename is required. If the file already exists, data will be appended to it. */
-	FsparklogsOutputDeviceFile(const TCHAR* InFilename);
+	FsparklogsOutputDeviceFile(const TCHAR* InFilename, TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> CloudStreamer);
 
 	/** Deconstructor that performs cleanup. */
 	~FsparklogsOutputDeviceFile();
+
+	void SetCloudStreamer(TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> CloudStreamer);
 
 	//~ Begin FOutputDevice Interface.
 	/**
@@ -587,6 +644,11 @@ protected:
 	FArchive* WriterArchive;
 	/** The categories that are always logged to the file, even if (!ALLOW_LOG_FILE || NO_LOGGING). */
 	TSet<FName> AlwaysLoggedCategories;
+	/** The weak reference to the streamer that will accrue bytes for auto-flushing. */
+	TWeakPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> CloudStreamerWeakPtr;
+
+	/** Writes out the given message event, potentially with a common message tag (e.g., date/time and verbosity/category), potentially with the ExtraJSON at the front. */
+	static void InternalAddMessageEvent(FArchive& Output, FString& RawJSON, const TCHAR* Message, ELogVerbosity::Type Verbosity, const class FName& Category, const double Time, bool bSuppressEventTag);
 
 	/** If the writer is not yet created, attempts to create it. On failure, sets Failed to True and returns false. */
 	bool CreateAsyncWriter();
@@ -596,6 +658,9 @@ protected:
 	  * it will return true only if the category name is in the always logged category set.
 	  */
 	bool ShouldLogCategory(const class FName& InCategoryName);
+
+	/** Accrue N bytes to the cloud streamer if possible. */
+	bool AccrueWrittenBytes(int N);
 };
 
 /**
@@ -669,10 +734,10 @@ private:
 	FString GameInstanceID;
 	bool EngineActive;
 	TSharedRef<FsparklogsSettings> Settings;
-	TUniquePtr<FsparklogsReadAndStreamToCloud> CloudStreamer;
+	TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> CloudStreamer;
 	TUniquePtr<FsparklogsStressGenerator> StressGenerator;
 	/** The payload processor that sends data to the cloud */
-	TSharedPtr<FsparklogsWriteHTTPPayloadProcessor> CloudPayloadProcessor;
+	TSharedPtr<FsparklogsWriteHTTPPayloadProcessor, ESPMode::ThreadSafe> CloudPayloadProcessor;
 
 	void RegisterSettings();
 	void UnregisterSettings();
