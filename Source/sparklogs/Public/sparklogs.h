@@ -46,6 +46,13 @@ enum class SPARKLOGS_API ITLCompressionMode
 	None = 1
 };
 
+/** The type of user ID to use for analytics. */
+enum class SPARKLOGS_API ITLAnalyticsUserIDType
+{
+	DeviceID = 0,
+	Generated = 1
+};
+
 SPARKLOGS_API bool ITLCompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, TArray<uint8>& OutData);
 SPARKLOGS_API bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, int InOriginalDataLen, TArray<uint8>& OutData);
 SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length);
@@ -57,6 +64,10 @@ class SPARKLOGS_API FsparklogsSettings
 {
 public:
 	static const TCHAR* PluginStateSection;
+
+	static constexpr TCHAR* AnalyticsUserIDTypeDeviceID = TEXT("device_id");
+	static constexpr TCHAR* AnalyticsUserIDTypeGenerated = TEXT("generated");
+	static constexpr TCHAR* DefaultAnalyticsUserIDType = AnalyticsUserIDTypeDeviceID;
 
 	static constexpr double DefaultRequestTimeoutSecs = 90;
 	static constexpr double MinRequestTimeoutSecs = 30;
@@ -92,8 +103,10 @@ public:
 	static constexpr bool DefaultClientCollectAnalytics = true;
 	static constexpr bool DefaultClientCollectLogs = false;
 
-	/** The game ID to use for game analytics. If set, will also be added to log events. */
+	/** The game ID to use for analytics. If set, will also be added to log events. */
 	FString AnalyticsGameID;
+	/** The type of user ID to use for analytics. */
+	ITLAnalyticsUserIDType AnalyticsUserIDType;
 
 	/** Whether or not game analytic events are collected */
 	bool CollectAnalytics;
@@ -147,9 +160,25 @@ public:
 	/** Gets the effective HTTP endpoint URI (either using the overridden HTTP endpoint URI if non-empty, or using the HttpEndpointURI if configured, or the CloudRegion). Returns empty if not configured. */
 	FString GetEffectiveHttpEndpointURI(const TCHAR* OverrideHTTPEndpointURI);
 
+	/** Thread-safe. Returns the User ID to use based on the analytics user ID type. */
+	FString GetEffectiveAnalyticsUserID();
+
+	/** Thread-safe. Returns the Player ID to use based on the analytics user ID and the analytics game ID. */
+	FString GetEffectiveAnalyticsPlayerID();
+
+	/** Thread-safe. Sets a custom User ID to use. */
+	void SetUserID(const TCHAR* UserID);
+
 protected:
+	FCriticalSection CachedCriticalSection;
+	FString CachedAnalyticsUserID;
+	FString CachedAnalyticsPlayerID;
+
 	/** Enforces constraints upon any loaded setting values. */
 	void EnforceConstraints();
+
+	/** Returns whether or not a given ID has valid information. */
+	static bool IsValidDeviceID(const FString& deviceId);
 };
 
 /**
@@ -161,11 +190,24 @@ class SPARKLOGS_API USparkLogsRuntimeSettings : public UObject
 	GENERATED_BODY()
 
 public:
-	// ------------------------------------------ GAME ANALYTICS
+	// ------------------------------------------ ANALYTICS
 	
-	// ID to identify this game when storing game analytics (can be any arbitrary string, e.g., "my_platformer_game"). Required for game analytics data to be sent.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Game Analytics", DisplayName = "Game ID")
+	// ID to identify this game when storing analytics (can be any arbitrary string, e.g., "my_platformer_game"). Required for analytics data to be sent.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Analytics", DisplayName = "Game ID")
 	FString AnalyticsGameID;
+
+	// The type of user ID for analytics. "Device ID" uses FPlatformMisc::GetDeviceId() (identifier for vendor (idvf) on iOS, Android ID on Android, see docs for requirements on use of this ID type). "Generated" randomly generates an ID and stores it with app config data. All methods failback to Generated as needed. The user ID can also be manually overriden when starting the engine.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Analytics", DisplayName = "Type of User ID", meta = (GetOptions = "GetAnalyticsUserIDTypeOptions"))
+	FString AnalyticsUserIDType = FsparklogsSettings::DefaultAnalyticsUserIDType;
+
+	UFUNCTION()
+	static TArray<FString> GetAnalyticsUserIDTypeOptions()
+	{
+		return {
+			FsparklogsSettings::AnalyticsUserIDTypeDeviceID,
+			FsparklogsSettings::AnalyticsUserIDTypeGenerated,
+		};
+	}
 
 	// ------------------------------------------ SERVER LAUNCH CONFIGURATION SETTINGS
 
@@ -701,6 +743,10 @@ public:
 	/**
 	 * Starts the log/event shipping engine if it has not yet started.
 	 * 
+	 * You can override the analytics user ID (normally we generate automatically) if desired
+	 * by specifying a non-null, non-empty value. Any custom analytics user ID should be globally
+	 * unique and make sure to respect any privacy rules for your app.
+	 * 
 	 * You can override the agent ID and/or agent auth token by specifying non-empty values.
 	 *
 	 * If you are sending data to your own HTTP endpoint URI instead of the SparkLogs cloud,
@@ -718,7 +764,7 @@ public:
 	 *
 	 * Returns true if the shipping engine was activated (may be false if diceroll + ActivationPercentage caused it to not start).
 	 */
-	bool StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHTTPEndpointURI, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, TMap<FString, FString>* AdditionalAttributes, bool AlwaysStart);
+	bool StartShippingEngine(const TCHAR* OverrideAnalyticsUserID, const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHTTPEndpointURI, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, TMap<FString, FString>* AdditionalAttributes, bool AlwaysStart);
 
 	/** Stops the log/event shipping engine. Any active game analytics session (if any) will end. It will not start again unless StartShippingEngine is manually called. */
 	void StopShippingEngine();
