@@ -7,6 +7,7 @@
 #include "Misc/AssertionMacros.h"
 #include "Misc/OutputDeviceFile.h"
 #include "Misc/OutputDeviceHelper.h"
+#include "Misc/SecureHash.h"
 #include "ISettingsModule.h"
 #include "HAL/ThreadManager.h"
 
@@ -299,7 +300,10 @@ SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length)
 const TCHAR* FsparklogsSettings::PluginStateSection = TEXT("PluginState");
 
 FsparklogsSettings::FsparklogsSettings()
-	: RequestTimeoutSecs(DefaultRequestTimeoutSecs)
+	: AnalyticsUserIDType(ITLAnalyticsUserIDType::DeviceID)
+	, CollectAnalytics(true)
+	, CollectLogs(false)
+	, RequestTimeoutSecs(DefaultRequestTimeoutSecs)
 	, ActivationPercentage(DefaultActivationPercentage)
 	, BytesPerRequest(DefaultBytesPerRequest)
 	, ProcessingIntervalSecs(DefaultServerProcessingIntervalSecs)
@@ -343,6 +347,77 @@ FString FsparklogsSettings::GetEffectiveHttpEndpointURI(const TCHAR* OverrideHTT
 	}
 }
 
+FString FsparklogsSettings::GetEffectiveAnalyticsUserID()
+{
+	FScopeLock WriteLock(&CachedCriticalSection);
+	if (AnalyticsGameID.IsEmpty())
+	{
+		return FString();
+	}
+	if (!CachedAnalyticsUserID.IsEmpty())
+	{
+		return CachedAnalyticsUserID;
+	}
+	
+	FString NewID;
+	switch (AnalyticsUserIDType)
+	{
+	case ITLAnalyticsUserIDType::DeviceID:
+		NewID = FPlatformMisc::GetDeviceId().ToLower();
+		break;
+	}
+	
+	// If another method hasn't given us a valid ID yet, then see if we have already saved a previously generated one, and if not, generate and save a new one.
+	if (!IsValidDeviceID(NewID))
+	{
+		constexpr TCHAR* UserIDKey = TEXT("AnalyticsUserID");
+		NewID = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, UserIDKey, GGameUserSettingsIni);
+		NewID.TrimStartAndEndInline();
+		if (NewID.IsEmpty())
+		{
+			NewID = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			GConfig->SetString(ITL_CONFIG_SECTION_NAME, UserIDKey, *NewID, GGameUserSettingsIni);
+			GConfig->Flush(false, GGameUserSettingsIni);
+		}
+	}
+	
+	CachedAnalyticsUserID = NewID;
+	// Whenever the user ID changes, the player ID must be recalculated...
+	CachedAnalyticsPlayerID.Reset();
+	return NewID;
+}
+
+FString FsparklogsSettings::GetEffectiveAnalyticsPlayerID()
+{
+	FScopeLock WriteLock1(&CachedCriticalSection);
+	if (AnalyticsGameID.IsEmpty())
+	{
+		return FString();
+	}
+	if (!CachedAnalyticsPlayerID.IsEmpty())
+	{
+		return CachedAnalyticsPlayerID;
+	}
+	// Have to unlock the CS before we acquire it again to get/generate the UserID
+	WriteLock1.Unlock();
+	FString UserID = GetEffectiveAnalyticsUserID();
+	FScopeLock WriteLock2(&CachedCriticalSection);
+
+	FTCHARToUTF8 Converted(*(AnalyticsGameID + TEXT(":") + UserID));
+	uint8 Hash[20];
+	FSHA1::HashBuffer(Converted.Get(), Converted.Length(), Hash);
+	FString NewID = BytesToHex(Hash, sizeof(Hash)).Left(32);
+	CachedAnalyticsPlayerID = NewID;
+	return NewID;
+}
+
+void FsparklogsSettings::SetUserID(const TCHAR* UserID)
+{
+	FScopeLock WriteLock(&CachedCriticalSection);
+	CachedAnalyticsUserID = UserID;
+	CachedAnalyticsPlayerID.Reset();
+}
+
 void FsparklogsSettings::LoadSettings()
 {
 	FString Section = ITL_CONFIG_SECTION_NAME;
@@ -351,6 +426,24 @@ void FsparklogsSettings::LoadSettings()
 	// Settings that are common across any launch configuration
 
 	AnalyticsGameID = GConfig->GetStr(*Section, TEXT("AnalyticsGameID"), GEngineIni);
+
+	FString AnalyticsUserIDTypeStr = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("AnalyticsUserIDType")), GEngineIni).ToLower();
+	if (AnalyticsUserIDTypeStr == AnalyticsUserIDTypeDeviceID)
+	{
+		AnalyticsUserIDType = ITLAnalyticsUserIDType::DeviceID;
+	}
+	else if (AnalyticsUserIDTypeStr == AnalyticsUserIDTypeGenerated)
+	{
+		AnalyticsUserIDType = ITLAnalyticsUserIDType::Generated;
+	}
+	else
+	{
+		if (AnalyticsUserIDTypeStr.Len() > 0)
+		{
+			UE_LOG(LogPluginSparkLogs, Warning, TEXT("Unknown AnalyticsUserIDType=%s, using default value of device_id..."), *AnalyticsUserIDTypeStr);
+		}
+		AnalyticsUserIDType = ITLAnalyticsUserIDType::DeviceID;
+	}
 
 	// Settings specific to this launch configuration
 
@@ -456,6 +549,11 @@ void FsparklogsSettings::LoadSettings()
 	}
 
 	EnforceConstraints();
+
+	// Clear out the previously cached values
+	FScopeLock WriteLock(&CachedCriticalSection);
+	CachedAnalyticsUserID.Reset();
+	CachedAnalyticsPlayerID.Reset();
 }
 
 void FsparklogsSettings::EnforceConstraints()
@@ -503,6 +601,38 @@ void FsparklogsSettings::EnforceConstraints()
 	{
 		StressTestNumEntriesPerTick = 1;
 	}
+	AnalyticsGameID.TrimStartAndEndInline();
+	if (AnalyticsGameID.IsEmpty())
+	{
+		if (CollectAnalytics)
+		{
+			CollectAnalytics = false;
+			UE_LOG(LogPluginSparkLogs, Log, TEXT("Analytics collection will not activate until game ID is set. Check plugin settings."));
+		}
+	}
+}
+
+bool FsparklogsSettings::IsValidDeviceID(const FString& deviceId)
+{
+	// Test if a device ID is all zeros (or is some variant of "null")
+	FString idForTesting = deviceId.ToLower();
+	idForTesting.ReplaceInline(TEXT("null"), TEXT(""));
+	idForTesting.ReplaceInline(TEXT("0"), TEXT(""));
+	idForTesting.ReplaceInline(TEXT(" "), TEXT(""));
+	idForTesting.ReplaceInline(TEXT(","), TEXT(""));
+	idForTesting.ReplaceInline(TEXT(":"), TEXT(""));
+	idForTesting.ReplaceInline(TEXT("_"), TEXT(""));
+	idForTesting.ReplaceInline(TEXT("-"), TEXT(""));
+	idForTesting.ReplaceInline(TEXT("/"), TEXT(""));
+	// Ignore a well-known Android device ID that was common on one brand of old Android devices...
+	idForTesting.ReplaceInline(TEXT("9774d56d682e549c"), TEXT(""));
+	// We require an ID that has material information beyond zeros and null
+	idForTesting.TrimStartAndEndInline();
+	if (idForTesting.IsEmpty())
+	{
+		return false;
+	}
+	return true;
 }
 
 // =============== FsparklogsWriteNDJSONPayloadProcessor ===============================================================================
@@ -1793,7 +1923,7 @@ void FsparklogsModule::StartupModule()
 	Settings->LoadSettings();
 	if (Settings->AutoStart)
 	{
-		StartShippingEngine(NULL, NULL, NULL, NULL, NULL, NULL, false);
+		StartShippingEngine(NULL, NULL, NULL, NULL, NULL, NULL, NULL, false);
 	}
 	else
 	{
@@ -1818,12 +1948,17 @@ FString FsparklogsModule::GetGameInstanceID()
 	return GameInstanceID;
 }
 
-bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHTTPEndpointURI, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, TMap<FString, FString>* AdditionalAttributes, bool AlwaysStart)
+bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAnalyticsUserID, const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHTTPEndpointURI, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, TMap<FString, FString>* AdditionalAttributes, bool AlwaysStart)
 {
 	if (EngineActive)
 	{
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Event shipping engine is already active. Ignoring call to StartShippingEngine."));
 		return true;
+	}
+
+	if (OverrideAnalyticsUserID != nullptr && FPlatformString::Strlen(OverrideAnalyticsUserID) > 0)
+	{
+		Settings->SetUserID(OverrideAnalyticsUserID);
 	}
 
 	FString EffectiveAgentID = Settings->AgentID;
@@ -1876,19 +2011,33 @@ bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAgentID, const T
 		return false;
 	}
 
+	if (!Settings->CollectLogs && !Settings->CollectAnalytics)
+	{
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("Log collection and analytics collection are both disabled. No reason to start engine."));
+		return false;
+	}
+
 	float DiceRoll = AlwaysStart ? 10000.0 : FMath::FRandRange(0.0, 100.0);
 	EngineActive = DiceRoll < Settings->ActivationPercentage;
 	if (EngineActive)
 	{
 		// Log all plugin messages to the ITL operations log
 		GLog->AddOutputDevice(GetITLInternalOpsLog().LogDevice.Get());
-		// Log all engine messages to an internal log just for this plugin, which we will then read from the file as we push log data to the cloud
-		GLog->AddOutputDevice(GetITLInternalGameLog(nullptr).LogDevice.Get());
+		if (Settings->CollectLogs)
+		{
+			// Log all engine messages to an internal log just for this plugin, which we will then read from the file as we push log data to the cloud
+			GLog->AddOutputDevice(GetITLInternalGameLog(nullptr).LogDevice.Get());
+		}
 	}
-	UE_LOG(LogPluginSparkLogs, Log, TEXT("Starting up: LaunchConfiguration=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s"), GetITLLaunchConfiguration(true), *EffectiveHttpEndpointURI, *EffectiveAgentID, Settings->ActivationPercentage, DiceRoll, EngineActive ? TEXT("yes") : TEXT("no"));
+	UE_LOG(LogPluginSparkLogs, Log, TEXT("Starting up: LaunchConfiguration=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s, CollectLogs=%s, CollectAnalytics=%s"), GetITLLaunchConfiguration(true), *EffectiveHttpEndpointURI, *EffectiveAgentID, Settings->ActivationPercentage, DiceRoll, EngineActive ? TEXT("yes") : TEXT("no"), Settings->CollectLogs ? TEXT("yes") : TEXT("no"), Settings->CollectAnalytics ? TEXT("yes") : TEXT("no"));
 	if (EngineActive)
 	{
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Ingestion parameters: RequestTimeoutSecs=%lf, BytesPerRequest=%d, ProcessingIntervalSecs=%lf, RetryIntervalSecs=%lf, UnflushedBytesToAutoFlush=%d, MinIntervalBetweenFlushes=%lf"), Settings->RequestTimeoutSecs, Settings->BytesPerRequest, Settings->ProcessingIntervalSecs, Settings->RetryIntervalSecs, (int)Settings->UnflushedBytesToAutoFlush, Settings->MinIntervalBetweenFlushes);
+		if (Settings->CollectAnalytics)
+		{
+			UE_LOG(LogPluginSparkLogs, Log, TEXT("Analytics collection is active. UserID=%s PlayerID=%s"), *Settings->GetEffectiveAnalyticsUserID(), *Settings->GetEffectiveAnalyticsPlayerID());
+		}
+		
 		FString SourceLogFile = GetITLInternalGameLog(nullptr).LogFilePath;
 		FString AuthorizationHeader;
 		if (EffectiveHttpAuthorizationHeaderValue.IsEmpty())
