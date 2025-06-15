@@ -7,6 +7,8 @@
 #include "UObject/ObjectMacros.h"
 #include "UObject/Object.h"
 #include "Modules/ModuleManager.h"
+#include "Interfaces/IAnalyticsProvider.h"
+#include "Interfaces/IAnalyticsProviderModule.h"
 #include "HAL/Runnable.h"
 #include "Interfaces/IHttpResponse.h"
 #include "HttpModule.h"
@@ -38,6 +40,15 @@ SPARKLOGS_API bool ITLFStringTrimCharStartEndInline(FString & s, TCHAR c);
 /** Returns a text encoding of the given severity that will be a severity level recognized by the SparkLogs cloud. */
 SPARKLOGS_API const TCHAR* ITLSeverityToString(ELogVerbosity::Type Verbosity);
 
+/** Calculates the OS platform name (windows/linux/...) and major OS version number (leaves out build info or other misc version info) */
+SPARKLOGS_API void ITLGetOSPlatformVersion(FString & OutPlatform, FString & OutMajorVersion);
+
+/** Calculates a string representation */
+SPARKLOGS_API FString ITLGetNetworkConnectionType();
+
+/** Formats an FDateTime that is already in UTC time zone in RFC3339 format (with milliseconds) */
+SPARKLOGS_API FString ITLGetUTCDateTimeAsRFC3339(const FDateTime& DT);
+
 /** The type of data compression to use. */
 enum class SPARKLOGS_API ITLCompressionMode
 {
@@ -55,6 +66,7 @@ enum class SPARKLOGS_API ITLAnalyticsUserIDType
 
 SPARKLOGS_API bool ITLCompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, TArray<uint8>& OutData);
 SPARKLOGS_API bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, int InOriginalDataLen, TArray<uint8>& OutData);
+SPARKLOGS_API FString ITLGenerateNewRandomID();
 SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length);
 
 /**
@@ -102,6 +114,8 @@ public:
 	static constexpr bool DefaultEditorCollectLogs = true;
 	static constexpr bool DefaultClientCollectAnalytics = true;
 	static constexpr bool DefaultClientCollectLogs = false;
+
+	static FDateTime EmptyDateTime;
 
 	/** The game ID to use for analytics. If set, will also be added to log events. */
 	FString AnalyticsGameID;
@@ -166,13 +180,32 @@ public:
 	/** Thread-safe. Returns the Player ID to use based on the analytics user ID and the analytics game ID. */
 	FString GetEffectiveAnalyticsPlayerID();
 
+	/** Thread-safe. Returns the PlayerID generated for a given game ID and user ID. */
+	static FString CalculatePlayerID(const FString& GameID, const FString& UserID);
+
+	/** Thread-safe. Returns the UTC timestamp when the game was first played */
+	FDateTime GetEffectiveAnalyticsInstallTime();
+
 	/** Thread-safe. Sets a custom User ID to use. */
 	void SetUserID(const TCHAR* UserID);
+
+	/** Thread-safe. Returns the session number since the app was first installed. Optionally increment the session number. */
+	int GetSessionNumber(bool Increment);
+
+	/** Thread-safe. Returns the transaction number since the app was first installed. Optionally increment the transaction number. */
+	int GetTransactionNumber(bool Increment);
+
+	/** Thread-safe. Returns the attempt number for the given event ID (case insensitive) since the app was first installed. Optionally increment the attempt number and/or optionally delete it (will still return last (possibly incremented) value). */
+	int GetAttemptNumber(const FString& EventID, bool Increment, bool DeleteAfter);
 
 protected:
 	FCriticalSection CachedCriticalSection;
 	FString CachedAnalyticsUserID;
 	FString CachedAnalyticsPlayerID;
+	FDateTime CachedAnalyticsInstallTime;
+	int CachedAnalyticsSessionNumber;
+	int CachedAnalyticsTransactionNumber;
+	TMap<FString, int> CachedAnalyticsAttemptNumber;
 
 	/** Enforces constraints upon any loaded setting values. */
 	void EnforceConstraints();
@@ -211,7 +244,7 @@ public:
 
 	// ------------------------------------------ SERVER LAUNCH CONFIGURATION SETTINGS
 
-	// Whether or not to collect game analytics on server launch configurations. Defaults to true; however, on server, session and client identity are not automatic -- you must manually specify the session ID and user ID with each event you ingest.
+	// Whether or not to collect analytics on server launch configurations. Defaults to true; however, on server, session and client identity are not automatic -- you must manually specify the session ID and user ID with each event you ingest.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Enable Analytics")
 	bool ServerCollectAnalytics = FsparklogsSettings::DefaultServerCollectAnalytics;
 
@@ -252,16 +285,17 @@ public:
 	float ServerRequestTimeoutSecs = FsparklogsSettings::DefaultRequestTimeoutSecs;
 
 	// Whether or not to automatically add a random game_instance_id field (ID randomly chosen at engine startup).
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Add Random Game Instance ID")
 	bool ServerAddRandomGameInstanceID = FsparklogsSettings::DefaultAddRandomGameInstanceID;
 
 	// ------------------------------------------ EDITOR LAUNCH CONFIGURATION SETTINGS
 
-	// Whether or not to collect game analytics on editor launch configurations. Defaults to true. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", DisplayName = "Enable Analytics")
+	// Whether or not to collect analytics on editor launch configurations. Defaults to true. [EDITOR RESTART REQUIRED]
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Enable Analytics")
 	bool EditorCollectAnalytics = FsparklogsSettings::DefaultEditorCollectAnalytics;
 
 	// Whether or not to collect logs on editor launch configurations. Defaults to true. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", DisplayName = "Auto Start")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Auto Start")
 	bool EditorCollectLogs = FsparklogsSettings::DefaultEditorCollectLogs;
 
 	// Set to 'us' or 'eu' based on what your SparkLogs workspace is provisioned to use. [EDITOR RESTART REQUIRED]
@@ -281,7 +315,7 @@ public:
 	FString EditorHTTPEndpointURI;
 
 	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue [EDITOR RESTART REQUIRED] */
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", DisplayName = "Custom HTTP Authorization Header Value")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Custom HTTP Authorization Header Value")
 	FString EditorHTTPAuthorizationHeaderValue;
 
 	// Whether or not to automatically start the log/event shipping engine. If disabled, you must manually start the engine by calling FsparklogsModule::GetModule().StartShippingEngine(...); [EDITOR RESTART REQUIRED]
@@ -297,11 +331,12 @@ public:
 	float EditorRequestTimeoutSecs = FsparklogsSettings::DefaultRequestTimeoutSecs;
 
 	// Whether or not to automatically add a random game_instance_id field (ID randomly chosen at engine startup). [EDITOR RESTART REQUIRED]
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Add Random Game Instance ID")
 	bool EditorAddRandomGameInstanceID = FsparklogsSettings::DefaultAddRandomGameInstanceID;
 
 	// ------------------------------------------ CLIENT LAUNCH CONFIGURATION SETTINGS
 
-	// Whether or not to collect game analytics on client launch configurations. Defaults to true.
+	// Whether or not to collect analytics on client launch configurations. Defaults to true.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Enable Analytics")
 	bool ClientCollectAnalytics = FsparklogsSettings::DefaultClientCollectAnalytics;
 
@@ -341,7 +376,8 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Request Timeout in Seconds")
 	float ClientRequestTimeoutSecs = FsparklogsSettings::DefaultRequestTimeoutSecs;
 
-	// Whether or not to automatically add a random game_instance_id field (ID randomly chosen at engine startup). [EDITOR RESTART REQUIRED]
+	// Whether or not to automatically add a random game_instance_id field (ID randomly chosen at engine startup).
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Add Random Game Instance ID")
 	bool ClientAddRandomGameInstanceID = FsparklogsSettings::DefaultAddRandomGameInstanceID;
 
 	// ------------------------------------------ SERVER LAUNCH CONFIGURATION ADVANCED SETTINGS
@@ -705,10 +741,171 @@ protected:
 	bool AccrueWrittenBytes(int N);
 };
 
+/** Uniquely identifies an analytics session. Pass this information from a client to a server
+  * to allow the server to explicitly create analytics events on behalf of the client *without*
+  * starting an analytics session on the server.
+  * 
+  * The bare minimum to have a valid session descriptor is the session ID and user ID.
+  * If available, the session number and session start time will complete the optional info.
+  */
+class FSparkLogsAnalyticsSessionDescriptor {
+public:
+	FSparkLogsAnalyticsSessionDescriptor();
+	FSparkLogsAnalyticsSessionDescriptor(const TCHAR* InSessionID, const TCHAR* InUserID);
+	FSparkLogsAnalyticsSessionDescriptor(const TCHAR* InSessionID, int InSessionNumber, const TCHAR* InUserID);
+	FSparkLogsAnalyticsSessionDescriptor(const TCHAR* InSessionID, int InSessionNumber, FDateTime InSessionStarted, const TCHAR* InUserID);
+	virtual ~FSparkLogsAnalyticsSessionDescriptor();
+
+	FString SessionID;
+	int SessionNumber;
+	FDateTime SessionStarted;
+	FString UserID;
+};
+
+/**
+ * Analytics interface implementation that sends data to the sparklogs module.
+ * Analytics must be enabled in the sparklogs module settings for this launch
+ * configuration in order for the data to go anywhere.
+ * 
+ * If you're on a server and you want to record analytics events for a given client,
+ * you can either explicitly pass overridden session information when creating each
+ * analytics event by passing a SparkLogsAnalyticsSessionDescriptor (recommended),
+ * or you can set the session ID/start time/number globally using the methods
+ * (NOT recommended unless your server is single threaded! (highly unlikely)).
+ * 
+ * To use sparklogs as an analytics provider, in DefaultEngine.ini do:
+ * [Analytics]
+ * ProviderModuleName=sparklogs
+ * 
+ * Or to use it with other analytics providers, in DefaultEngine.ini do:
+ * [Analytics]
+ * ProviderModuleName=AnalyticsMulticast
+ * ProviderModuleNames=sparklogs,...
+ */
+class SPARKLOGS_API FsparklogsAnalyticsProvider : public IAnalyticsProvider
+{
+public:	
+	static constexpr TCHAR* RootAnalyticsFieldName = TEXT("g_analytics");
+
+	static constexpr TCHAR* StandardFieldEventType = TEXT("type");
+	static constexpr TCHAR* EventTypeSessionStart = TEXT("session_start");
+	static constexpr TCHAR* EventTypeSessionEnd = TEXT("session_end");
+
+	static constexpr TCHAR* StandardFieldSessionId = TEXT("session_id");
+	static constexpr TCHAR* StandardFieldSessionNumber = TEXT("session_num");
+	static constexpr TCHAR* StandardFieldSessionStarted = TEXT("session_started");
+	static constexpr TCHAR* StandardFieldGameId = TEXT("game_id");
+	static constexpr TCHAR* StandardFieldUserId = TEXT("user_id");
+	static constexpr TCHAR* StandardFieldPlayerId = TEXT("player_id");
+	static constexpr TCHAR* StandardFieldFirstInstalled = TEXT("first_installed");
+	static constexpr TCHAR* StandardFieldMeta = TEXT("meta");
+
+	static constexpr TCHAR* SessionEndFieldSessionEnded = TEXT("session_ended");
+	static constexpr TCHAR* SessionEndFieldSessionDurationSecs = TEXT("session_duration_secs");
+
+	static constexpr TCHAR* MetaFieldPlatform = TEXT("platform");
+	static constexpr TCHAR* MetaFieldOSVersion = TEXT("os_version");
+	static constexpr TCHAR* MetaFieldSDKVersion = TEXT("sdk_version");
+	static constexpr TCHAR* MetaFieldEngineVersion = TEXT("engine_version");
+	static constexpr TCHAR* MetaFieldBuild = TEXT("build");
+	static constexpr TCHAR* MetaFieldDeviceMake = TEXT("device_make");
+	static constexpr TCHAR* MetaFieldDeviceModel = TEXT("device_model");
+	static constexpr TCHAR* MetaFieldConnectionType = TEXT("connection_type");
+	static constexpr TCHAR* MetaFieldGender = TEXT("gender");
+	static constexpr TCHAR* MetaFieldLocation = TEXT("location");
+	static constexpr TCHAR* MetaFieldAge = TEXT("age");
+
+public:
+	FsparklogsAnalyticsProvider(TSharedRef<FsparklogsSettings> InSettings);
+	virtual ~FsparklogsAnalyticsProvider();
+
+	//~ Begin IAnalyticsProvider Interface
+
+	/** Starts a session (if one has already started, does nothing and treats as success). */
+	virtual bool StartSession(const TArray<FAnalyticsEventAttribute>& Attributes) override;
+
+	/** Ends a session if any is active (if one is not active, does nothing) */
+	virtual void EndSession() override;
+	virtual FString GetSessionID() const override;
+
+	/** It's recommended NOT to use this and instead pass OverrideSession arguments instead to other functions. */
+	virtual bool SetSessionID(const FString& InSessionID) override;
+	virtual void FlushEvents() override;
+
+	/** It's recommended NOT to use this and instead pass OverrideSession arguments instead to other functions. */
+	virtual void SetUserID(const FString& InUserID) override;
+
+	virtual FString GetUserID() const override;
+	virtual void SetBuildInfo(const FString& InBuildInfo) override;
+	virtual void SetGender(const FString& InGender) override;
+	virtual void SetLocation(const FString& InLocation) override;
+	virtual void SetAge(const int32 InAge) override;
+	virtual void RecordEvent(const FString& EventName, const TArray<FAnalyticsEventAttribute>& Attributes) override;
+	virtual void RecordItemPurchase(const FString& ItemId, const FString& Currency, int PerItemCost, int ItemQuantity) override; // should override this?
+	virtual void RecordItemPurchase(const FString& ItemId, int ItemQuantity, const TArray<FAnalyticsEventAttribute>& EventAttrs) override;
+	virtual void RecordCurrencyPurchase(const FString& GameCurrencyType, int GameCurrencyAmount, const FString& RealCurrencyType, float RealMoneyCost, const FString& PaymentProvider) override; // should override this?
+	virtual void RecordCurrencyPurchase(const FString& GameCurrencyType, int GameCurrencyAmount, const TArray<FAnalyticsEventAttribute>& EventAttrs) override;
+	virtual void RecordCurrencyGiven(const FString& GameCurrencyType, int GameCurrencyAmount, const TArray<FAnalyticsEventAttribute>& EventAttrs) override;
+	virtual void RecordError(const FString& Error, const TArray<FAnalyticsEventAttribute>& EventAttrs) override;
+	virtual void RecordProgress(const FString& ProgressType, const TArray<FString>& ProgressHierarchy, const TArray<FAnalyticsEventAttribute>& EventAttrs) override;
+	//~ End IAnalyticsProvider Interface
+
+	// Automatically cleanup any active session, except for server launch configurations where we only send session data if they explicitly use StartSession and EndSession.
+	virtual void AutoCleanupSession();
+
+	/** Thread-safe. Gets a COPY of the information needed to record an analytics event. */
+	void GetAnalyticsEventData(FString& OutSessionID, FDateTime& OutSessionStarted, int& OutSessionNumber, TSharedPtr<FJsonObject>& OutMetaAttributes) const;
+
+	/** Thread-safe. Sets the given field in meta attributes to the given value. If the value is an object you should NEVER mutate it after storing it into the meta attributes. */
+	void SetMetaAttribute(const FString& Field, const TSharedPtr<FJsonValue> Value);
+	
+	/** Thread-safe. Gets the number of active sessions we've had on this device since install (starting from 1), including the current session. */
+	int GetSessionNumber();
+	/** Thread-safe. Do not use this, use OverrideSession arguments instead. */
+	void SetSessionNumber(int N);
+
+	/** Thread-safe. Gets the start time of the session. */
+	FDateTime GetSessionStarted();
+	/** Thread-safe. Do not use this, use OverrideSession arguments instead. */
+	void SetSessionStarted(FDateTime DT);
+
+	/** Thread-safe. Adds all standard fields to the given analytics logical event so it can be queued as a raw event. It modifies Object in-place.
+	  * This will automatically add meta attributes to the raw analytics event data.
+	  * 
+	  * If a session is NOT active or if there is no game ID or user ID, it will forcefully set Object to nullptr (so the event cannot be sent) unless you specify OverrideSession.
+	  * If OverrideSession is not nullptr/empty then you can override the session ID/number/start/user ID (useful on the server).
+	  */
+	void FinalizeAnalyticsEvent(const TCHAR* EventType, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession, TSharedPtr<FJsonObject>& Object);
+
+public:
+	static void AddAnalyticsEventAttributeToJsonObject(const TSharedPtr<FJsonObject> Object, const FAnalyticsEventAttribute& Attr);
+	static void AddAnalyticsEventAttributesToJsonObject(const TSharedPtr<FJsonObject> Object, const TArray<FAnalyticsEventAttribute>& EventAttrs);
+
+protected:
+	TSharedRef<FsparklogsSettings> Settings;
+
+	// Protects access to any of data below this declaration.
+	mutable FCriticalSection DataCriticalSection;
+	// If non-empty, the ID of the session that is currently active.
+	FString CurrentSessionID;
+	// Time when session started
+	FDateTime SessionStarted;
+	// The number of active sessions we've had on this device since install (starting from 1), including the current session. Incremented when the session starts.
+	int SessionNumber;
+	// The attributes we want to include with EVERY analytics event.
+	TSharedRef<FJsonObject> MetaAttributes;
+
+	// Not thread-safe (hold lock if needed). Setup defaults for meta attributes.
+	void SetupDefaultMetaAttributes();
+
+	// Like FinalizeAnalyticsEvent but will assume the critical section is ALREADY LOCKED!
+	void InternalFinalizeAnalyticsEvent(const TCHAR* EventType, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession, TSharedPtr<FJsonObject>& Object);
+};
+
 /**
 * Main plugin module. Reads settings and handles startup/shutdown.
 */
-class SPARKLOGS_API FsparklogsModule : public IModuleInterface
+class SPARKLOGS_API FsparklogsModule : public IAnalyticsProviderModule
 {
 public:
 	/**
@@ -733,6 +930,21 @@ public:
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
 	//~ End IModuleInterface Interface
+
+	//~ Begin IAnalyticsProviderModule Interface
+	virtual TSharedPtr<IAnalyticsProvider> CreateAnalyticsProvider(const FAnalyticsProviderConfigurationDelegate& GetConfigValue) const override;
+	//~ End IAnalyticsProviderModule Interface
+
+	/** Returns the SparkLogs analytics provider singleton (will always be valid). */
+	virtual TSharedPtr<FsparklogsAnalyticsProvider> GetAnalyticsProvider() const;
+
+	/** Thread-safe. Queues a raw analytics event of the given type for sending.
+	  * Prepare a raw analytics event using FsparklogsAnalyticsProvider::FinalizeAnalyticsEvent.
+	  * 
+	  * Normally you would interact with the analytics provider (see GetAnalyticsProvider)
+	  * for a higher level API that will produce and queue raw analytics events in a standard format.
+	  * If analytics is not enabled, returns false. Returns true if the data was queued. */
+	virtual bool AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalyticsData, const TCHAR* LogMessage);
 
 	/** Returns the random game_instance_id used for this run of the engine.
 	  * There may be multiple game analytics sessions during a single game instance.
@@ -766,8 +978,11 @@ public:
 	 */
 	bool StartShippingEngine(const TCHAR* OverrideAnalyticsUserID, const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHTTPEndpointURI, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, TMap<FString, FString>* AdditionalAttributes, bool AlwaysStart);
 
-	/** Stops the log/event shipping engine. Any active game analytics session (if any) will end. It will not start again unless StartShippingEngine is manually called. */
+	/** Stops the log/event shipping engine. Any active analytics session (if any) will end. It will not start again unless StartShippingEngine is manually called. */
 	void StopShippingEngine();
+
+	/** Triggers an immediate flush of queued log/analytics events to attempt to be sent to the cloud. Does not wait for this to finish. */
+	void Flush();
 
 protected:
 	/** Called by the engine after it has fully initialized. */
@@ -776,6 +991,8 @@ protected:
 	void OnEngineExit();
 
 private:
+	/** Singleton analytics provider */
+	static TSharedPtr<FsparklogsAnalyticsProvider> AnalyticsProvider;
 
 	FString GameInstanceID;
 	bool EngineActive;
