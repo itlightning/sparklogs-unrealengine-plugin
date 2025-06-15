@@ -30,7 +30,9 @@ public class sparklogs : ModuleRules
 			new string[]
 			{
 				"Core",
-				"HTTP"
+				"HTTP",
+				"Json",
+				"Projects"
 			}
 			);
 
@@ -52,9 +54,9 @@ public class sparklogs : ModuleRules
 				"Engine",
 				"Slate",
 				"SlateCore",
-				// ... add private dependencies that you statically link with here ...	
-			}
-			);
+                "Analytics",
+            }
+            );
 
         PrivateIncludePathModuleNames.AddRange(
             new string[] {

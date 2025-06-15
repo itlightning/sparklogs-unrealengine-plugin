@@ -5,11 +5,14 @@
 #include "CoreGlobals.h"
 #include "GenericPlatform/GenericPlatformOutputDevices.h"
 #include "Misc/AssertionMacros.h"
+#include "Misc/EngineVersion.h"
 #include "Misc/OutputDeviceFile.h"
 #include "Misc/OutputDeviceHelper.h"
 #include "Misc/SecureHash.h"
 #include "ISettingsModule.h"
+#include "IPluginManager.h"
 #include "HAL/ThreadManager.h"
+#include "Runtime/Launch/Resources/Version.h"
 
 #ifndef ALLOW_LOG_FILE
 #define ALLOW_LOG_FILE 1
@@ -90,6 +93,70 @@ const TCHAR* ITLSeverityToString(ELogVerbosity::Type Verbosity)
 		return TEXT("Info");
 	}
 	return ToString(Verbosity);
+}
+
+void ITLGetOSPlatformVersion(FString& OutPlatform, FString& OutMajorVersion)
+{
+	FString OSPlatform, OSSubVersion;
+	FPlatformMisc::GetOSVersions(OSPlatform, OSSubVersion);
+	
+	// Use only the platform name without any specifics after it.
+	OSPlatform.TrimStartAndEndInline();
+	int FirstSpace = OSPlatform.Find(TEXT(" "));
+	if (FirstSpace != INDEX_NONE)
+	{
+		OSPlatform.LeftInline(FirstSpace, false);
+	}
+	OSPlatform.ToLowerInline();
+
+	// For raw version only use major/minor and nothing after it (second period and beyond)
+	FString OSRawVersion = FPlatformMisc::GetOSVersion();
+	OSRawVersion.TrimStartAndEndInline();
+	int Period = OSRawVersion.Find(".");
+	if (Period != INDEX_NONE)
+	{
+		Period = OSRawVersion.Find(".", ESearchCase::IgnoreCase, ESearchDir::FromStart, Period + 1);
+		if (Period != INDEX_NONE)
+		{
+			OSRawVersion.LeftInline(Period, false);
+		}
+	}
+
+	if (OSPlatform.IsEmpty())
+	{
+		OSPlatform = TEXT("unknown");
+	}
+	if (OSRawVersion.IsEmpty())
+	{
+		OSRawVersion = TEXT("?");
+	}
+	OutPlatform = OSPlatform;
+	OutMajorVersion = OSRawVersion;
+}
+
+FString ITLGetNetworkConnectionType()
+{
+	ENetworkConnectionType Type = FPlatformMisc::GetNetworkConnectionType();
+	switch (Type)
+	{
+		case ENetworkConnectionType::Unknown:		return TEXT("");
+		case ENetworkConnectionType::None:			return TEXT("None");
+		case ENetworkConnectionType::AirplaneMode:	return TEXT("AirplaneMode");
+		case ENetworkConnectionType::Cell:			return TEXT("Cell");
+		case ENetworkConnectionType::WiFi:			return TEXT("WiFi");
+		case ENetworkConnectionType::Ethernet:		return TEXT("Ethernet");
+		default:									return TEXT("");
+	}
+}
+
+FString ITLGetUTCDateTimeAsRFC3339(const FDateTime& DT)
+{
+	return FString::Printf(
+		TEXT("%04d-%02d-%02dT%02d:%02d:%02d.%03dZ"),
+		DT.GetYear(), DT.GetMonth(), DT.GetDay(),
+		DT.GetHour(), DT.GetMinute(), DT.GetSecond(),
+		DT.GetMillisecond()
+	);
 }
 
 const TCHAR* INISectionForEditor = TEXT("Editor");
@@ -283,6 +350,13 @@ bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InData, int InDataL
 	}
 }
 
+SPARKLOGS_API FString ITLGenerateNewRandomID()
+{
+	FString A = FGuid::NewGuid().ToString(EGuidFormats::Base36Encoded);
+	FString B = FGuid::NewGuid().ToString(EGuidFormats::Base36Encoded);
+	return (A + B).ToLower();
+}
+
 SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length)
 {
 	const FString Charset = TEXT("abcdefghijklmnopqrstuvwxyz0123456789");
@@ -298,6 +372,7 @@ SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length)
 // =============== FsparklogsSettings ===============================================================================
 
 const TCHAR* FsparklogsSettings::PluginStateSection = TEXT("PluginState");
+FDateTime FsparklogsSettings::EmptyDateTime = FDateTime(0);
 
 FsparklogsSettings::FsparklogsSettings()
 	: AnalyticsUserIDType(ITLAnalyticsUserIDType::DeviceID)
@@ -316,6 +391,9 @@ FsparklogsSettings::FsparklogsSettings()
 	, AddRandomGameInstanceID(DefaultAddRandomGameInstanceID)
 	, StressTestGenerateIntervalSecs(0.0)
 	, StressTestNumEntriesPerTick(0)
+	, CachedAnalyticsInstallTime(EmptyDateTime)
+	, CachedAnalyticsSessionNumber(0)
+	, CachedAnalyticsTransactionNumber(0)
 {
 }
 
@@ -375,7 +453,7 @@ FString FsparklogsSettings::GetEffectiveAnalyticsUserID()
 		NewID.TrimStartAndEndInline();
 		if (NewID.IsEmpty())
 		{
-			NewID = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			NewID = ITLGenerateNewRandomID();
 			GConfig->SetString(ITL_CONFIG_SECTION_NAME, UserIDKey, *NewID, GGameUserSettingsIni);
 			GConfig->Flush(false, GGameUserSettingsIni);
 		}
@@ -402,13 +480,43 @@ FString FsparklogsSettings::GetEffectiveAnalyticsPlayerID()
 	WriteLock1.Unlock();
 	FString UserID = GetEffectiveAnalyticsUserID();
 	FScopeLock WriteLock2(&CachedCriticalSection);
-
-	FTCHARToUTF8 Converted(*(AnalyticsGameID + TEXT(":") + UserID));
-	uint8 Hash[20];
-	FSHA1::HashBuffer(Converted.Get(), Converted.Length(), Hash);
-	FString NewID = BytesToHex(Hash, sizeof(Hash)).Left(32);
+	FString NewID = CalculatePlayerID(AnalyticsGameID, UserID);
 	CachedAnalyticsPlayerID = NewID;
 	return NewID;
+}
+
+FString FsparklogsSettings::CalculatePlayerID(const FString& GameID, const FString& UserID)
+{
+	FTCHARToUTF8 Converted(*(GameID + TEXT(":") + UserID));
+	uint8 Hash[20];
+	FSHA1::HashBuffer(Converted.Get(), Converted.Length(), Hash);
+	return BytesToHex(Hash, sizeof(Hash)).Left(32);
+}
+
+FDateTime FsparklogsSettings::GetEffectiveAnalyticsInstallTime()
+{ 
+	FScopeLock WriteLock1(&CachedCriticalSection);
+	if (CachedAnalyticsInstallTime != CachedAnalyticsInstallTime)
+	{
+		return CachedAnalyticsInstallTime;
+	}
+	constexpr TCHAR* InstallTimeKey = TEXT("AnalyticsInstallTime");
+	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, InstallTimeKey, GGameUserSettingsIni);
+	TimeStr.TrimStartAndEndInline();
+	int64 Ts = FCString::Atoi64(*TimeStr);
+	if (Ts <= 0)
+	{
+		CachedAnalyticsInstallTime = FDateTime::UtcNow();
+		Ts = CachedAnalyticsInstallTime.GetTicks();
+		TimeStr = FString::Printf(TEXT("%lld"), Ts);
+		GConfig->SetString(ITL_CONFIG_SECTION_NAME, InstallTimeKey, *TimeStr, GGameUserSettingsIni);
+		GConfig->Flush(false, GGameUserSettingsIni);
+	}
+	else
+	{
+		CachedAnalyticsInstallTime = FDateTime(Ts);
+	}
+	return CachedAnalyticsInstallTime;
 }
 
 void FsparklogsSettings::SetUserID(const TCHAR* UserID)
@@ -416,6 +524,102 @@ void FsparklogsSettings::SetUserID(const TCHAR* UserID)
 	FScopeLock WriteLock(&CachedCriticalSection);
 	CachedAnalyticsUserID = UserID;
 	CachedAnalyticsPlayerID.Reset();
+}
+
+int FsparklogsSettings::GetSessionNumber(bool Increment)
+{
+	constexpr TCHAR* Key = TEXT("AnalyticsSessionNumber");
+	bool Changed = false;
+	FScopeLock WriteLock(&CachedCriticalSection);
+	if (CachedAnalyticsSessionNumber <= 0)
+	{
+		if (!GConfig->GetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsSessionNumber, GGameUserSettingsIni) || CachedAnalyticsSessionNumber <= 0)
+		{
+			CachedAnalyticsSessionNumber = 1;
+			Changed = true;
+			Increment = false;
+		}
+	}
+	if (Increment)
+	{
+		CachedAnalyticsSessionNumber++;
+		Changed = true;
+	}
+	if (Changed)
+	{
+		GConfig->SetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsSessionNumber, GGameUserSettingsIni);
+		GConfig->Flush(false, GGameUserSettingsIni);
+	}
+	return CachedAnalyticsSessionNumber;
+}
+
+int FsparklogsSettings::GetTransactionNumber(bool Increment)
+{
+	constexpr TCHAR* Key = TEXT("AnalyticsTransactionNumber");
+	bool Changed = false;
+	FScopeLock WriteLock(&CachedCriticalSection);
+	if (CachedAnalyticsTransactionNumber <= 0)
+	{
+		if (!GConfig->GetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsTransactionNumber, GGameUserSettingsIni) || CachedAnalyticsTransactionNumber <= 0)
+		{
+			CachedAnalyticsTransactionNumber = 1;
+			Changed = true;
+			Increment = false;
+		}
+	}
+	if (Increment)
+	{
+		CachedAnalyticsTransactionNumber++;
+		Changed = true;
+	}
+	if (Changed)
+	{
+		GConfig->SetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsTransactionNumber, GGameUserSettingsIni);
+		GConfig->Flush(false, GGameUserSettingsIni);
+	}
+	return CachedAnalyticsTransactionNumber;
+}
+
+int FsparklogsSettings::GetAttemptNumber(const FString& EventID, bool Increment, bool DeleteAfter)
+{
+	FString MapKey = EventID.ToLower();
+	FString Key = TEXT("AnalyticsAttemptNumber_") + MapKey;
+	bool Changed = false;
+	FScopeLock WriteLock(&CachedCriticalSection);
+	int CachedValue = 0;
+	int* CachedValuePtr = CachedAnalyticsAttemptNumber.Find(MapKey);
+	if (CachedValuePtr == nullptr)
+	{
+		if (!GConfig->GetInt(ITL_CONFIG_SECTION_NAME, *Key, CachedValue, GGameUserSettingsIni) || CachedValue <= 0)
+		{
+			CachedValue = 1;
+			Changed = true;
+			Increment = false;
+		}
+		CachedAnalyticsAttemptNumber.Emplace(MapKey, CachedValue);
+	}
+	else
+	{
+		CachedValue = *CachedValuePtr;
+	}
+	if (Increment)
+	{
+		CachedValue++;
+		Changed = true;
+	}
+	if (DeleteAfter)
+	{
+		CachedAnalyticsAttemptNumber.Remove(MapKey);
+		GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, *Key, GGameUserSettingsIni);
+		GConfig->Flush(false, GGameUserSettingsIni);
+	}
+	else if (Changed)
+	{
+		CachedAnalyticsAttemptNumber.Emplace(MapKey, CachedValue);
+		GConfig->SetInt(ITL_CONFIG_SECTION_NAME, *Key, CachedValue, GGameUserSettingsIni);
+		GConfig->Flush(false, GGameUserSettingsIni);
+	}
+	return CachedValue;
 }
 
 void FsparklogsSettings::LoadSettings()
@@ -1874,13 +2078,418 @@ bool FsparklogsOutputDeviceFile::AccrueWrittenBytes(int N)
 	return false;
 }
 
+// =============== FSparkLogsAnalyticsSessionDescriptor ===============================================================================
+
+FSparkLogsAnalyticsSessionDescriptor::FSparkLogsAnalyticsSessionDescriptor()
+	: SessionNumber(0)
+	, SessionStarted(FsparklogsSettings::EmptyDateTime)
+{
+}
+
+FSparkLogsAnalyticsSessionDescriptor::FSparkLogsAnalyticsSessionDescriptor(const TCHAR* InSessionID, const TCHAR* InUserID)
+	: SessionID(InSessionID)
+	, SessionNumber(0)
+	, SessionStarted(FsparklogsSettings::EmptyDateTime)
+	, UserID(InUserID)
+{
+}
+
+FSparkLogsAnalyticsSessionDescriptor::FSparkLogsAnalyticsSessionDescriptor(const TCHAR* InSessionID, int InSessionNumber, const TCHAR* InUserID)
+	: SessionID(InSessionID)
+	, SessionNumber(InSessionNumber)
+	, SessionStarted(FsparklogsSettings::EmptyDateTime)
+	, UserID(InUserID)
+{
+}
+
+FSparkLogsAnalyticsSessionDescriptor::FSparkLogsAnalyticsSessionDescriptor(const TCHAR* InSessionID, int InSessionNumber, FDateTime InSessionStarted, const TCHAR* InUserID)
+	: SessionID(InSessionID)
+	, SessionNumber(InSessionNumber)
+	, SessionStarted(InSessionStarted)
+	, UserID(InUserID)
+{
+}
+
+FSparkLogsAnalyticsSessionDescriptor::~FSparkLogsAnalyticsSessionDescriptor()
+{
+}
+
+// =============== FsparklogsAnalyticsProvider ===============================================================================
+
+FsparklogsAnalyticsProvider::FsparklogsAnalyticsProvider(TSharedRef<FsparklogsSettings> InSettings)
+	: Settings(InSettings)
+	, SessionStarted(FsparklogsSettings::EmptyDateTime)
+	, SessionNumber(0)
+	, MetaAttributes(new FJsonObject())
+{
+	SetupDefaultMetaAttributes();
+}
+
+FsparklogsAnalyticsProvider::~FsparklogsAnalyticsProvider()
+{
+
+}
+
+bool FsparklogsAnalyticsProvider::StartSession(const TArray<FAnalyticsEventAttribute>& Attributes)
+{
+	if (!FsparklogsModule::IsModuleLoaded())
+	{
+		return false;
+	}
+	FScopeLock WriteLock(&DataCriticalSection);
+	if (!CurrentSessionID.IsEmpty())
+	{
+		// Session already started, treat as success
+		return true;
+	}
+	CurrentSessionID = ITLGenerateNewRandomID();
+	SessionStarted = FDateTime::UtcNow();
+	SessionNumber = Settings->GetSessionNumber(true);
+	TSharedPtr<FJsonObject> Data;
+	// No special data for session start other than standard attributes, just finalize, unlock, and send
+	InternalFinalizeAnalyticsEvent(EventTypeSessionStart, nullptr, Data);
+	WriteLock.Unlock();
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, nullptr);
+}
+
+void FsparklogsAnalyticsProvider::EndSession()
+{
+	if (!FsparklogsModule::IsModuleLoaded())
+	{
+		return;
+	}
+	FScopeLock WriteLock(&DataCriticalSection);
+	if (CurrentSessionID.IsEmpty())
+	{
+		return;
+	}
+	
+	TSharedPtr<FJsonObject> Data(new FJsonObject());
+	FDateTime SessionEnded = FDateTime::UtcNow();
+	Data->SetStringField(SessionEndFieldSessionEnded, ITLGetUTCDateTimeAsRFC3339(SessionEnded));
+	FTimespan SessionDuration = SessionEnded - SessionStarted;
+	double SessionDurationSecs = SessionDuration.GetTotalSeconds();
+	if (SessionDurationSecs > 0.0 || SessionDurationSecs < (60.0 * 60.0 * 24 * 30 * 12))
+	{
+		Data->SetNumberField(SessionEndFieldSessionDurationSecs, SessionDurationSecs);
+	}
+	InternalFinalizeAnalyticsEvent(EventTypeSessionEnd, nullptr, Data);
+
+	// Now reset the session data, release write lock, and send the data
+	CurrentSessionID.Reset();
+	SessionStarted = FsparklogsSettings::EmptyDateTime;
+	SessionNumber = 0;
+	WriteLock.Unlock();
+	FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, nullptr);
+}
+
+FString FsparklogsAnalyticsProvider::GetSessionID() const
+{
+	FScopeLock ReadLock(&DataCriticalSection);
+	return CurrentSessionID;
+}
+
+bool FsparklogsAnalyticsProvider::SetSessionID(const FString& InSessionID)
+{
+	FString CurID = GetSessionID();
+	if (CurID == InSessionID)
+	{
+		// no-op
+		return true;
+	}
+	AutoCleanupSession();
+	FScopeLock WriteLock(&DataCriticalSection);
+	CurrentSessionID = InSessionID;
+	return true;
+}
+
+void FsparklogsAnalyticsProvider::FlushEvents()
+{
+	if (!FsparklogsModule::IsModuleLoaded())
+	{
+		return;
+	}
+	FsparklogsModule::GetModule().Flush();
+}
+
+void FsparklogsAnalyticsProvider::SetUserID(const FString& InUserID)
+{
+	FString CurrentID = Settings->GetEffectiveAnalyticsUserID();
+	if (CurrentID == InUserID)
+	{
+		// no-op
+		return;
+	}
+	AutoCleanupSession();
+	return Settings->SetUserID(*InUserID);
+}
+
+FString FsparklogsAnalyticsProvider::GetUserID() const
+{
+	return Settings->GetEffectiveAnalyticsUserID();
+}
+
+void FsparklogsAnalyticsProvider::SetBuildInfo(const FString& InBuildInfo)
+{
+	FAnalyticsEventAttribute Attr(MetaFieldBuild, InBuildInfo);
+	FScopeLock WriteLock(&DataCriticalSection);
+	AddAnalyticsEventAttributeToJsonObject(MetaAttributes, Attr);
+}
+
+void FsparklogsAnalyticsProvider::SetGender(const FString& InGender)
+{
+	FAnalyticsEventAttribute Attr(MetaFieldGender, InGender);
+	FScopeLock WriteLock(&DataCriticalSection);
+	AddAnalyticsEventAttributeToJsonObject(MetaAttributes, Attr);
+}
+
+void FsparklogsAnalyticsProvider::SetLocation(const FString& InLocation)
+{
+	FAnalyticsEventAttribute Attr(MetaFieldLocation, InLocation);
+	FScopeLock WriteLock(&DataCriticalSection);
+	AddAnalyticsEventAttributeToJsonObject(MetaAttributes, Attr);
+}
+
+void FsparklogsAnalyticsProvider::SetAge(const int32 InAge)
+{
+	FAnalyticsEventAttribute Attr(MetaFieldAge, InAge);
+	FScopeLock WriteLock(&DataCriticalSection);
+	AddAnalyticsEventAttributeToJsonObject(MetaAttributes, Attr);
+}
+
+void FsparklogsAnalyticsProvider::RecordEvent(const FString& EventName, const TArray<FAnalyticsEventAttribute>& Attributes)
+{
+}
+
+void FsparklogsAnalyticsProvider::RecordItemPurchase(const FString& ItemId, const FString& Currency, int PerItemCost, int ItemQuantity)
+{
+	// should override this?
+}
+
+void FsparklogsAnalyticsProvider::RecordItemPurchase(const FString& ItemId, int ItemQuantity, const TArray<FAnalyticsEventAttribute>& EventAttrs)
+{
+
+}
+
+void FsparklogsAnalyticsProvider::RecordCurrencyPurchase(const FString& GameCurrencyType, int GameCurrencyAmount, const FString& RealCurrencyType, float RealMoneyCost, const FString& PaymentProvider)
+{
+	// should override this?
+}
+
+void FsparklogsAnalyticsProvider::RecordCurrencyPurchase(const FString& GameCurrencyType, int GameCurrencyAmount, const TArray<FAnalyticsEventAttribute>& EventAttrs)
+{
+
+}
+
+void FsparklogsAnalyticsProvider::RecordCurrencyGiven(const FString& GameCurrencyType, int GameCurrencyAmount, const TArray<FAnalyticsEventAttribute>& EventAttrs)
+{
+
+}
+
+void FsparklogsAnalyticsProvider::RecordError(const FString& Error, const TArray<FAnalyticsEventAttribute>& EventAttrs)
+{
+
+}
+
+void FsparklogsAnalyticsProvider::RecordProgress(const FString& ProgressType, const TArray<FString>& ProgressHierarchy, const TArray<FAnalyticsEventAttribute>& EventAttrs)
+{
+
+}
+
+void FsparklogsAnalyticsProvider::AutoCleanupSession()
+{
+	if (IsRunningDedicatedServer())
+	{
+		return;
+	}
+	EndSession();
+}
+
+void FsparklogsAnalyticsProvider::GetAnalyticsEventData(FString& OutSessionID, FDateTime& OutSessionStarted, int& OutSessionNumber, TSharedPtr<FJsonObject>& OutMetaAttributes) const
+{
+	FScopeLock ReadLock(&DataCriticalSection);
+	OutSessionID = CurrentSessionID;
+	OutSessionStarted = SessionStarted;
+	OutSessionNumber = SessionNumber;
+	OutMetaAttributes = TSharedPtr<FJsonObject>(new FJsonObject(*MetaAttributes));
+}
+
+void FsparklogsAnalyticsProvider::SetMetaAttribute(const FString& Field, const TSharedPtr<FJsonValue> Value)
+{
+	FScopeLock WriteLock(&DataCriticalSection);
+	MetaAttributes->SetField(Field, Value);
+}
+
+int FsparklogsAnalyticsProvider::GetSessionNumber()
+{
+	FScopeLock ReadLock(&DataCriticalSection);
+	return SessionNumber;
+}
+
+void FsparklogsAnalyticsProvider::SetSessionNumber(int N)
+{
+	// This should really only be used on the server
+	FScopeLock WriteLock(&DataCriticalSection);
+	SessionNumber = N;
+}
+
+FDateTime FsparklogsAnalyticsProvider::GetSessionStarted()
+{
+	FScopeLock ReadLock(&DataCriticalSection);
+	return SessionStarted;
+}
+
+void FsparklogsAnalyticsProvider::SetSessionStarted(FDateTime DT)
+{
+	// This should really only be used on the server
+	FScopeLock WriteLock(&DataCriticalSection);
+	SessionStarted = DT;
+}
+
+void FsparklogsAnalyticsProvider::FinalizeAnalyticsEvent(const TCHAR* EventType, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession, TSharedPtr<FJsonObject>& Object)
+{
+	FScopeLock ReadLock(&DataCriticalSection);
+	InternalFinalizeAnalyticsEvent(EventType, OverrideSession, Object);
+}
+
+void FsparklogsAnalyticsProvider::InternalFinalizeAnalyticsEvent(const TCHAR* EventType, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession, TSharedPtr<FJsonObject>& Object)
+{
+	if (!Object.IsValid())
+	{
+		Object = TSharedPtr<FJsonObject>(new FJsonObject());
+	}
+
+	if (EventType != nullptr)
+	{
+		Object->SetStringField(StandardFieldEventType, EventType);
+	}
+
+	FString GameID = Settings->AnalyticsGameID;
+	FString UserID = Settings->GetEffectiveAnalyticsUserID();
+	FString PlayerID = Settings->GetEffectiveAnalyticsPlayerID();
+	FString EffectiveSessionID = CurrentSessionID;
+	FDateTime EffectiveSessionStarted = SessionStarted;
+	int EffectiveSessionNumber = SessionNumber;
+	TSharedPtr<FJsonObject> EffectiveMetaAttributes(new FJsonObject(*MetaAttributes));
+
+	if (OverrideSession != nullptr)
+	{
+		EffectiveSessionID = OverrideSession->SessionID;
+		EffectiveSessionNumber = OverrideSession->SessionNumber;
+		EffectiveSessionStarted = OverrideSession->SessionStarted;
+		UserID = OverrideSession->UserID;
+		PlayerID = FsparklogsSettings::CalculatePlayerID(GameID, UserID);
+	}
+	if (EffectiveSessionID.IsEmpty() || GameID.IsEmpty() || UserID.IsEmpty() || PlayerID.IsEmpty())
+	{
+		// We cannot send an analytics event without a valid session ID, game ID, user ID, and player ID
+		Object.Reset();
+		return;
+	}
+
+	Object->SetStringField(StandardFieldSessionId, EffectiveSessionID);
+	if (EffectiveSessionNumber > 0)
+	{
+		Object->SetNumberField(StandardFieldSessionNumber, (double)EffectiveSessionNumber);
+	}
+	if (EffectiveSessionStarted != FsparklogsSettings::EmptyDateTime)
+	{
+		Object->SetStringField(StandardFieldSessionStarted, ITLGetUTCDateTimeAsRFC3339(EffectiveSessionStarted));
+	}
+	Object->SetStringField(StandardFieldGameId, GameID);
+	Object->SetStringField(StandardFieldUserId, UserID);
+	Object->SetStringField(StandardFieldPlayerId, PlayerID);
+
+	FDateTime InstallTime = Settings->GetEffectiveAnalyticsInstallTime();
+	Object->SetStringField(StandardFieldFirstInstalled, ITLGetUTCDateTimeAsRFC3339(InstallTime));
+
+	if (EffectiveMetaAttributes.IsValid())
+	{
+		Object->SetObjectField(StandardFieldMeta, EffectiveMetaAttributes);
+	}
+}
+
+void FsparklogsAnalyticsProvider::AddAnalyticsEventAttributeToJsonObject(const TSharedPtr<FJsonObject> Object, const FAnalyticsEventAttribute& Attr)
+{
+	if (!Object.IsValid())
+	{
+		return;
+	}
+	if (Attr.IsJsonFragment())
+	{
+		TSharedPtr<FJsonValue> FragmentValue;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Attr.GetValue());
+		if (FJsonSerializer::Deserialize(Reader, FragmentValue) && FragmentValue.IsValid())
+		{
+			Object->SetField(Attr.GetName(), FragmentValue);
+			return;
+		}
+	}
+	Object->SetStringField(Attr.GetName(), Attr.GetValue());
+}
+
+void FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(const TSharedPtr<FJsonObject> Object, const TArray<FAnalyticsEventAttribute>& EventAttrs)
+{
+	for (const FAnalyticsEventAttribute& Attr : EventAttrs)
+	{
+		AddAnalyticsEventAttributeToJsonObject(Object, Attr);
+	}
+}
+
+void FsparklogsAnalyticsProvider::SetupDefaultMetaAttributes()
+{
+	FString OSPlatform, OSVersion;
+	ITLGetOSPlatformVersion(OSPlatform, OSVersion);
+	MetaAttributes->SetStringField(MetaFieldPlatform, OSPlatform);
+	MetaAttributes->SetStringField(MetaFieldOSVersion, OSVersion);
+		
+	constexpr TCHAR* EngineType = TEXT("unreal ");
+	FString SDKVersion = TEXT("?");
+	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(ITL_PLUGIN_MODULE_NAME);
+	if (Plugin.IsValid())
+	{
+		SDKVersion = EngineType + Plugin->GetDescriptor().VersionName;
+	}
+	MetaAttributes->SetStringField(MetaFieldSDKVersion, SDKVersion);
+	
+	FEngineVersion EngineVersion = FEngineVersion::Current();
+	MetaAttributes->SetStringField(MetaFieldEngineVersion, EngineType + EngineVersion.ToString(EVersionComponent::Patch));
+
+	MetaAttributes->SetStringField(MetaFieldBuild, FApp::GetBuildVersion());
+
+	TArray<FString> MMParts;
+	FString MM = FPlatformMisc::GetDeviceMakeAndModel();
+	MM.ParseIntoArray(MMParts, TEXT("|"), true);
+	while (MMParts.Num() > 2)
+	{
+		MMParts[MMParts.Num() - 2] += TEXT(" ") + MMParts[MMParts.Num() - 1];
+		MMParts.RemoveAt(MMParts.Num() - 1);
+	}
+	if (MMParts.Num() >= 1)
+	{
+		MetaAttributes->SetStringField(MetaFieldDeviceMake, MMParts[0]);
+	}
+	if (MMParts.Num() >= 2)
+	{
+		MetaAttributes->SetStringField(MetaFieldDeviceModel, MMParts[1]);
+	}
+
+	FString NetConnType = ITLGetNetworkConnectionType();
+	if (!NetConnType.IsEmpty())
+	{
+		MetaAttributes->SetStringField(MetaFieldConnectionType, NetConnType);
+	}
+}
+
 // =============== FsparklogsModule ===============================================================================
+
+TSharedPtr<FsparklogsAnalyticsProvider> FsparklogsModule::AnalyticsProvider;
 
 FsparklogsModule::FsparklogsModule()
 	: EngineActive(false)
 	, Settings(new FsparklogsSettings())
 {
-	GameInstanceID = ITLGenerateRandomAlphaNumID(16);
+	GameInstanceID = ITLGenerateRandomAlphaNumID(24);
 }
 
 void FsparklogsModule::StartupModule()
@@ -1943,6 +2552,40 @@ void FsparklogsModule::ShutdownModule()
 	StopShippingEngine();
 }
 
+TSharedPtr<IAnalyticsProvider> FsparklogsModule::CreateAnalyticsProvider(const FAnalyticsProviderConfigurationDelegate& GetConfigValue) const
+{
+	return GetAnalyticsProvider();
+}
+
+TSharedPtr<FsparklogsAnalyticsProvider> FsparklogsModule::GetAnalyticsProvider() const
+{
+	if (!AnalyticsProvider.IsValid())
+	{
+		AnalyticsProvider = TSharedPtr<FsparklogsAnalyticsProvider>(new FsparklogsAnalyticsProvider(Settings));
+	}
+	return AnalyticsProvider;
+}
+
+bool FsparklogsModule::AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalyticsData, const TCHAR* LogMessage)
+{
+	if (!EngineActive || !Settings->CollectAnalytics || !RawAnalyticsData.IsValid())
+	{
+		return false;
+	}
+
+	TSharedRef<FJsonObject> RootEvent(new FJsonObject());
+	RootEvent->SetObjectField(FsparklogsAnalyticsProvider::RootAnalyticsFieldName, RawAnalyticsData);
+	FString OutputJson;
+	TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+		TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&OutputJson);
+	if (!FJsonSerializer::Serialize(RootEvent, Writer))
+	{
+		return false;
+	}
+	Writer->Close();
+	return GetITLInternalGameLog(nullptr).LogDevice->AddRawEvent(*OutputJson, LogMessage);
+}
+
 FString FsparklogsModule::GetGameInstanceID()
 {
 	return GameInstanceID;
@@ -1955,6 +2598,9 @@ bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAnalyticsUserID,
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Event shipping engine is already active. Ignoring call to StartShippingEngine."));
 		return true;
 	}
+
+	// Lock in the application install date early even if analytics is not necessarily enabled yet
+	Settings->GetEffectiveAnalyticsInstallTime();
 
 	if (OverrideAnalyticsUserID != nullptr && FPlatformString::Strlen(OverrideAnalyticsUserID) > 0)
 	{
@@ -2035,7 +2681,9 @@ bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAnalyticsUserID,
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Ingestion parameters: RequestTimeoutSecs=%lf, BytesPerRequest=%d, ProcessingIntervalSecs=%lf, RetryIntervalSecs=%lf, UnflushedBytesToAutoFlush=%d, MinIntervalBetweenFlushes=%lf"), Settings->RequestTimeoutSecs, Settings->BytesPerRequest, Settings->ProcessingIntervalSecs, Settings->RetryIntervalSecs, (int)Settings->UnflushedBytesToAutoFlush, Settings->MinIntervalBetweenFlushes);
 		if (Settings->CollectAnalytics)
 		{
-			UE_LOG(LogPluginSparkLogs, Log, TEXT("Analytics collection is active. UserID=%s PlayerID=%s"), *Settings->GetEffectiveAnalyticsUserID(), *Settings->GetEffectiveAnalyticsPlayerID());
+			UE_LOG(LogPluginSparkLogs, Log, TEXT("Analytics collection is active. GameID='%s' UserID='%s' PlayerID='%s'"), *Settings->AnalyticsGameID, *Settings->GetEffectiveAnalyticsUserID(), *Settings->GetEffectiveAnalyticsPlayerID());
+			// Make sure analytics provider singleton is created...
+			GetAnalyticsProvider();
 		}
 		
 		FString SourceLogFile = GetITLInternalGameLog(nullptr).LogFilePath;
@@ -2081,15 +2729,15 @@ void FsparklogsModule::StopShippingEngine()
 				// When the engine is shutting down, wait no more than 6 seconds to flush the final log request
 				CloudPayloadProcessor->SetTimeoutSecs(FMath::Min(Settings->RequestTimeoutSecs, 6.0));
 			}
+			FOutputDevice* LogDevice = GetITLInternalGameLog(nullptr).LogDevice.Get();
+			LogDevice->Flush();
 			bool LastFlushProcessedEverything = false;
 			if (CloudStreamer->FlushAndWait(2, true, true, true, FsparklogsSettings::WaitForFlushToCloudOnShutdown, LastFlushProcessedEverything))
 			{
 				FString LogFilePath = GetITLInternalGameLog(nullptr).LogFilePath;
 				UE_LOG(LogPluginSparkLogs, Log, TEXT("Flushed logs successfully. LastFlushedEverything=%d"), (int)LastFlushProcessedEverything);
 				// Purge this plugin's logfile and delete the progress marker (fully flushed shutdown should start with an empty log next game session).
-				FOutputDevice* LogDevice = GetITLInternalGameLog(nullptr).LogDevice.Get();
 				GLog->RemoveOutputDevice(LogDevice);
-				LogDevice->Flush();
 				LogDevice->TearDown();
 				if (LastFlushProcessedEverything)
 				{
@@ -2100,7 +2748,9 @@ void FsparklogsModule::StopShippingEngine()
 			}
 			else
 			{
-				UE_LOG(LogPluginSparkLogs, Log, TEXT("Flush failed or timed out."));
+				UE_LOG(LogPluginSparkLogs, Log, TEXT("Flush failed or timed out during shutdown."));
+				GLog->RemoveOutputDevice(LogDevice);
+				LogDevice->TearDown();
 				// NOTE: the progress marker would not have been updated, so we'll keep trying the next time
 				// the game engine starts right from where we left off, so we shouldn't lose anything.
 			}
@@ -2110,6 +2760,24 @@ void FsparklogsModule::StopShippingEngine()
 		StressGenerator.Reset();
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Shutdown."));
 		EngineActive = false;
+	}
+}
+
+void FsparklogsModule::Flush()
+{
+	if (!EngineActive)
+	{
+		return;
+	}
+	GLog->Flush();
+	if (CloudStreamer.IsValid() && CloudPayloadProcessor.IsValid())
+	{
+		FOutputDevice* LogDevice = GetITLInternalGameLog(nullptr).LogDevice.Get();
+		if (LogDevice != nullptr)
+		{
+			LogDevice->Flush();
+		}
+		CloudStreamer->RequestFlush();
 	}
 }
 
