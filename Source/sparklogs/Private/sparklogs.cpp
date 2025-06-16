@@ -2030,6 +2030,25 @@ bool FsparklogsOutputDeviceFile::AddRawEvent(const TCHAR* RawJSON, const TCHAR* 
 	return true;
 }
 
+bool FsparklogsOutputDeviceFile::AddRawEventWithJSONObject(const FString& RawJSONWithBraces, const TCHAR* Message, bool AddUTCNow)
+{
+	FString TimestampFragment;
+	if (AddUTCNow)
+	{
+		TimestampFragment = TEXT("\"timestamp\": \"") + ITLGetUTCDateTimeAsRFC3339(FDateTime::UtcNow()) + TEXT("\"");
+	}
+	if (RawJSONWithBraces.Len() > 2 && RawJSONWithBraces[0] == '{' && RawJSONWithBraces[RawJSONWithBraces.Len()-1] == '}')
+	{
+		TimestampFragment += TEXT(",");
+		FString JSONWithoutBraces = TimestampFragment + RawJSONWithBraces.Mid(1, RawJSONWithBraces.Len() - 2);
+		return AddRawEvent(*JSONWithoutBraces, Message);
+	}
+	else
+	{
+		return AddRawEvent(*TimestampFragment, Message);
+	}
+}
+
 bool FsparklogsOutputDeviceFile::CreateAsyncWriter()
 {
 	if (IsOpened())
@@ -2127,7 +2146,65 @@ FsparklogsAnalyticsProvider::FsparklogsAnalyticsProvider(TSharedRef<FsparklogsSe
 
 FsparklogsAnalyticsProvider::~FsparklogsAnalyticsProvider()
 {
+}
 
+bool FsparklogsAnalyticsProvider::CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	if (!FsparklogsModule::IsModuleLoaded())
+	{
+		return false;
+	}
+	TSharedPtr<FJsonObject> Data(new FJsonObject());
+	FString EventID;
+	if (ItemCategory != nullptr && *ItemCategory != 0)
+	{
+		EventID = ItemCategory;
+		Data->SetStringField(PurchaseFieldItemCategory, ItemCategory);
+	}
+	else
+	{
+		ItemCategory = TEXT("");
+	}
+	if (ItemId != nullptr && *ItemId != 0)
+	{
+		if (!EventID.IsEmpty())
+		{
+			EventID += ItemSeparator;
+		}
+		EventID += ItemId;
+		Data->SetStringField(PurchaseFieldItemId, ItemId);
+	}
+	else
+	{
+		ItemId = TEXT("");
+	}
+	if (!EventID.IsEmpty())
+	{
+		Data->SetStringField(PurchaseFieldEventId, EventID);
+	}
+	if (RealCurrencyCode == nullptr || *RealCurrencyCode == 0)
+	{
+		RealCurrencyCode = TEXT("USD");
+	}
+	Data->SetStringField(PurchaseFieldCurrency, RealCurrencyCode);
+	Data->SetNumberField(PurchaseFieldAmount, Amount);
+	if (CustomAttrs.IsValid() && CustomAttrs->Values.Num() > 0)
+	{
+		Data->SetObjectField(StandardFieldCustom, CustomAttrs);
+	}
+	FinalizeAnalyticsEvent(EventTypePurchase, OverrideSession, Data);
+	FString DefaultMessage = FString::Printf(TEXT("%s: %s: purchase of item made; item_category=`%s` item_id=`%s` currency=`%s` amount=%.2f"), MessageHeader, EventTypePurchase, ItemCategory, ItemId, RealCurrencyCode, Amount);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage));
+}
+
+bool FsparklogsAnalyticsProvider::CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	TSharedPtr<FJsonObject> CustomObject;
+	if (CustomAttrs.Num() > 0)
+	{
+		AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
+	}
+	return CreateAnalyticsEventPurchase(ItemCategory, ItemId, RealCurrencyCode, Amount, CustomObject, IncludeDefaultMessage, ExtraMessage, OverrideSession);
 }
 
 bool FsparklogsAnalyticsProvider::StartSession(const TArray<FAnalyticsEventAttribute>& Attributes)
@@ -2149,7 +2226,7 @@ bool FsparklogsAnalyticsProvider::StartSession(const TArray<FAnalyticsEventAttri
 	// No special data for session start other than standard attributes, just finalize, unlock, and send
 	InternalFinalizeAnalyticsEvent(EventTypeSessionStart, nullptr, Data);
 	WriteLock.Unlock();
-	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, nullptr);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *FString::Printf(TEXT("%s: %s: started new session"), MessageHeader, EventTypeSessionStart));
 }
 
 void FsparklogsAnalyticsProvider::EndSession()
@@ -2180,7 +2257,9 @@ void FsparklogsAnalyticsProvider::EndSession()
 	SessionStarted = FsparklogsSettings::EmptyDateTime;
 	SessionNumber = 0;
 	WriteLock.Unlock();
-	FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, nullptr);
+	FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *FString::Printf(TEXT("%s: %s: finished session normally"), MessageHeader, EventTypeSessionEnd));
+	// The app might end or go inactive soon, try to get the data to the cloud asap...
+	FsparklogsModule::GetModule().Flush();
 }
 
 FString FsparklogsAnalyticsProvider::GetSessionID() const
@@ -2259,6 +2338,7 @@ void FsparklogsAnalyticsProvider::SetAge(const int32 InAge)
 
 void FsparklogsAnalyticsProvider::RecordEvent(const FString& EventName, const TArray<FAnalyticsEventAttribute>& Attributes)
 {
+	FScopeLock ReadLock(&DataCriticalSection);
 }
 
 void FsparklogsAnalyticsProvider::RecordItemPurchase(const FString& ItemId, const FString& Currency, int PerItemCost, int ItemQuantity)
@@ -2407,6 +2487,24 @@ void FsparklogsAnalyticsProvider::InternalFinalizeAnalyticsEvent(const TCHAR* Ev
 	{
 		Object->SetObjectField(StandardFieldMeta, EffectiveMetaAttributes);
 	}
+}
+
+FString FsparklogsAnalyticsProvider::CalculateFinalMessage(const FString& DefaultMessage, bool IncludeDefaultMessage, const TCHAR* ExtraMessage)
+{
+	FString FinalMessage;
+	if (IncludeDefaultMessage)
+	{
+		FinalMessage = DefaultMessage;
+	}
+	if (ExtraMessage != nullptr && *ExtraMessage != 0)
+	{
+		if (!FinalMessage.IsEmpty())
+		{
+			FinalMessage += TEXT(" ");
+		}
+		FinalMessage += ExtraMessage;
+	}
+	return FinalMessage;
 }
 
 void FsparklogsAnalyticsProvider::AddAnalyticsEventAttributeToJsonObject(const TSharedPtr<FJsonObject> Object, const FAnalyticsEventAttribute& Attr)
@@ -2583,7 +2681,7 @@ bool FsparklogsModule::AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalytics
 		return false;
 	}
 	Writer->Close();
-	return GetITLInternalGameLog(nullptr).LogDevice->AddRawEvent(*OutputJson, LogMessage);
+	return GetITLInternalGameLog(nullptr).LogDevice->AddRawEventWithJSONObject(OutputJson, LogMessage, true);
 }
 
 FString FsparklogsModule::GetGameInstanceID()

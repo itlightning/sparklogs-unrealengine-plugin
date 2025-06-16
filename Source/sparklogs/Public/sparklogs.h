@@ -706,8 +706,15 @@ public:
 	void AddAlwaysLoggedCategory(const class FName& InCategoryName) { AlwaysLoggedCategories.Add(InCategoryName); }
 
 	/** Thread safe method to add one new event to the queue. Raw JSON can be specified (should be the contents of an
-	  * encoded JSON object, but *without* the surrounding {}) as well as optional message text. Returns true on success. */
+	  * encoded JSON object, but *without* the surrounding {}) as well as optional raw message text. You should include
+	  * in the RawJSON a timestamp field with the time of the message, or a timestamp at the start of the message field.
+	  * Returns true on success. */
 	bool AddRawEvent(const TCHAR* RawJSON, const TCHAR* Message);
+
+	/** Similar to AddRawEvent but the format of RawJSON expects that the start/end *do* including the curly braces {}.
+	  * Can also optionally add the current UTC time to the JSON data.
+	  */
+	bool AddRawEventWithJSONObject(const FString& RawJSONWithBraces, const TCHAR* Message, bool AddUTCNow);
 
 protected:
 	/** Whether or not we've hit a failure that causes future writes to fail. */
@@ -767,11 +774,22 @@ public:
  * Analytics must be enabled in the sparklogs module settings for this launch
  * configuration in order for the data to go anywhere.
  * 
+ * Either rely on the plugin's session auto-start and auto-end features (when game
+ * launches and when game finally exits and for mobile when app activates/deactivates),
+ * or use StartSession and EndSession to start/end analytics sessions.
+ * 
+ * When a session is active, you can generate various analytics events using any
+ * of the high-level CreateAnalyticsEvent* methods (recommended). You can also use 
+ * the Unreal Engine analytics provider framework (see config instructions below) and
+ * use the Record* methods (will translate these to the corresponding AnalyticsEvent*
+ * methods).
+ * 
  * If you're on a server and you want to record analytics events for a given client,
- * you can either explicitly pass overridden session information when creating each
- * analytics event by passing a SparkLogsAnalyticsSessionDescriptor (recommended),
- * or you can set the session ID/start time/number globally using the methods
- * (NOT recommended unless your server is single threaded! (highly unlikely)).
+ * you should explicitly pass overridden session information when creating each
+ * analytics event by passing a SparkLogsAnalyticsSessionDescriptor (recommended).
+ * It is NOT recommended to use the Unreal Engine analytics plugin method SetSession
+ * and SetUserID as these set server session information globally (NOT recommended
+ * unless your server is single threaded! (highly unlikely)).
  * 
  * To use sparklogs as an analytics provider, in DefaultEngine.ini do:
  * [Analytics]
@@ -790,6 +808,7 @@ public:
 	static constexpr TCHAR* StandardFieldEventType = TEXT("type");
 	static constexpr TCHAR* EventTypeSessionStart = TEXT("session_start");
 	static constexpr TCHAR* EventTypeSessionEnd = TEXT("session_end");
+	static constexpr TCHAR* EventTypePurchase = TEXT("purchase");
 
 	static constexpr TCHAR* StandardFieldSessionId = TEXT("session_id");
 	static constexpr TCHAR* StandardFieldSessionNumber = TEXT("session_num");
@@ -799,6 +818,7 @@ public:
 	static constexpr TCHAR* StandardFieldPlayerId = TEXT("player_id");
 	static constexpr TCHAR* StandardFieldFirstInstalled = TEXT("first_installed");
 	static constexpr TCHAR* StandardFieldMeta = TEXT("meta");
+	static constexpr TCHAR* StandardFieldCustom = TEXT("custom");
 
 	static constexpr TCHAR* SessionEndFieldSessionEnded = TEXT("session_ended");
 	static constexpr TCHAR* SessionEndFieldSessionDurationSecs = TEXT("session_duration_secs");
@@ -815,9 +835,41 @@ public:
 	static constexpr TCHAR* MetaFieldLocation = TEXT("location");
 	static constexpr TCHAR* MetaFieldAge = TEXT("age");
 
+	static constexpr TCHAR* PurchaseFieldEventId = TEXT("event_id");
+	static constexpr TCHAR* PurchaseFieldItemCategory = TEXT("item_category");
+	static constexpr TCHAR* PurchaseFieldItemId = TEXT("item_id");
+	static constexpr TCHAR* PurchaseFieldCurrency = TEXT("currency");
+	static constexpr TCHAR* PurchaseFieldAmount = TEXT("amount");
+
+	static constexpr TCHAR* MessageHeader = TEXT("GAME_ENGINE_ANALYTICS");
+	static constexpr TCHAR* ItemSeparator = TEXT(":");
+
 public:
 	FsparklogsAnalyticsProvider(TSharedRef<FsparklogsSettings> InSettings);
 	virtual ~FsparklogsAnalyticsProvider();
+
+	/** Records real-money purchase events. ItemCategory and ItemId form a hierarchy. There are no cardinality limits,
+	  * but we recommend you limit the category and item IDs to make your analysis more meaningful.
+	  * RealCurrencyCode should be an alphabetic ISO 4217 code (e.g., USD, EUR, etc.) (if nullptr will assume USD).
+	  * Amount should be the actual amount of that local currency. e.g., one dollar and 99 cents would be "1.99".
+	  * This will automatically add a transaction number field indicating the sequential order of the transaction
+	  * since the game was installed, so you can analyze what players are purchasing in what order.
+	  * 
+	  * You can optionally specify additional custom attributes by passing a non-null JSON object.
+	  * 
+	  * You can optionally specify additional message text to be associated with the analytics event (instead of or
+	  * in addition to a default message text that will describe this purchase event in natural language).
+	  * 
+	  * If you're in a server process, then you may not have an active session, and instead you want to create an
+	  * event that is associated with a session for a given client process. In that case, create a
+	  * FSparkLogsAnalyticsSessionDescriptor specifying at least the session ID and user ID and pass to OverrideSessionInfo.
+	  * 
+	  * Returns whether or not the event was created/queued.
+	  */
+	virtual bool CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession);
+
+	/** Allows specifying custom attributes using an array of FAnalyticsEventAttribute instead of FJsonObject. */
+	virtual bool CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession);
 
 	//~ Begin IAnalyticsProvider Interface
 
@@ -870,7 +922,8 @@ public:
 	void SetSessionStarted(FDateTime DT);
 
 	/** Thread-safe. Adds all standard fields to the given analytics logical event so it can be queued as a raw event. It modifies Object in-place.
-	  * This will automatically add meta attributes to the raw analytics event data.
+	  * This will automatically add meta attributes to the raw analytics event data. Normally you should call higher-level Analytics* methods that
+	  * generate higher-level events that follow certain structures.
 	  * 
 	  * If a session is NOT active or if there is no game ID or user ID, it will forcefully set Object to nullptr (so the event cannot be sent) unless you specify OverrideSession.
 	  * If OverrideSession is not nullptr/empty then you can override the session ID/number/start/user ID (useful on the server).
@@ -900,6 +953,9 @@ protected:
 
 	// Like FinalizeAnalyticsEvent but will assume the critical section is ALREADY LOCKED!
 	void InternalFinalizeAnalyticsEvent(const TCHAR* EventType, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession, TSharedPtr<FJsonObject>& Object);
+
+	// Forms the final message that should be used given a default message, an extra message, and whether or not the default should be included.
+	FString CalculateFinalMessage(const FString& DefaultMessage, bool IncludeDefaultMessage, const TCHAR* ExtraMessage);
 };
 
 /**
