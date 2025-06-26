@@ -2206,6 +2206,66 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventPurchase(const TCHAR* Item
 	return CreateAnalyticsEventPurchase(ItemCategory, ItemId, RealCurrencyCode, Amount, CustomObject, IncludeDefaultMessage, ExtraMessage, OverrideSession);
 }
 
+bool FsparklogsAnalyticsProvider::CreateAnalyticsEventResource(EsparklogsAnalyticsFlowType FlowType, double Amount, const TCHAR* VirtualCurrency, const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	if (!FsparklogsModule::IsModuleLoaded() || VirtualCurrency == nullptr || *VirtualCurrency == 0)
+	{
+		return false;
+	}
+	TSharedPtr<FJsonObject> Data(new FJsonObject());
+	FString FlowTypeStr = UEnum::GetValueAsString(FlowType);
+	Data->SetStringField(ResourceFieldFlowType, FlowTypeStr);
+	Data->SetStringField(ResourceFieldVirtualCurrency, VirtualCurrency);
+	FString EventID = (FlowTypeStr + ItemSeparator) + VirtualCurrency;
+	if (ItemCategory != nullptr && *ItemCategory != 0)
+	{
+		EventID += ItemSeparator;
+		EventID += ItemCategory;
+		Data->SetStringField(ResourceFieldItemCategory, ItemCategory);
+	}
+	else
+	{
+		ItemCategory = TEXT("");
+	}
+	if (ItemId != nullptr && *ItemId != 0)
+	{
+		EventID += ItemSeparator;
+		EventID += ItemId;
+		Data->SetStringField(ResourceFieldItemId, ItemId);
+	}
+	else
+	{
+		ItemId = TEXT("");
+	}
+	Data->SetStringField(ResourceFieldEventId, EventID);
+	Data->SetNumberField(ResourceFieldAmount, Amount);
+	if (Reason != nullptr && *Reason != 0)
+	{
+		Data->SetStringField(ResourceFieldReason, Reason);
+	}
+	else
+	{
+		Reason = TEXT("");
+	}
+	if (CustomAttrs.IsValid() && CustomAttrs->Values.Num() > 0)
+	{
+		Data->SetObjectField(StandardFieldCustom, CustomAttrs);
+	}
+	FinalizeAnalyticsEvent(EventTypeResource, OverrideSession, Data);
+	FString DefaultMessage = FString::Printf(TEXT("%s: %s: flow_type=%s virtual_currency=`%s` item_category=`%s` item_id=`%s` amount=%.2f reason=`%s`"), MessageHeader, EventTypeResource, *FlowTypeStr, VirtualCurrency, ItemCategory, ItemId, Amount, Reason);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr);
+}
+
+bool FsparklogsAnalyticsProvider::CreateAnalyticsEventResource(EsparklogsAnalyticsFlowType FlowType, double Amount, const TCHAR* VirtualCurrency, const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	TSharedPtr<FJsonObject> CustomObject;
+	if (CustomAttrs.Num() > 0)
+	{
+		AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
+	}
+	return CreateAnalyticsEventResource(FlowType, Amount, VirtualCurrency, ItemCategory, ItemId, Reason, CustomObject, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
 bool FsparklogsAnalyticsProvider::ValidateProgressionEvent(const TArray<FString>& PArray)
 {
 	bool PrevIsEmpty = false;

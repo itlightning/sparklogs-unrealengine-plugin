@@ -793,6 +793,12 @@ enum class EsparklogsAnalyticsProgressionStatus : uint8 {
 	Completed UMETA(DisplayName = "Completed")
 };
 
+UENUM(BlueprintType)
+enum class EsparklogsAnalyticsFlowType : uint8 {
+	Source UMETA(DisplayName = "Source"),
+	Sink UMETA(DisplayName = "Sink")
+};
+
 USTRUCT(BlueprintType)
 struct FsparklogsAnalyticsAttribute
 {
@@ -849,6 +855,7 @@ public:
 	static constexpr TCHAR* EventTypeSessionStart = TEXT("session_start");
 	static constexpr TCHAR* EventTypeSessionEnd = TEXT("session_end");
 	static constexpr TCHAR* EventTypePurchase = TEXT("purchase");
+	static constexpr TCHAR* EventTypeResource = TEXT("resource");
 	static constexpr TCHAR* EventTypeProgression = TEXT("progression");
 	static constexpr TCHAR* EventTypeDesign = TEXT("design");
 	static constexpr TCHAR* EventTypeLog = TEXT("log");
@@ -884,6 +891,14 @@ public:
 	static constexpr TCHAR* PurchaseFieldCurrency = TEXT("currency");
 	static constexpr TCHAR* PurchaseFieldAmount = TEXT("amount");
 
+	static constexpr TCHAR* ResourceFieldEventId = TEXT("event_id");
+	static constexpr TCHAR* ResourceFieldFlowType = TEXT("flow_type");
+	static constexpr TCHAR* ResourceFieldVirtualCurrency = TEXT("virtual_currency");
+	static constexpr TCHAR* ResourceFieldItemCategory = TEXT("item_category");
+	static constexpr TCHAR* ResourceFieldItemId = TEXT("item_id");
+	static constexpr TCHAR* ResourceFieldAmount = TEXT("amount");
+	static constexpr TCHAR* ResourceFieldReason = TEXT("reason");
+
 	static constexpr TCHAR* ProgressionFieldEventId = TEXT("event_id");
 	static constexpr TCHAR* ProgressionFieldStatus = TEXT("status");
 	static constexpr TCHAR* ProgressionFieldTiersString = TEXT("tiers");
@@ -905,10 +920,20 @@ public:
 	FsparklogsAnalyticsProvider(TSharedRef<FsparklogsSettings> InSettings);
 	virtual ~FsparklogsAnalyticsProvider();
 
-	/** Records real-money purchase events. ItemCategory and ItemId form a hierarchy. There are no cardinality limits,
+	/** Records real-money purchase events. ItemCategory and ItemId form a hierarchy.
+	  *
+	  * For example, the user might purchase additional gems (a virtual currency) through
+	  * a 1000 gem pack, which could be identified with an ItemCategory of "in_app_purchase"
+	  * and an Itemid of "1000_gem_pack". When a purchase occurs that generates in-game virtual
+	  * currency then you should also record a Resource source event with the appropriate
+	  * virtual currency for the same ItemCategory and ItemId.
+	  * 
+	  * There are no cardinality limits on the combination of values for ItemCategory & ItemId,
 	  * but we recommend you limit the category and item IDs to make your analysis more meaningful.
+	  * 
 	  * RealCurrencyCode should be an alphabetic ISO 4217 code (e.g., USD, EUR, etc.) (if nullptr will assume USD).
 	  * Amount should be the actual amount of that local currency. e.g., one dollar and 99 cents would be "1.99".
+	  * 
 	  * This will automatically add a transaction number field indicating the sequential order of the transaction
 	  * since the game was installed, so you can analyze what players are purchasing in what order.
 	  * 
@@ -926,6 +951,35 @@ public:
 	virtual bool CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage=true, const TCHAR* ExtraMessage=nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession=nullptr);
 	virtual bool CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage=true, const TCHAR* ExtraMessage=nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession=nullptr);
 
+	/** Records the granting (resource source) or using up (resource sink) of a virtual currency (gems, lives, etc.)
+	 * for a particular ItemCategory and ItemId, which form a hierarchy.
+	 * 
+	 * The amount should be positive for sources and negatives for sinks. It will automatically enforce
+	 * this using the absolute value of the amount as needed.
+	 * 
+	 * There are no limits on the possible values for ItemCategory and ItemId, but in general be thoughtful
+	 * about what values you use and how you will design your analysis.
+	 * 
+	 * Also, be thoughtful about the balance between recording every resource source/sink event as it happens
+	 * (which could be very often), vs aggregating the information and recording it only at key points (e.g.
+	 * when losing a life or ending a level). The system can handle sending frequent events, but this could
+	 * generate exponentially more data and could thus cost more at large scale. Be especially thoughtful
+	 * when you have 100s of thousands of users or more.
+	 * 
+	 * If a resource was granted as the result of a purchase using real money, then make sure to also record a
+	 * corresponding purchase event as well with the same ItemCategory and ItemId.
+	 * 
+	 * You can optionally specify an additional textual reason describing more information why the event occurred.
+	 * 
+	 * If you're in a server process, then you may not have an active session, and instead you want to create an
+	 * event that is associated with a session for a given client process. In that case, create a
+	 * FSparkLogsAnalyticsSessionDescriptor specifying at least the session ID and user ID and pass to OverrideSessionInfo.
+	 * 
+	 * Returns whether or not the event was created/queued.
+	 */
+	virtual bool CreateAnalyticsEventResource(EsparklogsAnalyticsFlowType FlowType, double Amount, const TCHAR* VirtualCurrency, const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventResource(EsparklogsAnalyticsFlowType FlowType, double Amount, const TCHAR* VirtualCurrency, const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+
 	/** Records a progression event, which records starting, failing, or completing a certain part of
 	  * a game. Progression events form a hierarchy and can have up to N arbitrary tiers (world,
 	  * region, level, segment, etc.).
@@ -937,6 +991,12 @@ public:
 	  * how many total possible values of unique progression event IDs you create based on your planned analysis.
 	  *
 	  * Design events may optionally be associated with a numeric value as well.
+	  * 
+	  * If you're in a server process, then you may not have an active session, and instead you want to create an
+	  * event that is associated with a session for a given client process. In that case, create a
+	  * FSparkLogsAnalyticsSessionDescriptor specifying at least the session ID and user ID and pass to OverrideSessionInfo.
+	  * 
+	  * Returns whether or not the event was created/queued.
 	  */
 	virtual bool CreateAnalyticsEventProgression(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
 	virtual bool CreateAnalyticsEventProgression(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
@@ -952,6 +1012,12 @@ public:
 	  * on your planned analysis.
 	  * 
 	  * Design events may optionally be associated with a numeric value as well.
+	  * 
+	  * If you're in a server process, then you may not have an active session, and instead you want to create an
+	  * event that is associated with a session for a given client process. In that case, create a
+	  * FSparkLogsAnalyticsSessionDescriptor specifying at least the session ID and user ID and pass to OverrideSessionInfo.
+	  * 
+	  * Returns whether or not the event was created/queued.
 	  */
 	virtual bool CreateAnalyticsEventDesign(const TCHAR* EventId, double Value, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
 	virtual bool CreateAnalyticsEventDesign(const TCHAR* EventId, double Value, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
@@ -962,6 +1028,12 @@ public:
 	 * This could be an error, a key debug event, etc. There are no limits on how many events you can record,
 	 * but take care not to ingest too much data (e.g., if you have millions of users, you may want to log
 	 * only the first kind of exception per game session, or log crashes, etc.).
+	 * 
+	 * If you're in a server process, then you may not have an active session, and instead you want to create an
+	 * event that is associated with a session for a given client process. In that case, create a
+	 * FSparkLogsAnalyticsSessionDescriptor specifying at least the session ID and user ID and pass to OverrideSessionInfo.
+	 * 
+	 * Returns whether or not the event was created/queued.
 	 */
 	virtual bool CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, TSharedPtr<FJsonObject> CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
 	virtual bool CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, const TArray<FAnalyticsEventAttribute>& CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
