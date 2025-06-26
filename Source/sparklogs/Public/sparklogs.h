@@ -195,7 +195,9 @@ public:
 	/** Thread-safe. Returns the transaction number since the app was first installed. Optionally increment the transaction number. */
 	int GetTransactionNumber(bool Increment);
 
-	/** Thread-safe. Returns the attempt number for the given event ID (case insensitive) since the app was first installed. Optionally increment the attempt number and/or optionally delete it (will still return last (possibly incremented) value). */
+	/** Thread-safe. Returns the attempt number for the given event ID (case insensitive) since the app was first installed.
+	  * Optionally increment the attempt number and/or optionally delete it (will still return last (possibly incremented) value).
+	  */
 	int GetAttemptNumber(const FString& EventID, bool Increment, bool DeleteAfter);
 
 protected:
@@ -769,6 +771,44 @@ public:
 	FString UserID;
 };
 
+UENUM(BlueprintType)
+enum class EsparklogsSeverity : uint8 {
+	Trace UMETA(DisplayName = "Trace"),
+	Debug UMETA(DisplayName = "Debug"),
+	Info UMETA(DisplayName = "Info"),
+	Notice UMETA(DisplayName = "Notice"),
+	Warn UMETA(DisplayName = "Warn"),
+	Error UMETA(DisplayName = "Error"),
+	Critical UMETA(DisplayName = "Critical"),
+	Fatal UMETA(DisplayName = "Fatal"),
+	Alert UMETA(DisplayName = "Alert"),
+	Panic UMETA(DisplayName = "Panic"),
+	Emergency UMETA(DisplayName = "Emergency")
+};
+
+UENUM(BlueprintType)
+enum class EsparklogsAnalyticsProgressionStatus : uint8 {
+	Started UMETA(DisplayName = "Started"),
+	Failed UMETA(DisplayName = "Failed"),
+	Completed UMETA(DisplayName = "Completed")
+};
+
+USTRUCT(BlueprintType)
+struct FsparklogsAnalyticsAttribute
+{
+	GENERATED_USTRUCT_BODY();
+
+	FsparklogsAnalyticsAttribute() {}
+	FsparklogsAnalyticsAttribute(const FString& K, const FString& V) { Key = K; Value = V; }
+	~FsparklogsAnalyticsAttribute() {}
+
+	UPROPERTY(Category = "SparkLogs", EditAnywhere, BlueprintReadWrite);
+	FString Key;
+
+	UPROPERTY(Category = "SparkLogs", EditAnywhere, BlueprintReadWrite);
+	FString Value;
+};
+
 /**
  * Analytics interface implementation that sends data to the sparklogs module.
  * Analytics must be enabled in the sparklogs module settings for this launch
@@ -809,6 +849,9 @@ public:
 	static constexpr TCHAR* EventTypeSessionStart = TEXT("session_start");
 	static constexpr TCHAR* EventTypeSessionEnd = TEXT("session_end");
 	static constexpr TCHAR* EventTypePurchase = TEXT("purchase");
+	static constexpr TCHAR* EventTypeProgression = TEXT("progression");
+	static constexpr TCHAR* EventTypeDesign = TEXT("design");
+	static constexpr TCHAR* EventTypeLog = TEXT("log");
 
 	static constexpr TCHAR* StandardFieldSessionId = TEXT("session_id");
 	static constexpr TCHAR* StandardFieldSessionNumber = TEXT("session_num");
@@ -841,6 +884,20 @@ public:
 	static constexpr TCHAR* PurchaseFieldCurrency = TEXT("currency");
 	static constexpr TCHAR* PurchaseFieldAmount = TEXT("amount");
 
+	static constexpr TCHAR* ProgressionFieldEventId = TEXT("event_id");
+	static constexpr TCHAR* ProgressionFieldStatus = TEXT("status");
+	static constexpr TCHAR* ProgressionFieldTiersString = TEXT("tiers");
+	static constexpr TCHAR* ProgressionFieldTiersArray = TEXT("tiers_array");
+	static constexpr TCHAR* ProgressionFieldTierPrefix = TEXT("tier");
+	static constexpr TCHAR* ProgressionFieldAttempt = TEXT("attempt");
+	static constexpr TCHAR* ProgressionFieldValue = TEXT("value");
+	static constexpr TCHAR* ProgressionFieldReason = TEXT("reason");
+
+	static constexpr TCHAR* DesignFieldEventId = TEXT("event_id");
+	static constexpr TCHAR* DesignFieldValue = TEXT("value");
+
+	static constexpr TCHAR* LogFieldSeverity = TEXT("severity");
+
 	static constexpr TCHAR* MessageHeader = TEXT("GAME_ENGINE_ANALYTICS");
 	static constexpr TCHAR* ItemSeparator = TEXT(":");
 
@@ -866,10 +923,48 @@ public:
 	  * 
 	  * Returns whether or not the event was created/queued.
 	  */
-	virtual bool CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession);
+	virtual bool CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage=true, const TCHAR* ExtraMessage=nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession=nullptr);
+	virtual bool CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage=true, const TCHAR* ExtraMessage=nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession=nullptr);
 
-	/** Allows specifying custom attributes using an array of FAnalyticsEventAttribute instead of FJsonObject. */
-	virtual bool CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession);
+	/** Records a progression event, which records starting, failing, or completing a certain part of
+	  * a game. Progression events form a hierarchy and can have up to N arbitrary tiers (world,
+	  * region, level, segment, etc.).
+	  * 
+	  * Later tiers are optional and can be an empty string or nullptr, but you cannot specify a later
+	  * tier value if an earlier tier is not set.
+	  *
+	  * While there is no limit on depth or cardinality of the combination of tier values, be smart about
+	  * how many total possible values of unique progression event IDs you create based on your planned analysis.
+	  *
+	  * Design events may optionally be associated with a numeric value as well.
+	  */
+	virtual bool CreateAnalyticsEventProgression(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventProgression(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventProgression(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventProgression(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventProgression(EsparklogsAnalyticsProgressionStatus Status, double* Value, const TArray<FString>& PArray, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+
+	/** Records a design event. EventId is a colon delimited string that forms an event hierarchy of arbitrary depth
+	  * (e.g., "quest:trial_master_sword:beginning_floors:start" or "quest:trial_master_sword:middle_floors:finish" or
+	  * "tutorial:begin").
+	  * 
+	  * While there is no limit on depth or cardinality of EventId, be smart about how many categories you create based
+	  * on your planned analysis.
+	  * 
+	  * Design events may optionally be associated with a numeric value as well.
+	  */
+	virtual bool CreateAnalyticsEventDesign(const TCHAR* EventId, double Value, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventDesign(const TCHAR* EventId, double Value, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventDesign(const TCHAR* EventId, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventDesign(const TCHAR* EventId, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+
+	/** Records a log event with key information you want to associate with this analytics session & user.
+	 * This could be an error, a key debug event, etc. There are no limits on how many events you can record,
+	 * but take care not to ingest too much data (e.g., if you have millions of users, you may want to log
+	 * only the first kind of exception per game session, or log crashes, etc.).
+	 */
+	virtual bool CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, TSharedPtr<FJsonObject> CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, const TArray<FAnalyticsEventAttribute>& CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
 
 	//~ Begin IAnalyticsProvider Interface
 
@@ -900,6 +995,18 @@ public:
 	virtual void RecordCurrencyGiven(const FString& GameCurrencyType, int GameCurrencyAmount, const TArray<FAnalyticsEventAttribute>& EventAttrs) override;
 	virtual void RecordError(const FString& Error, const TArray<FAnalyticsEventAttribute>& EventAttrs) override;
 	virtual void RecordProgress(const FString& ProgressType, const TArray<FString>& ProgressHierarchy, const TArray<FAnalyticsEventAttribute>& EventAttrs) override;
+
+#if (ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4))
+	virtual FAnalyticsEventAttribute GetDefaultEventAttribute(int AttributeIndex) const override;
+	virtual int32 GetDefaultEventAttributeCount() const override;
+	virtual TArray<FAnalyticsEventAttribute> GetDefaultEventAttributesSafe() const override;
+	virtual void SetDefaultEventAttributes(TArray<FAnalyticsEventAttribute>&& Attributes) override;
+#else
+	virtual FAnalyticsEventAttribute GetDefaultEventAttribute(int AttributeIndex) const;
+	virtual int32 GetDefaultEventAttributeCount() const;
+	virtual TArray<FAnalyticsEventAttribute> GetDefaultEventAttributesSafe() const;
+	virtual void SetDefaultEventAttributes(TArray<FAnalyticsEventAttribute>&& Attributes);
+#endif
 	//~ End IAnalyticsProvider Interface
 
 	// Automatically cleanup any active session, except for server launch configurations where we only send session data if they explicitly use StartSession and EndSession.
@@ -933,6 +1040,9 @@ public:
 public:
 	static void AddAnalyticsEventAttributeToJsonObject(const TSharedPtr<FJsonObject> Object, const FAnalyticsEventAttribute& Attr);
 	static void AddAnalyticsEventAttributesToJsonObject(const TSharedPtr<FJsonObject> Object, const TArray<FAnalyticsEventAttribute>& EventAttrs);
+	static FAnalyticsEventAttribute ConvertJsonValueToEventAttribute(const FString& Key, TSharedPtr<FJsonValue> Value);
+	// Returns a JSON array value that contains the strings from the given array. Ignores empty string values in the array.
+	static TSharedRef<FJsonValueArray> ConvertNonEmptyStringArrayToJSON(const TArray<FString>& A);
 
 protected:
 	TSharedRef<FsparklogsSettings> Settings;
@@ -947,6 +1057,8 @@ protected:
 	int SessionNumber;
 	// The attributes we want to include with EVERY analytics event.
 	TSharedRef<FJsonObject> MetaAttributes;
+	// The flattened tiers (e.g., tier1:tier2,tier3) of the progression events that are currently in progress.
+	TSet<FString> InProgressProgression;
 
 	// Not thread-safe (hold lock if needed). Setup defaults for meta attributes.
 	void SetupDefaultMetaAttributes();
@@ -956,6 +1068,11 @@ protected:
 
 	// Forms the final message that should be used given a default message, an extra message, and whether or not the default should be included.
 	FString CalculateFinalMessage(const FString& DefaultMessage, bool IncludeDefaultMessage, const TCHAR* ExtraMessage);
+
+	// Returns true if the progression event is valid
+	bool ValidateProgressionEvent(const TArray<FString>& PArray);
+	// Returns an EventID for a given (valid) progression event. Returns an empty string for an invalid progression event.
+	FString GetProgressionEventID(const TArray<FString>& PArray);
 };
 
 /**
@@ -1000,7 +1117,7 @@ public:
 	  * Normally you would interact with the analytics provider (see GetAnalyticsProvider)
 	  * for a higher level API that will produce and queue raw analytics events in a standard format.
 	  * If analytics is not enabled, returns false. Returns true if the data was queued. */
-	virtual bool AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalyticsData, const TCHAR* LogMessage);
+	virtual bool AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalyticsData, const TCHAR* LogMessage, TSharedPtr<FJsonObject> CustomRootFields);
 
 	/** Returns the random game_instance_id used for this run of the engine.
 	  * There may be multiple game analytics sessions during a single game instance.
