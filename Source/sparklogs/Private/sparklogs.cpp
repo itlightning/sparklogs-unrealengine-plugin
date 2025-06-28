@@ -2207,7 +2207,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventPurchase(const TCHAR* Item
 	}
 	FinalizeAnalyticsEvent(EventTypePurchase, OverrideSession, Data);
 	FString DefaultMessage = FString::Printf(TEXT("%s: %s: purchase of item made; item_category=`%s` item_id=`%s` currency=`%s` amount=%.2f reason=`%s`"), MessageHeader, EventTypePurchase, ItemCategory, ItemId, RealCurrencyCode, Amount, Reason);
-	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage);
 }
 
 bool FsparklogsAnalyticsProvider::CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
@@ -2273,7 +2273,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventResource(EsparklogsAnalyti
 	}
 	FinalizeAnalyticsEvent(EventTypeResource, OverrideSession, Data);
 	FString DefaultMessage = FString::Printf(TEXT("%s: %s: flow_type=%s virtual_currency=`%s` item_category=`%s` item_id=`%s` amount=%f reason=`%s`"), MessageHeader, EventTypeResource, *FlowTypeStr, VirtualCurrency, ItemCategory, ItemId, Amount, Reason);
-	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage);
 }
 
 bool FsparklogsAnalyticsProvider::CreateAnalyticsEventResource(EsparklogsAnalyticsFlowType FlowType, double Amount, const TCHAR* VirtualCurrency, const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
@@ -2444,7 +2444,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventProgression(EsparklogsAnal
 	}
 	FinalizeAnalyticsEvent(EventTypeProgression, OverrideSession, Data);
 	FString DefaultMessage = FString::Printf(TEXT("%s: %s: event_id=`%s` value=%s reason=`%s`"), MessageHeader, EventTypeProgression, *EventId, Value == nullptr ? TEXT("null") : *FString::Printf(TEXT("%f"), Value), Reason);
-	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage);
 }
 
 bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TCHAR* EventId, double Value, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
@@ -2524,7 +2524,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TArray<FStrin
 	}
 	FinalizeAnalyticsEvent(EventTypeDesign, OverrideSession, Data);
 	FString DefaultMessage = FString::Printf(TEXT("%s: %s: event_id=`%s` value=%s reason=`%s`"), MessageHeader, EventTypeDesign, *EventId, Value == nullptr ? TEXT("null") : *FString::Printf(TEXT("%f"), Value), Reason);
-	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage);
 }
 
 bool FsparklogsAnalyticsProvider::CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
@@ -2545,7 +2545,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventLog(EsparklogsSeverity Sev
 		Data->SetObjectField(StandardFieldCustom, CustomAttrs);
 	}
 	FinalizeAnalyticsEvent(EventTypeDesign, OverrideSession, Data);
-	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, Message, RootData);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, Message, RootData, false);
 }
 
 bool FsparklogsAnalyticsProvider::CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
@@ -2577,7 +2577,7 @@ bool FsparklogsAnalyticsProvider::StartSession(const TArray<FAnalyticsEventAttri
 	// No special data for session start other than standard attributes, just finalize, unlock, and send
 	InternalFinalizeAnalyticsEvent(EventTypeSessionStart, nullptr, Data);
 	WriteLock.Unlock();
-	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *FString::Printf(TEXT("%s: %s: started new session"), MessageHeader, EventTypeSessionStart), nullptr);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *FString::Printf(TEXT("%s: %s: started new session"), MessageHeader, EventTypeSessionStart), nullptr, false);
 }
 
 void FsparklogsAnalyticsProvider::EndSession()
@@ -2608,7 +2608,7 @@ void FsparklogsAnalyticsProvider::EndSession()
 	SessionStarted = FsparklogsSettings::EmptyDateTime;
 	SessionNumber = 0;
 	WriteLock.Unlock();
-	FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *FString::Printf(TEXT("%s: %s: finished session normally"), MessageHeader, EventTypeSessionEnd), nullptr);
+	FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *FString::Printf(TEXT("%s: %s: finished session normally"), MessageHeader, EventTypeSessionEnd), nullptr, false);
 	// The app might end or go inactive soon, try to get the data to the cloud asap...
 	FsparklogsModule::GetModule().Flush();
 }
@@ -3094,7 +3094,7 @@ TSharedPtr<FsparklogsAnalyticsProvider> FsparklogsModule::GetAnalyticsProvider()
 	return AnalyticsProvider;
 }
 
-bool FsparklogsModule::AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalyticsData, const TCHAR* LogMessage, TSharedPtr<FJsonObject> CustomRootFields)
+bool FsparklogsModule::AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalyticsData, const TCHAR* LogMessage, TSharedPtr<FJsonObject> CustomRootFields, bool ForceDisableAutoExtract)
 {
 	if (!EngineActive || !Settings->CollectAnalytics || !RawAnalyticsData.IsValid())
 	{
@@ -3110,6 +3110,10 @@ bool FsparklogsModule::AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalytics
 		}
 	}
 	RootEvent->SetObjectField(FsparklogsAnalyticsProvider::RootAnalyticsFieldName, RawAnalyticsData);
+	if (ForceDisableAutoExtract)
+	{
+		RootEvent->SetBoolField(OverrideAutoExtractDisabled, true);
+	}
 	FString OutputJson;
 	TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
 		TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&OutputJson);
