@@ -886,12 +886,15 @@ public:
 	static constexpr TCHAR* MetaFieldAge = TEXT("age");
 
 	static constexpr TCHAR* PurchaseFieldEventId = TEXT("event_id");
+	static constexpr TCHAR* PurchaseFieldEventIdParts = TEXT("event_ids");
 	static constexpr TCHAR* PurchaseFieldItemCategory = TEXT("item_category");
 	static constexpr TCHAR* PurchaseFieldItemId = TEXT("item_id");
 	static constexpr TCHAR* PurchaseFieldCurrency = TEXT("currency");
 	static constexpr TCHAR* PurchaseFieldAmount = TEXT("amount");
+	static constexpr TCHAR* PurchaseFieldReason = TEXT("reason");
 
 	static constexpr TCHAR* ResourceFieldEventId = TEXT("event_id");
+	static constexpr TCHAR* ResourceFieldEventIdParts = TEXT("event_ids");
 	static constexpr TCHAR* ResourceFieldFlowType = TEXT("flow_type");
 	static constexpr TCHAR* ResourceFieldVirtualCurrency = TEXT("virtual_currency");
 	static constexpr TCHAR* ResourceFieldItemCategory = TEXT("item_category");
@@ -900,6 +903,7 @@ public:
 	static constexpr TCHAR* ResourceFieldReason = TEXT("reason");
 
 	static constexpr TCHAR* ProgressionFieldEventId = TEXT("event_id");
+	static constexpr TCHAR* ProgressionFieldEventIdParts = TEXT("event_ids");
 	static constexpr TCHAR* ProgressionFieldStatus = TEXT("status");
 	static constexpr TCHAR* ProgressionFieldTiersString = TEXT("tiers");
 	static constexpr TCHAR* ProgressionFieldTiersArray = TEXT("tiers_array");
@@ -909,9 +913,12 @@ public:
 	static constexpr TCHAR* ProgressionFieldReason = TEXT("reason");
 
 	static constexpr TCHAR* DesignFieldEventId = TEXT("event_id");
+	static constexpr TCHAR* DesignFieldEventIdParts = TEXT("event_ids");
 	static constexpr TCHAR* DesignFieldValue = TEXT("value");
+	static constexpr TCHAR* DesignFieldReason = TEXT("reason");
 
 	static constexpr TCHAR* LogFieldSeverity = TEXT("severity");
+	static constexpr TCHAR* LogFieldReason = TEXT("reason");
 
 	static constexpr TCHAR* MessageHeader = TEXT("GAME_ENGINE_ANALYTICS");
 	static constexpr TCHAR* ItemSeparator = TEXT(":");
@@ -934,6 +941,8 @@ public:
 	  * RealCurrencyCode should be an alphabetic ISO 4217 code (e.g., USD, EUR, etc.) (if nullptr will assume USD).
 	  * Amount should be the actual amount of that local currency. e.g., one dollar and 99 cents would be "1.99".
 	  * 
+	  * You can optionally specify a reason that triggered the purchase.
+	  * 
 	  * This will automatically add a transaction number field indicating the sequential order of the transaction
 	  * since the game was installed, so you can analyze what players are purchasing in what order.
 	  * 
@@ -948,8 +957,8 @@ public:
 	  * 
 	  * Returns whether or not the event was created/queued.
 	  */
-	virtual bool CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage=true, const TCHAR* ExtraMessage=nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession=nullptr);
-	virtual bool CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage=true, const TCHAR* ExtraMessage=nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession=nullptr);
+	virtual bool CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage=true, const TCHAR* ExtraMessage=nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession=nullptr);
+	virtual bool CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage=true, const TCHAR* ExtraMessage=nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession=nullptr);
 
 	/** Records the granting (resource source) or using up (resource sink) of a virtual currency (gems, lives, etc.)
 	 * for a particular ItemCategory and ItemId, which form a hierarchy.
@@ -1019,15 +1028,18 @@ public:
 	  * 
 	  * Returns whether or not the event was created/queued.
 	  */
-	virtual bool CreateAnalyticsEventDesign(const TCHAR* EventId, double Value, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
-	virtual bool CreateAnalyticsEventDesign(const TCHAR* EventId, double Value, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
-	virtual bool CreateAnalyticsEventDesign(const TCHAR* EventId, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
-	virtual bool CreateAnalyticsEventDesign(const TCHAR* EventId, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventDesign(const TCHAR* EventId, double Value, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventDesign(const TCHAR* EventId, double Value, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventDesign(const TCHAR* EventId, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventDesign(const TCHAR* EventId, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventDesign(const TArray<FString>& EventIDParts, double* Value, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
 
 	/** Records a log event with key information you want to associate with this analytics session & user.
 	 * This could be an error, a key debug event, etc. There are no limits on how many events you can record,
 	 * but take care not to ingest too much data (e.g., if you have millions of users, you may want to log
 	 * only the first kind of exception per game session, or log crashes, etc.).
+	 * 
+	 * You can optionally specify a reason for this log event.
 	 * 
 	 * If you're in a server process, then you may not have an active session, and instead you want to create an
 	 * event that is associated with a session for a given client process. In that case, create a
@@ -1035,8 +1047,8 @@ public:
 	 * 
 	 * Returns whether or not the event was created/queued.
 	 */
-	virtual bool CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, TSharedPtr<FJsonObject> CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
-	virtual bool CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, const TArray<FAnalyticsEventAttribute>& CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
 
 	//~ Begin IAnalyticsProvider Interface
 
