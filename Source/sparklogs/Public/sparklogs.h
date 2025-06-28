@@ -1165,6 +1165,9 @@ protected:
 class SPARKLOGS_API FsparklogsModule : public IAnalyticsProviderModule
 {
 public:
+	static constexpr const TCHAR* OverrideAutoExtractDisabled = TEXT("__autoextract_disabled");
+
+public:
 	/**
 	 * Returns the singleton instance of this module, loading it on demand if needed.
 	 * Be careful calling this during shutdown when the module may already be unloaded!
@@ -1201,7 +1204,7 @@ public:
 	  * Normally you would interact with the analytics provider (see GetAnalyticsProvider)
 	  * for a higher level API that will produce and queue raw analytics events in a standard format.
 	  * If analytics is not enabled, returns false. Returns true if the data was queued. */
-	virtual bool AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalyticsData, const TCHAR* LogMessage, TSharedPtr<FJsonObject> CustomRootFields);
+	virtual bool AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalyticsData, const TCHAR* LogMessage, TSharedPtr<FJsonObject> CustomRootFields, bool ForceDisableAutoExtract);
 
 	/** Returns the random game_instance_id used for this run of the engine.
 	  * There may be multiple game analytics sessions during a single game instance.
