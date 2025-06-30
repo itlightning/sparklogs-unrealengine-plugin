@@ -2132,6 +2132,775 @@ FSparkLogsAnalyticsSessionDescriptor::~FSparkLogsAnalyticsSessionDescriptor()
 {
 }
 
+// =============== UsparklogsAnalytics ===============================================================================
+
+UsparklogsAnalytics::UsparklogsAnalytics(const FObjectInitializer& OI) : Super(OI) { }
+
+bool UsparklogsAnalytics::StartSession() { return FsparklogsModule::GetAnalyticsProvider()->StartSession(TArray<FAnalyticsEventAttribute>()); }
+void UsparklogsAnalytics::EndSession() { FsparklogsModule::GetAnalyticsProvider()->EndSession(); }
+FString UsparklogsAnalytics::GetSessionID() { return FsparklogsModule::GetAnalyticsProvider()->GetSessionID(); }
+void UsparklogsAnalytics::SetBuildInfo(const FString& InBuildInfo) { FsparklogsModule::GetAnalyticsProvider()->SetBuildInfo(InBuildInfo); }
+void UsparklogsAnalytics::SetCommonAttribute(const FString& Field, const FString& Value) { FsparklogsModule::GetAnalyticsProvider()->SetMetaAttribute(Field, TSharedPtr<FJsonValue>(new FJsonValueString(Value))); }
+void UsparklogsAnalytics::SetCommonAttributeJSON(const FString& Field, const TSharedPtr<FJsonValue> Value) { FsparklogsModule::GetAnalyticsProvider()->SetMetaAttribute(Field, Value); }
+
+bool UsparklogsAnalytics::AddPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventPurchase(ItemCategory, ItemId, RealCurrencyCode, Amount, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventPurchase(ItemCategory, ItemId, RealCurrencyCode, Amount, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventPurchase(ItemCategory, ItemId, RealCurrencyCode, Amount, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventPurchase(ItemCategory, ItemId, RealCurrencyCode, Amount, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+void UsparklogsAnalytics::RecordPurchase(const FString& ItemCategory, const FString& ItemId, const FString& RealCurrencyCode, float Amount)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventPurchase(*ItemCategory, *ItemId, *RealCurrencyCode, Amount, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordPurchaseWithAttrs(const FString& ItemCategory, const FString& ItemId, const FString& RealCurrencyCode, float Amount, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventPurchase(*ItemCategory, *ItemId, *RealCurrencyCode, Amount, nullptr, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordPurchaseWithReason(const FString& ItemCategory, const FString& ItemId, const FString& RealCurrencyCode, float Amount, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventPurchase(*ItemCategory, *ItemId, *RealCurrencyCode, Amount, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordPurchaseWithReasonWithAttrs(const FString& ItemCategory, const FString& ItemId, const FString& RealCurrencyCode, float Amount, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventPurchase(*ItemCategory, *ItemId, *RealCurrencyCode, Amount, *Reason, CustomAttrs);
+}
+
+bool UsparklogsAnalytics::AddResource(EsparklogsAnalyticsFlowType FlowType, double Amount, const TCHAR* VirtualCurrency, const TCHAR* ItemCategory, const TCHAR* ItemId, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventResource(FlowType, Amount, VirtualCurrency, ItemCategory, ItemId, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddResource(EsparklogsAnalyticsFlowType FlowType, double Amount, const TCHAR* VirtualCurrency, const TCHAR* ItemCategory, const TCHAR* ItemId, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventResource(FlowType, Amount, VirtualCurrency, ItemCategory, ItemId, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddResource(EsparklogsAnalyticsFlowType FlowType, double Amount, const TCHAR* VirtualCurrency, const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventResource(FlowType, Amount, VirtualCurrency, ItemCategory, ItemId, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddResource(EsparklogsAnalyticsFlowType FlowType, double Amount, const TCHAR* VirtualCurrency, const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventResource(FlowType, Amount, VirtualCurrency, ItemCategory, ItemId, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+void UsparklogsAnalytics::RecordResource(EsparklogsAnalyticsFlowType FlowType, float Amount, const FString& VirtualCurrency, const FString& ItemCategory, const FString& ItemId)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventResource(FlowType, Amount, *VirtualCurrency, *ItemCategory, *ItemId, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordResourceWithAttrs(EsparklogsAnalyticsFlowType FlowType, float Amount, const FString& VirtualCurrency, const FString& ItemCategory, const FString& ItemId, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventResource(FlowType, Amount, *VirtualCurrency, *ItemCategory, *ItemId, nullptr, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordResourceWithReason(EsparklogsAnalyticsFlowType FlowType, float Amount, const FString& VirtualCurrency, const FString& ItemCategory, const FString& ItemId, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventResource(FlowType, Amount, *VirtualCurrency, *ItemCategory, *ItemId, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordResourceWithReasonWithAttrs(EsparklogsAnalyticsFlowType FlowType, float Amount, const FString& VirtualCurrency, const FString& ItemCategory, const FString& ItemId, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventResource(FlowType, Amount, *VirtualCurrency, *ItemCategory, *ItemId, *Reason, CustomAttrs);
+}
+
+bool UsparklogsAnalytics::AddProgression1(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression2(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, P2, nullptr, nullptr, nullptr, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression3(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, P2, P3, nullptr, nullptr, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression4(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, P2, P3, P4, nullptr, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression5(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, P2, P3, P4, P5, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression1(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, nullptr, nullptr, nullptr, nullptr, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression2(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, P2, nullptr, nullptr, nullptr, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression3(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, P2, P3, nullptr, nullptr, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression4(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, P2, P3, P4, nullptr, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression5(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, P2, P3, P4, P5, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression1(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, nullptr, nullptr, nullptr, nullptr, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression2(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, P2, nullptr, nullptr, nullptr, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression3(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, P2, P3, nullptr, nullptr, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression4(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, P2, P3, P4, nullptr, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression5(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, P2, P3, P4, P5, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression1(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, nullptr, nullptr, nullptr, nullptr, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression2(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, P2, nullptr, nullptr, nullptr, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression3(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, P2, P3, nullptr, nullptr, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression4(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, P2, P3, P4, nullptr, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression5(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, P1, P2, P3, P4, P5, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression1(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression2(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, P2, nullptr, nullptr, nullptr, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression3(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, P2, P3, nullptr, nullptr, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression4(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, P2, P3, P4, nullptr, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression5(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, P2, P3, P4, P5, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression1(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, nullptr, nullptr, nullptr, nullptr, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression2(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, P2, nullptr, nullptr, nullptr, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression3(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, P2, P3, nullptr, nullptr, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression4(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, P2, P3, P4, nullptr, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression5(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, P2, P3, P4, P5, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression1(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, nullptr, nullptr, nullptr, nullptr, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression2(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, P2, nullptr, nullptr, nullptr, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression3(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, P2, P3, nullptr, nullptr, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression4(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, P2, P3, P4, nullptr, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression5(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, P2, P3, P4, P5, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression1(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, nullptr, nullptr, nullptr, nullptr, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression2(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, P2, nullptr, nullptr, nullptr, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression3(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, P2, P3, nullptr, nullptr, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression4(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, P2, P3, P4, nullptr, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgression5(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, P1, P2, P3, P4, P5, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgressionArray(EsparklogsAnalyticsProgressionStatus Status, const TArray<FString>& PArray, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, nullptr, PArray, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgressionArray(EsparklogsAnalyticsProgressionStatus Status, const TArray<FString>& PArray, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, nullptr, PArray, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgressionArray(EsparklogsAnalyticsProgressionStatus Status, const TArray<FString>& PArray, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, nullptr, PArray, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgressionArray(EsparklogsAnalyticsProgressionStatus Status, const TArray<FString>& PArray, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, nullptr, PArray, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgressionArray(EsparklogsAnalyticsProgressionStatus Status, double Value, const TArray<FString>& PArray, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, &Value, PArray, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgressionArray(EsparklogsAnalyticsProgressionStatus Status, double Value, const TArray<FString>& PArray, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, &Value, PArray, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgressionArray(EsparklogsAnalyticsProgressionStatus Status, double Value, const TArray<FString>& PArray, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, &Value, PArray, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddProgressionArray(EsparklogsAnalyticsProgressionStatus Status, double Value, const TArray<FString>& PArray, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, &Value, PArray, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+void UsparklogsAnalytics::RecordProgression1(EsparklogsAnalyticsProgressionStatus Status, const FString& P1)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, *P1, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgression2(EsparklogsAnalyticsProgressionStatus Status, const FString& P1, const FString& P2)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, *P1, *P2, nullptr, nullptr, nullptr, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgression3(EsparklogsAnalyticsProgressionStatus Status, const FString& P1, const FString& P2, const FString& P3)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, *P1, *P2, *P3, nullptr, nullptr, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgression4(EsparklogsAnalyticsProgressionStatus Status, const FString& P1, const FString& P2, const FString& P3, const FString& P4)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, *P1, *P2, *P3, *P4, nullptr, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgression5(EsparklogsAnalyticsProgressionStatus Status, const FString& P1, const FString& P2, const FString& P3, const FString& P4, const FString& P5)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, *P1, *P2, *P3, *P4, *P5, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithReason1(EsparklogsAnalyticsProgressionStatus Status, const FString& P1, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, *P1, nullptr, nullptr, nullptr, nullptr, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithReason2(EsparklogsAnalyticsProgressionStatus Status, const FString& P1, const FString& P2, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, *P1, *P2, nullptr, nullptr, nullptr, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithReason3(EsparklogsAnalyticsProgressionStatus Status, const FString& P1, const FString& P2, const FString& P3, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, *P1, *P2, *P3, nullptr, nullptr, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithReason4(EsparklogsAnalyticsProgressionStatus Status, const FString& P1, const FString& P2, const FString& P3, const FString& P4, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, *P1, *P2, *P3, *P4, nullptr, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithReason5(EsparklogsAnalyticsProgressionStatus Status, const FString& P1, const FString& P2, const FString& P3, const FString& P4, const FString& P5, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, *P1, *P2, *P3, *P4, *P5, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithReasonWithAttrs1(EsparklogsAnalyticsProgressionStatus Status, const FString& P1, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, *P1, nullptr, nullptr, nullptr, nullptr, *Reason, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithReasonWithAttrs2(EsparklogsAnalyticsProgressionStatus Status, const FString& P1, const FString& P2, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, *P1, *P2, nullptr, nullptr, nullptr, *Reason, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithReasonWithAttrs3(EsparklogsAnalyticsProgressionStatus Status, const FString& P1, const FString& P2, const FString& P3, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, *P1, *P2, *P3, nullptr, nullptr, *Reason, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithReasonWithAttrs4(EsparklogsAnalyticsProgressionStatus Status, const FString& P1, const FString& P2, const FString& P3, const FString& P4, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, *P1, *P2, *P3, *P4, nullptr, *Reason, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithReasonWithAttrs5(EsparklogsAnalyticsProgressionStatus Status, const FString& P1, const FString& P2, const FString& P3, const FString& P4, const FString& P5, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, *P1, *P2, *P3, *P4, *P5, *Reason, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithValue1(EsparklogsAnalyticsProgressionStatus Status, float Value, const FString& P1)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, *P1, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithValue2(EsparklogsAnalyticsProgressionStatus Status, float Value, const FString& P1, const FString& P2)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, *P1, *P2, nullptr, nullptr, nullptr, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithValue3(EsparklogsAnalyticsProgressionStatus Status, float Value, const FString& P1, const FString& P2, const FString& P3)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, *P1, *P2, *P3, nullptr, nullptr, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithValue4(EsparklogsAnalyticsProgressionStatus Status, float Value, const FString& P1, const FString& P2, const FString& P3, const FString& P4)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, *P1, *P2, *P3, *P4, nullptr, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithValue5(EsparklogsAnalyticsProgressionStatus Status, float Value, const FString& P1, const FString& P2, const FString& P3, const FString& P4, const FString& P5)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, *P1, *P2, *P3, *P4, *P5, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithValueWithReason1(EsparklogsAnalyticsProgressionStatus Status, float Value, const FString& P1, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, *P1, nullptr, nullptr, nullptr, nullptr, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithValueWithReason2(EsparklogsAnalyticsProgressionStatus Status, float Value, const FString& P1, const FString& P2, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, *P1, *P2, nullptr, nullptr, nullptr, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithValueWithReason3(EsparklogsAnalyticsProgressionStatus Status, float Value, const FString& P1, const FString& P2, const FString& P3, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, *P1, *P2, *P3, nullptr, nullptr, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithValueWithReason4(EsparklogsAnalyticsProgressionStatus Status, float Value, const FString& P1, const FString& P2, const FString& P3, const FString& P4, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, *P1, *P2, *P3, *P4, nullptr, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithValueWithReason5(EsparklogsAnalyticsProgressionStatus Status, float Value, const FString& P1, const FString& P2, const FString& P3, const FString& P4, const FString& P5, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, *P1, *P2, *P3, *P4, *P5, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithValueWithReasonWithAttrs1(EsparklogsAnalyticsProgressionStatus Status, float Value, const FString& P1, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, *P1, nullptr, nullptr, nullptr, nullptr, *Reason, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithValueWithReasonWithAttrs2(EsparklogsAnalyticsProgressionStatus Status, float Value, const FString& P1, const FString& P2, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, *P1, *P2, nullptr, nullptr, nullptr, *Reason, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithValueWithReasonWithAttrs3(EsparklogsAnalyticsProgressionStatus Status, float Value, const FString& P1, const FString& P2, const FString& P3, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, *P1, *P2, *P3, nullptr, nullptr, *Reason, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithValueWithReasonWithAttrs4(EsparklogsAnalyticsProgressionStatus Status, float Value, const FString& P1, const FString& P2, const FString& P3, const FString& P4, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, *P1, *P2, *P3, *P4, nullptr, *Reason, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordProgressionWithValueWithReasonWithAttrs5(EsparklogsAnalyticsProgressionStatus Status, float Value, const FString& P1, const FString& P2, const FString& P3, const FString& P4, const FString& P5, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, Value, *P1, *P2, *P3, *P4, *P5, *Reason, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordProgressionArray(EsparklogsAnalyticsProgressionStatus Status, const TArray<FString>& PArray)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, nullptr, PArray, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionArrayWithAttrs(EsparklogsAnalyticsProgressionStatus Status, const TArray<FString>& PArray, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	TSharedPtr<FJsonObject> CustomObject;
+	if (CustomAttrs.Num() > 0)
+	{
+		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
+	}
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, nullptr, PArray, nullptr, CustomObject);
+}
+
+void UsparklogsAnalytics::RecordProgressionArrayWithReason(EsparklogsAnalyticsProgressionStatus Status, const TArray<FString>& PArray, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, nullptr, PArray, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionArrayWithReasonWithAttrs(EsparklogsAnalyticsProgressionStatus Status, const TArray<FString>& PArray, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	TSharedPtr<FJsonObject> CustomObject;
+	if (CustomAttrs.Num() > 0)
+	{
+		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
+	}
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, nullptr, PArray, *Reason, CustomObject);
+}
+
+void UsparklogsAnalytics::RecordProgressionArrayWithValue(EsparklogsAnalyticsProgressionStatus Status, float Value, const TArray<FString>& PArray)
+{
+	double ValueDouble = Value;
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, &ValueDouble, PArray, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionArrayWithValueWithAttrs(EsparklogsAnalyticsProgressionStatus Status, float Value, const TArray<FString>& PArray, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	TSharedPtr<FJsonObject> CustomObject;
+	if (CustomAttrs.Num() > 0)
+	{
+		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
+	}
+	double ValueDouble = Value;
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, &ValueDouble, PArray, nullptr, CustomObject);
+}
+
+void UsparklogsAnalytics::RecordProgressionArrayWithValueWithReason(EsparklogsAnalyticsProgressionStatus Status, float Value, const TArray<FString>& PArray, const FString& Reason)
+{
+	double ValueDouble = Value;
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, &ValueDouble, PArray, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordProgressionArrayWithValueWithReasonWithAttrs(EsparklogsAnalyticsProgressionStatus Status, float Value, const TArray<FString>& PArray, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	TSharedPtr<FJsonObject> CustomObject;
+	if (CustomAttrs.Num() > 0)
+	{
+		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
+	}
+	double ValueDouble = Value;
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, &ValueDouble, PArray, *Reason, CustomObject);
+}
+
+bool UsparklogsAnalytics::AddDesign(const TCHAR* EventId, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventId, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddDesign(const TCHAR* EventId, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventId, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddDesign(const TCHAR* EventId, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventId, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddDesign(const TCHAR* EventId, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventId, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddDesign(const TCHAR* EventId, double Value, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventId, Value, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddDesign(const TCHAR* EventId, double Value, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventId, Value, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddDesign(const TCHAR* EventId, double Value, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventId, Value, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddDesign(const TCHAR* EventId, double Value, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventId, Value, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddDesignArray(const TArray<FString>& EventIDParts, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, nullptr, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddDesignArray(const TArray<FString>& EventIDParts, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, nullptr, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddDesignArray(const TArray<FString>& EventIDParts, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, nullptr, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddDesignArray(const TArray<FString>& EventIDParts, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, nullptr, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddDesignArray(const TArray<FString>& EventIDParts, double Value, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, &Value, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddDesignArray(const TArray<FString>& EventIDParts, double Value, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, &Value, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddDesignArray(const TArray<FString>& EventIDParts, double Value, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, &Value, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddDesignArray(const TArray<FString>& EventIDParts, double Value, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, &Value, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+void UsparklogsAnalytics::RecordDesign(const FString& EventId)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(*EventId, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordDesignWithAttr(const FString& EventId, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(*EventId, nullptr, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordDesignWithReason(const FString& EventId, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(*EventId, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordDesignWithReasonWithAttr(const FString& EventId, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(*EventId, *Reason, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordDesignWithValue(const FString& EventId, float Value)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(*EventId, Value, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordDesignWithValueWithAttr(const FString& EventId, float Value, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(*EventId, Value, nullptr, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordDesignWithValueWithReason(const FString& EventId, float Value, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(*EventId, Value, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordDesignWithValueWithReasonWithAttr(const FString& EventId, float Value, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(*EventId, Value, *Reason, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordDesignArrayWithValue(const TArray<FString>& EventIDParts, float Value)
+{
+	double ValueDouble = Value;
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, &ValueDouble, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordDesignArrayWithValueWithAttr(const TArray<FString>& EventIDParts, float Value, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	TSharedPtr<FJsonObject> CustomObject;
+	if (CustomAttrs.Num() > 0)
+	{
+		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
+	}
+	double ValueDouble = Value;
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, &ValueDouble, nullptr, CustomObject);
+}
+
+void UsparklogsAnalytics::RecordDesignArrayWithValueWithReason(const TArray<FString>& EventIDParts, float Value, const FString& Reason)
+{
+	double ValueDouble = Value;
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, &ValueDouble, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordDesignArrayWithValueWithReasonWithAttr(const TArray<FString>& EventIDParts, float Value, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	TSharedPtr<FJsonObject> CustomObject;
+	if (CustomAttrs.Num() > 0)
+	{
+		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
+	}
+	double ValueDouble = Value;
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, &ValueDouble, *Reason, CustomObject);
+}
+
+void UsparklogsAnalytics::RecordDesignArray(const TArray<FString>& EventIDParts)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, nullptr, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordDesignArrayWithAttr(const TArray<FString>& EventIDParts, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	TSharedPtr<FJsonObject> CustomObject;
+	if (CustomAttrs.Num() > 0)
+	{
+		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
+	}
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, nullptr, nullptr, CustomObject);
+}
+
+void UsparklogsAnalytics::RecordDesignArrayWithReason(const TArray<FString>& EventIDParts, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, nullptr, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordDesignArrayWithReasonWithAttr(const TArray<FString>& EventIDParts, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	TSharedPtr<FJsonObject> CustomObject;
+	if (CustomAttrs.Num() > 0)
+	{
+		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
+	}
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, nullptr, *Reason, CustomObject);
+}
+
+bool UsparklogsAnalytics::AddLog(EsparklogsSeverity Severity, const TCHAR* Message, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventLog(Severity, Message, nullptr, nullptr, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddLog(EsparklogsSeverity Severity, const TCHAR* Message, TSharedPtr<FJsonObject> CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventLog(Severity, Message, nullptr, CustomAttrs, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddLog(EsparklogsSeverity Severity, const TCHAR* Message, const TCHAR* Reason, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventLog(Severity, Message, Reason, nullptr, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddLog(EsparklogsSeverity Severity, const TCHAR* Message, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventLog(Severity, Message, Reason, CustomAttrs, OverrideSession);
+}
+
+void UsparklogsAnalytics::RecordLog(EsparklogsSeverity Severity, const FString& Message)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventLog(Severity, *Message, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordLogWithAttr(EsparklogsSeverity Severity, const FString& Message, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventLog(Severity, *Message, nullptr, CustomAttrs);
+}
+
+void UsparklogsAnalytics::RecordLogWithReason(EsparklogsSeverity Severity, const FString& Message, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventLog(Severity, *Message, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordLogWithReasonWithAttr(EsparklogsSeverity Severity, const FString& Message, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventLog(Severity, *Message, *Reason, CustomAttrs);
+}
+
 // =============== FsparklogsAnalyticsProvider ===============================================================================
 
 FsparklogsAnalyticsProvider::FsparklogsAnalyticsProvider(TSharedRef<FsparklogsSettings> InSettings)
@@ -2210,7 +2979,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventPurchase(const TCHAR* Item
 	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage);
 }
 
-bool FsparklogsAnalyticsProvider::CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+bool FsparklogsAnalyticsProvider::CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, const TCHAR* Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
 {
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
@@ -2226,6 +2995,17 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventResource(EsparklogsAnalyti
 	{
 		return false;
 	}
+
+	double AmountAbs = FMath::Abs(Amount);
+	if (FlowType == EsparklogsAnalyticsFlowType::Source)
+	{
+		Amount = AmountAbs;
+	}
+	else
+	{
+		Amount = -AmountAbs;
+	}
+
 	TSharedPtr<FJsonObject> Data(new FJsonObject());
 	FString FlowTypeStr = UEnum::GetValueAsString(FlowType);
 	Data->SetStringField(ResourceFieldFlowType, FlowTypeStr);
@@ -2276,7 +3056,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventResource(EsparklogsAnalyti
 	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage);
 }
 
-bool FsparklogsAnalyticsProvider::CreateAnalyticsEventResource(EsparklogsAnalyticsFlowType FlowType, double Amount, const TCHAR* VirtualCurrency, const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+bool FsparklogsAnalyticsProvider::CreateAnalyticsEventResource(EsparklogsAnalyticsFlowType FlowType, double Amount, const TCHAR* VirtualCurrency, const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
 {
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
@@ -2341,7 +3121,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventProgression(EsparklogsAnal
 	return CreateAnalyticsEventProgression(Status, &Value, PArray, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
 }
 
-bool FsparklogsAnalyticsProvider::CreateAnalyticsEventProgression(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+bool FsparklogsAnalyticsProvider::CreateAnalyticsEventProgression(EsparklogsAnalyticsProgressionStatus Status, double Value, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, const TCHAR* Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
 {
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
@@ -2362,7 +3142,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventProgression(EsparklogsAnal
 	return CreateAnalyticsEventProgression(Status, nullptr, PArray, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
 }
 
-bool FsparklogsAnalyticsProvider::CreateAnalyticsEventProgression(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+bool FsparklogsAnalyticsProvider::CreateAnalyticsEventProgression(EsparklogsAnalyticsProgressionStatus Status, const TCHAR* P1, const TCHAR* P2, const TCHAR* P3, const TCHAR* P4, const TCHAR* P5, const TCHAR* Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
 {
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
@@ -2459,7 +3239,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TCHAR* EventI
 	return CreateAnalyticsEventDesign(EventIdParts, &Value, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
 }
 
-bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TCHAR* EventId, double Value, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TCHAR* EventId, double Value, const TCHAR* Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
 {
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
@@ -2481,7 +3261,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TCHAR* EventI
 	return CreateAnalyticsEventDesign(EventIdParts, nullptr, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
 }
 
-bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TCHAR* EventId, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TCHAR* EventId, const TCHAR* Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
 {
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
@@ -2548,7 +3328,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventLog(EsparklogsSeverity Sev
 	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, Message, RootData, false);
 }
 
-bool FsparklogsAnalyticsProvider::CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+bool FsparklogsAnalyticsProvider::CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, const TCHAR* Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
 {
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
@@ -2964,6 +3744,23 @@ void FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(const 
 	}
 }
 
+void FsparklogsAnalyticsProvider::AddAnalyticsEventAttributeToJsonObject(const TSharedPtr<FJsonObject> Object, const FsparklogsAnalyticsAttribute& Attr)
+{
+	if (!Object.IsValid())
+	{
+		return;
+	}
+	Object->SetStringField(Attr.Key, Attr.Value);
+}
+
+void FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(const TSharedPtr<FJsonObject> Object, const TArray<FsparklogsAnalyticsAttribute>& EventAttrs)
+{
+	for (const FsparklogsAnalyticsAttribute& Attr : EventAttrs)
+	{
+		AddAnalyticsEventAttributeToJsonObject(Object, Attr);
+	}
+}
+
 void FsparklogsAnalyticsProvider::SetupDefaultMetaAttributes()
 {
 	FString OSPlatform, OSVersion;
@@ -3085,11 +3882,11 @@ TSharedPtr<IAnalyticsProvider> FsparklogsModule::CreateAnalyticsProvider(const F
 	return GetAnalyticsProvider();
 }
 
-TSharedPtr<FsparklogsAnalyticsProvider> FsparklogsModule::GetAnalyticsProvider() const
+TSharedPtr<FsparklogsAnalyticsProvider> FsparklogsModule::GetAnalyticsProvider()
 {
 	if (!AnalyticsProvider.IsValid())
 	{
-		AnalyticsProvider = TSharedPtr<FsparklogsAnalyticsProvider>(new FsparklogsAnalyticsProvider(Settings));
+		AnalyticsProvider = TSharedPtr<FsparklogsAnalyticsProvider>(new FsparklogsAnalyticsProvider(FsparklogsModule::GetModule().Settings));
 	}
 	return AnalyticsProvider;
 }
