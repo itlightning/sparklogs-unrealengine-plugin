@@ -3469,42 +3469,164 @@ void FsparklogsAnalyticsProvider::SetAge(const int32 InAge)
 
 void FsparklogsAnalyticsProvider::RecordEvent(const FString& EventName, const TArray<FAnalyticsEventAttribute>& Attributes)
 {
-	FScopeLock ReadLock(&DataCriticalSection);
+	FString EffectiveEventId = EventName;
+	if (EventName.IsEmpty())
+	{
+		if (Attributes.Num() <= 0)
+		{
+			return;
+		}
+		EffectiveEventId = RecordEventGenericEventId;
+	}
+	TSharedPtr<FJsonObject> CustomObject;
+	AddAnalyticsEventAttributesToJsonObject(CustomObject, Attributes);
+	CreateAnalyticsEventDesign(*EffectiveEventId, nullptr, CustomObject);
 }
 
 void FsparklogsAnalyticsProvider::RecordItemPurchase(const FString& ItemId, const FString& Currency, int PerItemCost, int ItemQuantity)
 {
-	// should override this?
+	TSharedPtr<FJsonObject> CustomObject(new FJsonObject());
+	CustomObject->SetNumberField(RecordItemPurchasePerItemCost, (double)PerItemCost);
+	CustomObject->SetNumberField(RecordItemPurchaseItemQuantity, (double)ItemQuantity);
+	CreateAnalyticsEventResource(EsparklogsAnalyticsFlowType::Sink, PerItemCost * ItemQuantity, *Currency, RecordItemPurchaseItemCategory, *ItemId, nullptr, nullptr);
 }
 
 void FsparklogsAnalyticsProvider::RecordItemPurchase(const FString& ItemId, int ItemQuantity, const TArray<FAnalyticsEventAttribute>& EventAttrs)
 {
-
+	FString VirtualCurrency;
+	FString ItemCategory;
+	double Amount = (double)ItemQuantity;
+	for (const auto A : EventAttrs)
+	{
+		if (0 == A.GetName().Compare(TEXT("itemcategory"), ESearchCase::IgnoreCase)
+			|| 0 == A.GetName().Compare(TEXT("item_category"), ESearchCase::IgnoreCase)
+			|| 0 == A.GetName().Compare(TEXT("itemtype"), ESearchCase::IgnoreCase)
+			|| 0 == A.GetName().Compare(TEXT("item_type"), ESearchCase::IgnoreCase))
+		{
+			ItemCategory = A.GetValue();
+		}
+		else if (0 == A.GetName().Compare(TEXT("currency"), ESearchCase::IgnoreCase)
+			|| 0 == A.GetName().Compare(TEXT("virtual_currency"), ESearchCase::IgnoreCase)
+			|| 0 == A.GetName().Compare(TEXT("game_currency"), ESearchCase::IgnoreCase))
+		{
+			VirtualCurrency = A.GetValue();
+		}
+		else if (0 == A.GetName().Compare(TEXT("amount"), ESearchCase::IgnoreCase)
+			|| 0 == A.GetName().Compare(TEXT("cost"), ESearchCase::IgnoreCase))
+		{
+			Amount = FCString::Atod(*A.GetValue());
+		}
+	}
+	TSharedPtr<FJsonObject> CustomObject(new FJsonObject());
+	CustomObject->SetNumberField(RecordItemPurchaseItemQuantity, (double)ItemQuantity);
+	AddAnalyticsEventAttributesToJsonObject(CustomObject, EventAttrs);
+	if (VirtualCurrency.IsEmpty())
+	{
+		FString PurchasePrefix = FString(RecordCurrencyPurchasePurchaseItemCategory) + ItemSeparator;
+		CreateAnalyticsEventDesign(*(PurchasePrefix + ItemId), Amount, nullptr, CustomObject);
+	}
+	else
+	{
+		CreateAnalyticsEventResource(EsparklogsAnalyticsFlowType::Sink, Amount, *VirtualCurrency, RecordItemPurchaseItemCategory, *ItemId, nullptr, nullptr);
+	}
 }
 
 void FsparklogsAnalyticsProvider::RecordCurrencyPurchase(const FString& GameCurrencyType, int GameCurrencyAmount, const FString& RealCurrencyType, float RealMoneyCost, const FString& PaymentProvider)
 {
-	// should override this?
+	TSharedPtr<FJsonObject> CustomObject(new FJsonObject());
+	CustomObject->SetStringField(RecordCurrencyPurchasePaymentProvider, PaymentProvider);
+	CreateAnalyticsEventPurchase(RecordCurrencyPurchasePurchaseItemCategory, *GameCurrencyType, *RealCurrencyType, (double)RealMoneyCost, nullptr, CustomObject);
+	CreateAnalyticsEventResource(EsparklogsAnalyticsFlowType::Source, (double)GameCurrencyAmount, *GameCurrencyType, RecordCurrencyPurchaseResourceItemCategory, nullptr, nullptr, CustomObject);
 }
 
 void FsparklogsAnalyticsProvider::RecordCurrencyPurchase(const FString& GameCurrencyType, int GameCurrencyAmount, const TArray<FAnalyticsEventAttribute>& EventAttrs)
 {
-
+	FString RealCurrency;
+	bool FoundCost = false;
+	double Cost=0.0;
+	TSharedPtr<FJsonObject> CustomObject;
+	AddAnalyticsEventAttributesToJsonObject(CustomObject, EventAttrs);
+	for (const auto A : EventAttrs)
+	{
+		if (0 == A.GetName().Compare(TEXT("currency"), ESearchCase::IgnoreCase)
+			|| 0 == A.GetName().Compare(TEXT("real_currency"), ESearchCase::IgnoreCase))
+		{
+			RealCurrency = A.GetValue();
+		}
+		else if (0 == A.GetName().Compare(TEXT("cost"), ESearchCase::IgnoreCase)
+			|| 0 == A.GetName().Compare(TEXT("amount"), ESearchCase::IgnoreCase))
+		{
+			Cost = FCString::Atod(*A.GetValue());
+			FoundCost = true;
+		}
+	}
+	if (!RealCurrency.IsEmpty() && FoundCost)
+	{
+		CreateAnalyticsEventPurchase(RecordCurrencyPurchasePurchaseItemCategory, *GameCurrencyType, *RealCurrency, (double)Cost, nullptr, CustomObject);
+	}
+	CreateAnalyticsEventResource(EsparklogsAnalyticsFlowType::Source, (double)GameCurrencyAmount, *GameCurrencyType, RecordCurrencyPurchaseResourceItemCategory, nullptr, nullptr, CustomObject);
 }
 
 void FsparklogsAnalyticsProvider::RecordCurrencyGiven(const FString& GameCurrencyType, int GameCurrencyAmount, const TArray<FAnalyticsEventAttribute>& EventAttrs)
 {
-
+	TSharedPtr<FJsonObject> CustomObject;
+	AddAnalyticsEventAttributesToJsonObject(CustomObject, EventAttrs);
+	CreateAnalyticsEventResource(EsparklogsAnalyticsFlowType::Source, (double)GameCurrencyAmount, *GameCurrencyType, RecordCurrencyGivenItemCategory, nullptr, nullptr, CustomObject);
 }
 
 void FsparklogsAnalyticsProvider::RecordError(const FString& Error, const TArray<FAnalyticsEventAttribute>& EventAttrs)
 {
+	TSharedPtr<FJsonObject> CustomObject;
+	AddAnalyticsEventAttributesToJsonObject(CustomObject, EventAttrs);
+	CreateAnalyticsEventLog(EsparklogsSeverity::Error, *Error, nullptr, CustomObject);
+}
 
+void FsparklogsAnalyticsProvider::RecordProgress(const FString& ProgressType, const FString& ProgressHierarchy)
+{
+	RecordProgress(ProgressType, ProgressHierarchy, TArray<FAnalyticsEventAttribute>());
+}
+
+void FsparklogsAnalyticsProvider::RecordProgress(const FString& ProgressType, const FString& ProgressHierarchy, const TArray<FAnalyticsEventAttribute>& EventAttrs)
+{
+	TArray<FString> PArray;
+	ProgressHierarchy.ParseIntoArray(PArray, RecordProgressDelimiters, sizeof(RecordProgressDelimiters) / sizeof(RecordProgressDelimiters[0]), true);
+	RecordProgress(ProgressType, PArray, EventAttrs);
 }
 
 void FsparklogsAnalyticsProvider::RecordProgress(const FString& ProgressType, const TArray<FString>& ProgressHierarchy, const TArray<FAnalyticsEventAttribute>& EventAttrs)
 {
-
+	EsparklogsAnalyticsProgressionStatus InvalidStatus = (EsparklogsAnalyticsProgressionStatus)INDEX_NONE;
+	EsparklogsAnalyticsProgressionStatus Status = InvalidStatus;
+	const UEnum* StatusEnum = StaticEnum<EsparklogsAnalyticsProgressionStatus>();
+	if (ensure(StatusEnum))
+	{
+		Status = (EsparklogsAnalyticsProgressionStatus)StatusEnum->GetValueByName(FName(ProgressType));
+	}
+	if (Status == InvalidStatus)
+	{
+		UE_LOG(LogPluginSparkLogs, Warning, TEXT("FsparklogsAnalyticsProvider::RecordProgress ignoring unknown ProgressType=%s"), *ProgressType);
+		return;
+	}
+	if (ProgressHierarchy.Num() <= 0)
+	{
+		UE_LOG(LogPluginSparkLogs, Warning, TEXT("FsparklogsAnalyticsProvider::RecordProgress ignoring empty ProgressHierarchy"));
+		return;
+	}
+	double* ValuePtr = nullptr;
+	double Value = 0.0;
+	for (const auto A : EventAttrs)
+	{
+		if (0 == A.GetName().Compare(TEXT("value"), ESearchCase::IgnoreCase)
+			|| 0 == A.GetName().Compare(TEXT("amount"), ESearchCase::IgnoreCase)
+			|| 0 == A.GetName().Compare(TEXT("score"), ESearchCase::IgnoreCase))
+		{
+			Value = FCString::Atod(*A.GetValue());
+			ValuePtr = &Value;
+		}
+	}
+	TSharedPtr<FJsonObject> CustomObject;
+	AddAnalyticsEventAttributesToJsonObject(CustomObject, EventAttrs);
+	CreateAnalyticsEventProgression(Status, ValuePtr, ProgressHierarchy, nullptr, CustomObject);
 }
 
 FAnalyticsEventAttribute FsparklogsAnalyticsProvider::GetDefaultEventAttribute(int AttributeIndex) const
