@@ -2922,6 +2922,10 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventPurchase(const TCHAR* Item
 	{
 		return false;
 	}
+	if (!AutoStartSessionBeforeEvent())
+	{
+		return false;
+	}
 	TSharedPtr<FJsonObject> Data(new FJsonObject());
 	FString EventID;
 	TArray<TSharedPtr<FJsonValue>> EventIDParts;
@@ -2992,6 +2996,10 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventPurchase(const TCHAR* Item
 bool FsparklogsAnalyticsProvider::CreateAnalyticsEventResource(EsparklogsAnalyticsFlowType FlowType, double Amount, const TCHAR* VirtualCurrency, const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
 {
 	if (!FsparklogsModule::IsModuleLoaded() || VirtualCurrency == nullptr || *VirtualCurrency == 0)
+	{
+		return false;
+	}
+	if (!AutoStartSessionBeforeEvent())
 	{
 		return false;
 	}
@@ -3159,6 +3167,10 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventProgression(EsparklogsAnal
 	{
 		return false;
 	}
+	if (!AutoStartSessionBeforeEvent())
+	{
+		return false;
+	}
 	int Attempt = 0;
 	bool StoreAttemptField = (Status != EsparklogsAnalyticsProgressionStatus::Started);
 	FString AttemptID = (FString(EventTypeProgression) + ItemSeparator + Tiers).ToLower();
@@ -3278,6 +3290,10 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TArray<FStrin
 	{
 		return false;
 	}
+	if (!AutoStartSessionBeforeEvent())
+	{
+		return false;
+	}
 	TSharedPtr<FJsonObject> Data(new FJsonObject());
 	Data->SetStringField(DesignFieldEventId, EventId);
 	TArray<TSharedPtr<FJsonValue>> EventIdPartsJson;
@@ -3310,6 +3326,10 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TArray<FStrin
 bool FsparklogsAnalyticsProvider::CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
 {
 	if (!FsparklogsModule::IsModuleLoaded() || Message == nullptr)
+	{
+		return false;
+	}
+	if (!AutoStartSessionBeforeEvent())
 	{
 		return false;
 	}
@@ -3706,6 +3726,18 @@ void FsparklogsAnalyticsProvider::SetDefaultEventAttributes(TArray<FAnalyticsEve
 	AddAnalyticsEventAttributesToJsonObject(NewMeta, Attributes);
 	FScopeLock WriteLock(&DataCriticalSection);
 	MetaAttributes = NewMeta;
+}
+
+bool FsparklogsAnalyticsProvider::AutoStartSessionBeforeEvent()
+{
+	if (IsRunningDedicatedServer())
+	{
+		return !(GetSessionID().IsEmpty());
+	}
+	else
+	{
+		return StartSession(TArray<FAnalyticsEventAttribute>());
+	}
 }
 
 void FsparklogsAnalyticsProvider::AutoCleanupSession()

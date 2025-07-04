@@ -1373,6 +1373,8 @@ public:
 #endif
 	//~ End IAnalyticsProvider Interface
 
+	// Prepares for an analytics event to be generated. Ensures a session is started (except for server launch config). Returns false if we should not proceed.
+	virtual bool AutoStartSessionBeforeEvent();
 	// Automatically cleanup any active session, except for server launch configurations where we only send session data if they explicitly use StartSession and EndSession.
 	virtual void AutoCleanupSession();
 
