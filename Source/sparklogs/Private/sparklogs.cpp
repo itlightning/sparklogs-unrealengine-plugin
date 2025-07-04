@@ -385,6 +385,7 @@ FsparklogsSettings::FsparklogsSettings()
 	, RetryIntervalSecs(DefaultRetryIntervalSecs)
 	, UnflushedBytesToAutoFlush(DefaultUnflushedBytesToAutoFlush)
 	, IncludeCommonMetadata(DefaultIncludeCommonMetadata)
+	, DebugLogForAnalyticsEvents(DefaultServerDebugLogForAnalyticsEvents)
 	, DebugLogRequests(DefaultDebugLogRequests)
 	, AutoStart(DefaultAutoStart)
 	, CompressionMode(ITLCompressionMode::Default)
@@ -710,6 +711,10 @@ void FsparklogsSettings::LoadSettings()
 	if (!GConfig->GetBool(*Section, *(SettingPrefix + TEXT("IncludeCommonMetadata")), IncludeCommonMetadata, GEngineIni))
 	{
 		IncludeCommonMetadata = DefaultIncludeCommonMetadata;
+	}
+	if (!GConfig->GetBool(*Section, *(SettingPrefix + TEXT("DebugLogForAnalyticsEvents")), DebugLogForAnalyticsEvents, GEngineIni))
+	{
+		DebugLogForAnalyticsEvents = GetValueForLaunchConfiguration(DefaultServerDebugLogForAnalyticsEvents, DefaultEditorDebugLogForAnalyticsEvents, DefaultClientDebugLogForAnalyticsEvents, false);
 	}
 	if (!GConfig->GetBool(*Section, *(SettingPrefix + TEXT("DebugLogRequests")), DebugLogRequests, GEngineIni))
 	{
@@ -4073,6 +4078,17 @@ bool FsparklogsModule::AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalytics
 		return false;
 	}
 	Writer->Close();
+	if (Settings->DebugLogForAnalyticsEvents)
+	{
+		if (LogMessage != nullptr)
+		{
+			UE_LOG(LogPluginSparkLogs, Display, TEXT("%s: %s %s"), DebugForAnalyticsEventsPrefix, LogMessage, *OutputJson);
+		}
+		else
+		{
+			UE_LOG(LogPluginSparkLogs, Display, TEXT("%s: %s"), DebugForAnalyticsEventsPrefix, *OutputJson);
+		}
+	}
 	return GetITLInternalGameLog(nullptr).LogDevice->AddRawEventWithJSONObject(OutputJson, LogMessage, true);
 }
 

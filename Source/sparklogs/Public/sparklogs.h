@@ -115,6 +115,10 @@ public:
 	static constexpr bool DefaultClientCollectAnalytics = true;
 	static constexpr bool DefaultClientCollectLogs = false;
 
+	static constexpr bool DefaultServerDebugLogForAnalyticsEvents = false;
+	static constexpr bool DefaultEditorDebugLogForAnalyticsEvents = true;
+	static constexpr bool DefaultClientDebugLogForAnalyticsEvents = false;
+
 	static FDateTime EmptyDateTime;
 
 	/** The game ID to use for analytics. If set, will also be added to log events. */
@@ -152,6 +156,8 @@ public:
 	double MinIntervalBetweenFlushes;
 	/** Whether or not to include common metadata in each log event. */
 	bool IncludeCommonMetadata;
+	/** Whether or not to log analytics events to the debug log. */
+	bool DebugLogForAnalyticsEvents;
 	/** Whether or not to log requests */
 	bool DebugLogRequests;
 	/** Whether or not to automatically start the log/event shipping engine. */
@@ -408,6 +414,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Include Common Metadata")
 	bool ServerIncludeCommonMetadata = FsparklogsSettings::DefaultIncludeCommonMetadata;
 
+	// Whether or not to also print analytics events to the log as a debug event. Defaults to false.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Debug Log for Analytics Events")
+	bool ServerDebugLogForAnalyticsEvents = FsparklogsSettings::DefaultServerDebugLogForAnalyticsEvents;
+
 	// How to compress the payload. Use 'lz4' or 'none'. Defaults to lz4. 'lz4' is normally more CPU efficient as it reduces the size of the TLS payload.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Server Launch Configuration", DisplayName = "Compression Mode")
 	FString ServerCompressionMode;
@@ -442,6 +452,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Include Common Metadata")
 	bool EditorIncludeCommonMetadata = FsparklogsSettings::DefaultIncludeCommonMetadata;
 
+	// Whether or not to also print analytics events to the log as a debug event. Defaults to true.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Debug Log for Analytics Events")
+	bool EditorDebugLogForAnalyticsEvents = FsparklogsSettings::DefaultEditorDebugLogForAnalyticsEvents;
+
 	// How to compress the payload. Use 'lz4' or 'none'. Defaults to lz4. 'lz4' is normally more CPU efficient as it reduces the size of the TLS payload. [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Compression Mode")
 	FString EditorCompressionMode;
@@ -475,6 +489,10 @@ public:
 	// Whether or not to include common metadata (hostname, game name) in each log event.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Include Common Metadata")
 	bool ClientIncludeCommonMetadata = FsparklogsSettings::DefaultIncludeCommonMetadata;
+
+	// Whether or not to also print analytics events to the log as a debug event. Defaults to false.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Debug Log for Analytics Events")
+	bool ClientDebugLogForAnalyticsEvents = FsparklogsSettings::DefaultClientDebugLogForAnalyticsEvents;
 
 	// How to compress the payload. Use 'lz4' or 'none'. Defaults to lz4. 'lz4' is normally more CPU efficient as it reduces the size of the TLS payload.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Compression Mode")
@@ -1450,6 +1468,7 @@ class SPARKLOGS_API FsparklogsModule : public IAnalyticsProviderModule
 {
 public:
 	static constexpr const TCHAR* OverrideAutoExtractDisabled = TEXT("__autoextract_disabled");
+	static constexpr TCHAR* DebugForAnalyticsEventsPrefix = TEXT("ANALYTICS_DEBUG");
 
 public:
 	/**
