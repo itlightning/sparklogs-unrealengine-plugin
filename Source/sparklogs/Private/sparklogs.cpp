@@ -159,6 +159,21 @@ FString ITLGetUTCDateTimeAsRFC3339(const FDateTime& DT)
 	);
 }
 
+FDateTime ITLEmptyDateTime = FDateTime(0);
+
+FDateTime ITLParseDateTime(const FString& TimeStr)
+{
+	int64 Ts = FCString::Atoi64(*TimeStr);
+	if (Ts > 0)
+	{
+		return FDateTime(Ts);
+	}
+	else
+	{
+		return ITLEmptyDateTime;
+	}
+}
+
 const TCHAR* INISectionForEditor = TEXT("Editor");
 const TCHAR* INISectionForCommandlet = TEXT("Commandlet");
 const TCHAR* INISectionForServer = TEXT("Server");
@@ -372,7 +387,6 @@ SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length)
 // =============== FsparklogsSettings ===============================================================================
 
 const TCHAR* FsparklogsSettings::PluginStateSection = TEXT("PluginState");
-FDateTime FsparklogsSettings::EmptyDateTime = FDateTime(0);
 
 FsparklogsSettings::FsparklogsSettings()
 	: AnalyticsUserIDType(ITLAnalyticsUserIDType::DeviceID)
@@ -392,9 +406,10 @@ FsparklogsSettings::FsparklogsSettings()
 	, AddRandomGameInstanceID(DefaultAddRandomGameInstanceID)
 	, StressTestGenerateIntervalSecs(0.0)
 	, StressTestNumEntriesPerTick(0)
-	, CachedAnalyticsInstallTime(EmptyDateTime)
+	, CachedAnalyticsInstallTime(ITLEmptyDateTime)
 	, CachedAnalyticsSessionNumber(0)
 	, CachedAnalyticsTransactionNumber(0)
+	, CachedAnalyticsLastEvent(ITLEmptyDateTime)
 {
 }
 
@@ -497,27 +512,25 @@ FString FsparklogsSettings::CalculatePlayerID(const FString& GameID, const FStri
 FDateTime FsparklogsSettings::GetEffectiveAnalyticsInstallTime()
 { 
 	FScopeLock WriteLock1(&CachedCriticalSection);
-	if (CachedAnalyticsInstallTime != CachedAnalyticsInstallTime)
+	if (CachedAnalyticsInstallTime != ITLEmptyDateTime)
 	{
 		return CachedAnalyticsInstallTime;
 	}
 	constexpr TCHAR* InstallTimeKey = TEXT("AnalyticsInstallTime");
 	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, InstallTimeKey, GGameUserSettingsIni);
 	TimeStr.TrimStartAndEndInline();
-	int64 Ts = FCString::Atoi64(*TimeStr);
-	if (Ts <= 0)
+	FDateTime InstallTime = ITLParseDateTime(TimeStr);
+	if (InstallTime == ITLEmptyDateTime)
 	{
-		CachedAnalyticsInstallTime = FDateTime::UtcNow();
-		Ts = CachedAnalyticsInstallTime.GetTicks();
+		InstallTime = FDateTime::UtcNow();
+		int64 Ts = InstallTime.GetTicks();
 		TimeStr = FString::Printf(TEXT("%lld"), Ts);
 		GConfig->SetString(ITL_CONFIG_SECTION_NAME, InstallTimeKey, *TimeStr, GGameUserSettingsIni);
 		GConfig->Flush(false, GGameUserSettingsIni);
 	}
-	else
-	{
-		CachedAnalyticsInstallTime = FDateTime(Ts);
-	}
-	return CachedAnalyticsInstallTime;
+	
+	CachedAnalyticsInstallTime = InstallTime;
+	return InstallTime;
 }
 
 void FsparklogsSettings::SetUserID(const TCHAR* UserID)
@@ -620,6 +633,68 @@ int FsparklogsSettings::GetAttemptNumber(const FString& EventID, bool Increment,
 		GConfig->Flush(false, GGameUserSettingsIni);
 	}
 	return CachedValue;
+}
+
+FDateTime FsparklogsSettings::GetEffectiveLastWrittenAnalyticsEvent()
+{
+	if (CachedAnalyticsLastEvent != ITLEmptyDateTime)
+	{
+		return CachedAnalyticsLastEvent;
+	}
+	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, GGameUserSettingsIni);
+	TimeStr.TrimStartAndEndInline();
+	FDateTime LastEvent = ITLParseDateTime(TimeStr);
+	CachedAnalyticsLastEvent = LastEvent;
+	return LastEvent;
+}
+
+void FsparklogsSettings::MarkLastWrittenAnalyticsEvent()
+{
+	FDateTime Now = FDateTime::UtcNow();
+	FDateTime KnownLastEvent = CachedAnalyticsLastEvent;
+	if (KnownLastEvent != ITLEmptyDateTime)
+	{
+		FTimespan Interval = Now - KnownLastEvent;
+		if (FMath::Abs(Interval.GetTotalSeconds()) < 15.0)
+		{
+			// Only update this timestamp every few seconds for efficiency
+			return;
+		}
+	}
+	CachedAnalyticsLastEvent = Now;
+	int64 Ts = Now.GetTicks();
+	FString TimeStr = FString::Printf(TEXT("%lld"), Ts);
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, *TimeStr, GGameUserSettingsIni);
+	GConfig->Flush(false, GGameUserSettingsIni);
+}
+
+void FsparklogsSettings::MarkEndOfAnalyticsSession()
+{
+	CachedAnalyticsLastEvent = ITLEmptyDateTime;
+	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, GGameUserSettingsIni);
+	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, GGameUserSettingsIni);
+	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, GGameUserSettingsIni);
+	GConfig->Flush(false, GGameUserSettingsIni);
+}
+
+void FsparklogsSettings::MarkStartOfAnalyticsSession(const FString& SessionID, FDateTime SessionStarted)
+{
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, *SessionID, GGameUserSettingsIni);
+	FString SessionStartedStr = FString::Printf(TEXT("%lld"), (int64)SessionStarted.GetTicks());
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, *SessionStartedStr, GGameUserSettingsIni);
+	FDateTime Now = FDateTime::UtcNow();
+	FString NowStr = FString::Printf(TEXT("%lld"), (int64)Now.GetTicks());
+	CachedAnalyticsLastEvent = Now;
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, *NowStr, GGameUserSettingsIni);
+	GConfig->Flush(false, GGameUserSettingsIni);
+}
+
+void FsparklogsSettings::GetLastAnalyticsSessionStartInfo(FString& OutSessionID, FDateTime& OutSessionStarted)
+{
+	OutSessionID = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, GGameUserSettingsIni);
+	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, GGameUserSettingsIni);
+	TimeStr.TrimStartAndEndInline();
+	OutSessionStarted = ITLParseDateTime(TimeStr);
 }
 
 void FsparklogsSettings::LoadSettings()
@@ -2105,14 +2180,14 @@ bool FsparklogsOutputDeviceFile::AccrueWrittenBytes(int N)
 
 FSparkLogsAnalyticsSessionDescriptor::FSparkLogsAnalyticsSessionDescriptor()
 	: SessionNumber(0)
-	, SessionStarted(FsparklogsSettings::EmptyDateTime)
+	, SessionStarted(ITLEmptyDateTime)
 {
 }
 
 FSparkLogsAnalyticsSessionDescriptor::FSparkLogsAnalyticsSessionDescriptor(const TCHAR* InSessionID, const TCHAR* InUserID)
 	: SessionID(InSessionID)
 	, SessionNumber(0)
-	, SessionStarted(FsparklogsSettings::EmptyDateTime)
+	, SessionStarted(ITLEmptyDateTime)
 	, UserID(InUserID)
 {
 }
@@ -2120,7 +2195,7 @@ FSparkLogsAnalyticsSessionDescriptor::FSparkLogsAnalyticsSessionDescriptor(const
 FSparkLogsAnalyticsSessionDescriptor::FSparkLogsAnalyticsSessionDescriptor(const TCHAR* InSessionID, int InSessionNumber, const TCHAR* InUserID)
 	: SessionID(InSessionID)
 	, SessionNumber(InSessionNumber)
-	, SessionStarted(FsparklogsSettings::EmptyDateTime)
+	, SessionStarted(ITLEmptyDateTime)
 	, UserID(InUserID)
 {
 }
@@ -2910,7 +2985,7 @@ void UsparklogsAnalytics::RecordLogWithReasonWithAttr(EsparklogsSeverity Severit
 
 FsparklogsAnalyticsProvider::FsparklogsAnalyticsProvider(TSharedRef<FsparklogsSettings> InSettings)
 	: Settings(InSettings)
-	, SessionStarted(FsparklogsSettings::EmptyDateTime)
+	, SessionStarted(ITLEmptyDateTime)
 	, SessionNumber(0)
 	, MetaAttributes(new FJsonObject())
 {
@@ -3382,10 +3457,16 @@ bool FsparklogsAnalyticsProvider::StartSession(const TArray<FAnalyticsEventAttri
 	// No special data for session start other than standard attributes, just finalize, unlock, and send
 	InternalFinalizeAnalyticsEvent(EventTypeSessionStart, nullptr, Data);
 	WriteLock.Unlock();
+	Settings->MarkStartOfAnalyticsSession(CurrentSessionID, SessionStarted);
 	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *FString::Printf(TEXT("%s: %s: started new session"), MessageHeader, EventTypeSessionStart), nullptr, false);
 }
 
 void FsparklogsAnalyticsProvider::EndSession()
+{
+	DoEndSession(FDateTime::UtcNow());
+}
+
+void FsparklogsAnalyticsProvider::DoEndSession(FDateTime SessionEnded)
 {
 	if (!FsparklogsModule::IsModuleLoaded())
 	{
@@ -3398,7 +3479,6 @@ void FsparklogsAnalyticsProvider::EndSession()
 	}
 
 	TSharedPtr<FJsonObject> Data(new FJsonObject());
-	FDateTime SessionEnded = FDateTime::UtcNow();
 	Data->SetStringField(SessionEndFieldSessionEnded, ITLGetUTCDateTimeAsRFC3339(SessionEnded));
 	FTimespan SessionDuration = SessionEnded - SessionStarted;
 	double SessionDurationSecs = SessionDuration.GetTotalSeconds();
@@ -3410,12 +3490,13 @@ void FsparklogsAnalyticsProvider::EndSession()
 
 	// Now reset the session data, release write lock, and send the data
 	CurrentSessionID.Reset();
-	SessionStarted = FsparklogsSettings::EmptyDateTime;
+	SessionStarted = ITLEmptyDateTime;
 	SessionNumber = 0;
 	WriteLock.Unlock();
 	FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *FString::Printf(TEXT("%s: %s: finished session normally"), MessageHeader, EventTypeSessionEnd), nullptr, false);
 	// The app might end or go inactive soon, try to get the data to the cloud asap...
 	FsparklogsModule::GetModule().Flush();
+	Settings->MarkEndOfAnalyticsSession();
 }
 
 FString FsparklogsAnalyticsProvider::GetSessionID() const
@@ -3754,6 +3835,33 @@ void FsparklogsAnalyticsProvider::AutoCleanupSession()
 	EndSession();
 }
 
+void FsparklogsAnalyticsProvider::CheckForStaleSessionAtStartup()
+{
+	FDateTime LastWrittenEvent = Settings->GetEffectiveLastWrittenAnalyticsEvent();
+	FDateTime LastSessionStarted = ITLEmptyDateTime;
+	FString LastSessionID;
+	Settings->GetLastAnalyticsSessionStartInfo(LastSessionID, LastSessionStarted);
+	if (!LastSessionID.IsEmpty() && LastSessionStarted != ITLEmptyDateTime)
+	{
+		// we shouldn't have an active session at this point, but in case we do, end it.
+		EndSession();
+		// simulate having the session that was last active to now be active
+		int LastSessionNumber = Settings->GetSessionNumber(false);
+		if (LastWrittenEvent == ITLEmptyDateTime)
+		{
+			LastWrittenEvent = LastSessionStarted;
+		}
+		FScopeLock WriteLock(&DataCriticalSection);
+		CurrentSessionID = LastSessionID;
+		SessionStarted = LastSessionStarted;
+		SessionNumber = LastSessionNumber;
+		WriteLock.Unlock();
+		// end the session with the effective end time matching the time of last analytics event in that session
+		DoEndSession(LastWrittenEvent);
+		Settings->MarkEndOfAnalyticsSession();
+	}
+}
+
 void FsparklogsAnalyticsProvider::GetAnalyticsEventData(FString& OutSessionID, FDateTime& OutSessionStarted, int& OutSessionNumber, TSharedPtr<FJsonObject>& OutMetaAttributes) const
 {
 	FScopeLock ReadLock(&DataCriticalSection);
@@ -3841,7 +3949,7 @@ void FsparklogsAnalyticsProvider::InternalFinalizeAnalyticsEvent(const TCHAR* Ev
 	{
 		Object->SetNumberField(StandardFieldSessionNumber, (double)EffectiveSessionNumber);
 	}
-	if (EffectiveSessionStarted != FsparklogsSettings::EmptyDateTime)
+	if (EffectiveSessionStarted != ITLEmptyDateTime)
 	{
 		Object->SetStringField(StandardFieldSessionStarted, ITLGetUTCDateTimeAsRFC3339(EffectiveSessionStarted));
 	}
@@ -4089,6 +4197,7 @@ bool FsparklogsModule::AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalytics
 			UE_LOG(LogPluginSparkLogs, Display, TEXT("%s: %s"), DebugForAnalyticsEventsPrefix, *OutputJson);
 		}
 	}
+	Settings->MarkLastWrittenAnalyticsEvent();
 	return GetITLInternalGameLog(nullptr).LogDevice->AddRawEventWithJSONObject(OutputJson, LogMessage, true);
 }
 
@@ -4188,8 +4297,8 @@ bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAnalyticsUserID,
 		if (Settings->CollectAnalytics)
 		{
 			UE_LOG(LogPluginSparkLogs, Log, TEXT("Analytics collection is active. GameID='%s' UserID='%s' PlayerID='%s'"), *Settings->AnalyticsGameID, *Settings->GetEffectiveAnalyticsUserID(), *Settings->GetEffectiveAnalyticsPlayerID());
-			// Make sure analytics provider singleton is created...
-			GetAnalyticsProvider();
+			// Make sure analytics provider singleton is created and make sure any previously open session from a prior game instance is cleaned up...
+			GetAnalyticsProvider()->CheckForStaleSessionAtStartup();
 		}
 		
 		FString SourceLogFile = GetITLInternalGameLog(nullptr).LogFilePath;

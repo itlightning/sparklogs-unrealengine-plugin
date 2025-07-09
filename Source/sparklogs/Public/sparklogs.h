@@ -49,6 +49,12 @@ SPARKLOGS_API FString ITLGetNetworkConnectionType();
 /** Formats an FDateTime that is already in UTC time zone in RFC3339 format (with milliseconds) */
 SPARKLOGS_API FString ITLGetUTCDateTimeAsRFC3339(const FDateTime& DT);
 
+/** The empty FDateTime value used by all functions/classes in this module. */
+extern SPARKLOGS_API FDateTime ITLEmptyDateTime;
+
+/** Parses a string as an FDateTime (expects to be stored as ticks) or returns ITLEmptyDateTime on failure. */
+SPARKLOGS_API FDateTime ITLParseDateTime(const FString & TimeStr);
+
 /** The type of data compression to use. */
 enum class SPARKLOGS_API ITLCompressionMode
 {
@@ -119,7 +125,9 @@ public:
 	static constexpr bool DefaultEditorDebugLogForAnalyticsEvents = true;
 	static constexpr bool DefaultClientDebugLogForAnalyticsEvents = false;
 
-	static FDateTime EmptyDateTime;
+	static constexpr TCHAR* AnalyticsLastSessionID = TEXT("AnalyticsLastSessionID");
+	static constexpr TCHAR* AnalyticsLastSessionStarted = TEXT("AnalyticsLastSessionStarted");
+	static constexpr TCHAR* AnalyticsLastWrittenKey = TEXT("AnalyticsLastWritten");
 
 	/** The game ID to use for analytics. If set, will also be added to log events. */
 	FString AnalyticsGameID;
@@ -206,6 +214,22 @@ public:
 	  */
 	int GetAttemptNumber(const FString& EventID, bool Increment, bool DeleteAfter);
 
+	/** Returns the last time that we've written an analytics event in an active session, or EmptyDateTime if nothing
+	  * has been written since the last session ended. */
+	FDateTime GetEffectiveLastWrittenAnalyticsEvent();
+
+	/** Records that we've written an analytics event. will update the effective timestamp if it's been long enough. */
+	void MarkLastWrittenAnalyticsEvent();
+
+	/** Marks the end of an analytics session (will clear the last written analytics event timestamp). */
+	void MarkEndOfAnalyticsSession();
+
+	/** Records the start of a session with the given ID and start time. */
+	void MarkStartOfAnalyticsSession(const FString& SessionID, FDateTime SessionStarted);
+
+	/** Gets info about the last recorded analytics session. OutSessionID will be empty if no info is available. */
+	void GetLastAnalyticsSessionStartInfo(FString& OutSessionID, FDateTime& OutSessionStarted);
+
 protected:
 	FCriticalSection CachedCriticalSection;
 	FString CachedAnalyticsUserID;
@@ -214,6 +238,7 @@ protected:
 	int CachedAnalyticsSessionNumber;
 	int CachedAnalyticsTransactionNumber;
 	TMap<FString, int> CachedAnalyticsAttemptNumber;
+	FDateTime CachedAnalyticsLastEvent;
 
 	/** Enforces constraints upon any loaded setting values. */
 	void EnforceConstraints();
@@ -1395,6 +1420,8 @@ public:
 	virtual bool AutoStartSessionBeforeEvent();
 	// Automatically cleanup any active session, except for server launch configurations where we only send session data if they explicitly use StartSession and EndSession.
 	virtual void AutoCleanupSession();
+	// Checks if there is a session that was active in a previous instance of the game that wasn't ended properly. If so, mark that session as ended with the appropriate duration.
+	virtual void CheckForStaleSessionAtStartup();
 
 	/** Thread-safe. Gets a COPY of the information needed to record an analytics event. */
 	void GetAnalyticsEventData(FString& OutSessionID, FDateTime& OutSessionStarted, int& OutSessionNumber, TSharedPtr<FJsonObject>& OutMetaAttributes) const;
@@ -1445,6 +1472,9 @@ protected:
 	TSharedRef<FJsonObject> MetaAttributes;
 	// The flattened tiers (e.g., tier1:tier2,tier3) of the progression events that are currently in progress.
 	TSet<FString> InProgressProgression;
+
+	// Does the work to end the session, using the given date/time (in UTC) as the session end date.
+	void DoEndSession(FDateTime SessionEnded);
 
 	// Not thread-safe (hold lock if needed). Setup defaults for meta attributes.
 	void SetupDefaultMetaAttributes();
@@ -1510,7 +1540,7 @@ public:
 	virtual bool AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalyticsData, const TCHAR* LogMessage, TSharedPtr<FJsonObject> CustomRootFields, bool ForceDisableAutoExtract);
 
 	/** Returns the random game_instance_id used for this run of the engine.
-	  * There may be multiple game analytics sessions during a single game instance.
+	  * There may be multiple game engine analytics sessions during a single game instance.
 	  * This is available after the module has started (even before the shipping
 	  * engine is started.*/
 	FString GetGameInstanceID();
