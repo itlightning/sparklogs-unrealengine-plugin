@@ -55,6 +55,9 @@ extern SPARKLOGS_API FDateTime ITLEmptyDateTime;
 /** Parses a string as an FDateTime (expects to be stored as ticks) or returns ITLEmptyDateTime on failure. */
 SPARKLOGS_API FDateTime ITLParseDateTime(const FString & TimeStr);
 
+/** Returns true if we're on a mobile platform. */
+SPARKLOGS_API bool ITLIsMobilePlatform();
+
 /** The type of data compression to use. */
 enum class SPARKLOGS_API ITLCompressionMode
 {
@@ -86,6 +89,8 @@ public:
 	static constexpr TCHAR* AnalyticsUserIDTypeDeviceID = TEXT("device_id");
 	static constexpr TCHAR* AnalyticsUserIDTypeGenerated = TEXT("generated");
 	static constexpr TCHAR* DefaultAnalyticsUserIDType = AnalyticsUserIDTypeDeviceID;
+	static constexpr bool DefaultAnalyticsMobileAutoSessionStart = true;
+	static constexpr bool DefaultAnalyticsMobileAutoSessionEnd = true;
 
 	static constexpr double DefaultRequestTimeoutSecs = 90;
 	static constexpr double MinRequestTimeoutSecs = 30;
@@ -133,6 +138,10 @@ public:
 	FString AnalyticsGameID;
 	/** The type of user ID to use for analytics. */
 	ITLAnalyticsUserIDType AnalyticsUserIDType;
+	/** On mobile platforms whether or not to auto-start a session when the game starts or when the app enters the foreground. */
+	bool AnalyticsMobileAutoSessionStart;
+	/** On mobile platforms whether or not to auto-end a session when the app enters the background. */
+	bool AnalyticsMobileAutoSessionEnd;
 
 	/** Whether or not game analytic events are collected */
 	bool CollectAnalytics;
@@ -274,6 +283,14 @@ public:
 			FsparklogsSettings::AnalyticsUserIDTypeGenerated,
 		};
 	}
+
+	// On mobile platforms whether or not to auto-start a session when the game starts or when the app enters the foreground.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Analytics", DisplayName = "Mobile Session Auto Start")
+	bool AnalyticsMobileAutoSessionStart = FsparklogsSettings::DefaultAnalyticsMobileAutoSessionStart;
+
+	// On mobile platforms whether or not to auto-end a session when the app enters the background.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Analytics", DisplayName = "Mobile Session Auto Stop")
+	bool AnalyticsMobileAutoSessionEnd = FsparklogsSettings::DefaultAnalyticsMobileAutoSessionEnd;
 
 	// ------------------------------------------ SERVER LAUNCH CONFIGURATION SETTINGS
 
@@ -906,10 +923,14 @@ public:
 	/** Starts a session (if one has already started, does nothing and treats as success). */
 	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
 	static bool StartSession();
+	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
+	static bool StartSessionWithReason(const FString& Reason);
 
 	/** Ends a session if any is active (if one is not active, does nothing) */
 	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
 	static void EndSession();
+	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
+	static void EndSessionWithReason(const FString& Reason);
 
 	/** Gets the ID of the current session, or returns an empty string if none is active. */
 	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
@@ -1283,8 +1304,11 @@ public:
 	static constexpr TCHAR* StandardFieldMeta = TEXT("meta");
 	static constexpr TCHAR* StandardFieldCustom = TEXT("custom");
 
+	static constexpr TCHAR* SessionStartFieldReason = TEXT("reason");
+
 	static constexpr TCHAR* SessionEndFieldSessionEnded = TEXT("session_ended");
 	static constexpr TCHAR* SessionEndFieldSessionDurationSecs = TEXT("session_duration_secs");
+	static constexpr TCHAR* SessionEndFieldReason = TEXT("reason");
 
 	static constexpr TCHAR* MetaFieldPlatform = TEXT("platform");
 	static constexpr TCHAR* MetaFieldOSVersion = TEXT("os_version");
@@ -1375,9 +1399,11 @@ public:
 
 	/** Starts a session (if one has already started, does nothing and treats as success). */
 	virtual bool StartSession(const TArray<FAnalyticsEventAttribute>& Attributes) override;
+	virtual bool StartSession(const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& Attributes);
 
 	/** Ends a session if any is active (if one is not active, does nothing) */
 	virtual void EndSession() override;
+	virtual void EndSession(const TCHAR* Reason);
 	virtual FString GetSessionID() const override;
 
 	/** It's recommended NOT to use this and instead pass OverrideSession arguments instead to other functions. */
@@ -1474,7 +1500,7 @@ protected:
 	TSet<FString> InProgressProgression;
 
 	// Does the work to end the session, using the given date/time (in UTC) as the session end date.
-	void DoEndSession(FDateTime SessionEnded);
+	void DoEndSession(const TCHAR* Reason, FDateTime SessionEnded);
 
 	// Not thread-safe (hold lock if needed). Setup defaults for meta attributes.
 	void SetupDefaultMetaAttributes();
@@ -1582,6 +1608,10 @@ protected:
 	void OnPostEngineInit();
 	/** Called by the engine as part of its exit process. */
 	void OnEngineExit();
+	/** Called by the engine when the app is about to enter the background on mobile. */
+	void OnAppEnterBackground();
+	/** Called by the engine when the app has entered the foreground on mobile. */
+	void OnAppEnterForeground();
 
 private:
 	/** Singleton analytics provider */

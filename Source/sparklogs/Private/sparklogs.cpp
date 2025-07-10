@@ -174,6 +174,15 @@ FDateTime ITLParseDateTime(const FString& TimeStr)
 	}
 }
 
+bool ITLIsMobilePlatform()
+{
+#if PLATFORM_IOS || PLATFORM_TVOS || PLATFORM_ANDROID
+	return true;
+#else
+	return false;
+#endif
+}
+
 const TCHAR* INISectionForEditor = TEXT("Editor");
 const TCHAR* INISectionForCommandlet = TEXT("Commandlet");
 const TCHAR* INISectionForServer = TEXT("Server");
@@ -390,6 +399,8 @@ const TCHAR* FsparklogsSettings::PluginStateSection = TEXT("PluginState");
 
 FsparklogsSettings::FsparklogsSettings()
 	: AnalyticsUserIDType(ITLAnalyticsUserIDType::DeviceID)
+	, AnalyticsMobileAutoSessionStart(DefaultAnalyticsMobileAutoSessionStart)
+	, AnalyticsMobileAutoSessionEnd(DefaultAnalyticsMobileAutoSessionEnd)
 	, CollectAnalytics(true)
 	, CollectLogs(false)
 	, RequestTimeoutSecs(DefaultRequestTimeoutSecs)
@@ -706,7 +717,7 @@ void FsparklogsSettings::LoadSettings()
 
 	AnalyticsGameID = GConfig->GetStr(*Section, TEXT("AnalyticsGameID"), GEngineIni);
 
-	FString AnalyticsUserIDTypeStr = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("AnalyticsUserIDType")), GEngineIni).ToLower();
+	FString AnalyticsUserIDTypeStr = GConfig->GetStr(*Section, TEXT("AnalyticsUserIDType"), GEngineIni).ToLower();
 	if (AnalyticsUserIDTypeStr == AnalyticsUserIDTypeDeviceID)
 	{
 		AnalyticsUserIDType = ITLAnalyticsUserIDType::DeviceID;
@@ -722,6 +733,14 @@ void FsparklogsSettings::LoadSettings()
 			UE_LOG(LogPluginSparkLogs, Warning, TEXT("Unknown AnalyticsUserIDType=%s, using default value of device_id..."), *AnalyticsUserIDTypeStr);
 		}
 		AnalyticsUserIDType = ITLAnalyticsUserIDType::DeviceID;
+	}
+	if (!GConfig->GetBool(*Section, TEXT("AnalyticsMobileAutoSessionStart"), AnalyticsMobileAutoSessionStart, GEngineIni))
+	{
+		AnalyticsMobileAutoSessionStart = DefaultAnalyticsMobileAutoSessionStart;
+	}
+	if (!GConfig->GetBool(*Section, TEXT("AnalyticsMobileAutoSessionEnd"), AnalyticsMobileAutoSessionEnd, GEngineIni))
+	{
+		AnalyticsMobileAutoSessionEnd = DefaultAnalyticsMobileAutoSessionEnd;
 	}
 
 	// Settings specific to this launch configuration
@@ -2226,7 +2245,9 @@ FSparkLogsAnalyticsSessionDescriptor::~FSparkLogsAnalyticsSessionDescriptor()
 UsparklogsAnalytics::UsparklogsAnalytics(const FObjectInitializer& OI) : Super(OI) { }
 
 bool UsparklogsAnalytics::StartSession() { return FsparklogsModule::GetAnalyticsProvider()->StartSession(TArray<FAnalyticsEventAttribute>()); }
+bool UsparklogsAnalytics::StartSessionWithReason(const FString& Reason) { return FsparklogsModule::GetAnalyticsProvider()->StartSession(*Reason, TArray<FAnalyticsEventAttribute>()); }
 void UsparklogsAnalytics::EndSession() { FsparklogsModule::GetAnalyticsProvider()->EndSession(); }
+void UsparklogsAnalytics::EndSessionWithReason(const FString& Reason) { FsparklogsModule::GetAnalyticsProvider()->EndSession(*Reason); }
 FString UsparklogsAnalytics::GetSessionID() { return FsparklogsModule::GetAnalyticsProvider()->GetSessionID(); }
 void UsparklogsAnalytics::SetBuildInfo(const FString& InBuildInfo) { FsparklogsModule::GetAnalyticsProvider()->SetBuildInfo(InBuildInfo); }
 void UsparklogsAnalytics::SetCommonAttribute(const FString& Field, const FString& Value) { FsparklogsModule::GetAnalyticsProvider()->SetMetaAttribute(Field, TSharedPtr<FJsonValue>(new FJsonValueString(Value))); }
@@ -3449,6 +3470,11 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventLog(EsparklogsSeverity Sev
 
 bool FsparklogsAnalyticsProvider::StartSession(const TArray<FAnalyticsEventAttribute>& Attributes)
 {
+	return StartSession(nullptr, Attributes);
+}
+
+bool FsparklogsAnalyticsProvider::StartSession(const TCHAR* Reason, const TArray<FAnalyticsEventAttribute>& Attributes)
+{
 	if (!FsparklogsModule::IsModuleLoaded())
 	{
 		return false;
@@ -3462,8 +3488,11 @@ bool FsparklogsAnalyticsProvider::StartSession(const TArray<FAnalyticsEventAttri
 	CurrentSessionID = ITLGenerateNewRandomID();
 	SessionStarted = FDateTime::UtcNow();
 	SessionNumber = Settings->GetSessionNumber(true);
-	TSharedPtr<FJsonObject> Data;
-	// No special data for session start other than standard attributes, just finalize, unlock, and send
+	TSharedPtr<FJsonObject> Data(new FJsonObject());
+	if (Reason != nullptr)
+	{
+		Data->SetStringField(SessionStartFieldReason, Reason);
+	}
 	InternalFinalizeAnalyticsEvent(EventTypeSessionStart, nullptr, Data);
 	WriteLock.Unlock();
 	Settings->MarkStartOfAnalyticsSession(CurrentSessionID, SessionStarted);
@@ -3472,10 +3501,15 @@ bool FsparklogsAnalyticsProvider::StartSession(const TArray<FAnalyticsEventAttri
 
 void FsparklogsAnalyticsProvider::EndSession()
 {
-	DoEndSession(FDateTime::UtcNow());
+	DoEndSession(nullptr, FDateTime::UtcNow());
 }
 
-void FsparklogsAnalyticsProvider::DoEndSession(FDateTime SessionEnded)
+void FsparklogsAnalyticsProvider::EndSession(const TCHAR* Reason)
+{
+	DoEndSession(Reason, FDateTime::UtcNow());
+}
+
+void FsparklogsAnalyticsProvider::DoEndSession(const TCHAR* Reason, FDateTime SessionEnded)
 {
 	if (!FsparklogsModule::IsModuleLoaded())
 	{
@@ -3494,6 +3528,10 @@ void FsparklogsAnalyticsProvider::DoEndSession(FDateTime SessionEnded)
 	if (SessionDurationSecs > 0.0 || SessionDurationSecs < (60.0 * 60.0 * 24 * 30 * 12))
 	{
 		Data->SetNumberField(SessionEndFieldSessionDurationSecs, SessionDurationSecs);
+	}
+	if (Reason != nullptr)
+	{
+		Data->SetStringField(SessionEndFieldReason, Reason);
 	}
 	InternalFinalizeAnalyticsEvent(EventTypeSessionEnd, nullptr, Data);
 
@@ -3866,7 +3904,7 @@ void FsparklogsAnalyticsProvider::CheckForStaleSessionAtStartup()
 		SessionNumber = LastSessionNumber;
 		WriteLock.Unlock();
 		// end the session with the effective end time matching the time of last analytics event in that session
-		DoEndSession(LastWrittenEvent);
+		DoEndSession(TEXT("stale session found at next game activation"), LastWrittenEvent);
 		Settings->MarkEndOfAnalyticsSession();
 	}
 }
@@ -4096,6 +4134,8 @@ FsparklogsModule::FsparklogsModule()
 void FsparklogsModule::StartupModule()
 {
 	FCoreDelegates::OnPostEngineInit.AddRaw(this, &FsparklogsModule::OnPostEngineInit);
+	FCoreDelegates::ApplicationWillEnterBackgroundDelegate.AddRaw(this, &FsparklogsModule::OnAppEnterBackground);
+	FCoreDelegates::ApplicationHasEnteredForegroundDelegate.AddRaw(this, &FsparklogsModule::OnAppEnterForeground);
 	// TODO: does it matter if we are loaded later and miss a bunch of log entries during engine initialization?
 	// TODO: Should run plugin earlier and check command line to determine if this is running in an editor with
 	//       similar logic to FEngineLoop::PreInitPreStartupScreen [LaunchEngineLoop.cpp] (GIsEditor not available earlier).
@@ -4143,6 +4183,8 @@ void FsparklogsModule::StartupModule()
 
 void FsparklogsModule::ShutdownModule()
 {
+	FCoreDelegates::ApplicationWillEnterBackgroundDelegate.RemoveAll(this);
+	FCoreDelegates::ApplicationHasEnteredForegroundDelegate.RemoveAll(this);
 	FCoreDelegates::OnPostEngineInit.RemoveAll(this);
 	FCoreDelegates::OnExit.RemoveAll(this);
 	if (UObjectInitialized())
@@ -4308,6 +4350,10 @@ bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAnalyticsUserID,
 			UE_LOG(LogPluginSparkLogs, Log, TEXT("Analytics collection is active. GameID='%s' UserID='%s' PlayerID='%s'"), *Settings->AnalyticsGameID, *Settings->GetEffectiveAnalyticsUserID(), *Settings->GetEffectiveAnalyticsPlayerID());
 			// Make sure analytics provider singleton is created and make sure any previously open session from a prior game instance is cleaned up...
 			GetAnalyticsProvider()->CheckForStaleSessionAtStartup();
+			if (ITLIsMobilePlatform() && Settings->AnalyticsMobileAutoSessionStart)
+			{
+				GetAnalyticsProvider()->StartSession(TEXT("automatically started at app start"), TArray<FAnalyticsEventAttribute>());
+			}
 		}
 		
 		FString SourceLogFile = GetITLInternalGameLog(nullptr).LogFilePath;
@@ -4339,6 +4385,9 @@ void FsparklogsModule::StopShippingEngine()
 	if (EngineActive || CloudStreamer.IsValid())
 	{
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Shutting down and flushing logs to cloud..."));
+		// If an analytics session is active then end it
+		GetAnalyticsProvider()->EndSession(TEXT("automatically ended at app exit"));
+		
 		GLog->Flush();
 		if (StressGenerator.IsValid())
 		{
@@ -4384,6 +4433,23 @@ void FsparklogsModule::StopShippingEngine()
 		StressGenerator.Reset();
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Shutdown."));
 		EngineActive = false;
+	}
+}
+
+void FsparklogsModule::OnAppEnterBackground()
+{
+	if (ITLIsMobilePlatform() && Settings->AnalyticsMobileAutoSessionEnd)
+	{
+		GetAnalyticsProvider()->EndSession(TEXT("automatically ended"));
+	}
+	Flush();
+}
+
+void FsparklogsModule::OnAppEnterForeground()
+{
+	if (ITLIsMobilePlatform() && Settings->AnalyticsMobileAutoSessionStart)
+	{
+		GetAnalyticsProvider()->StartSession(TEXT("automatically started at app activation"), TArray<FAnalyticsEventAttribute>());
 	}
 }
 
