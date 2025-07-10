@@ -979,6 +979,7 @@ bool FsparklogsWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayl
 	SetHTTPTimezoneHeader(HttpRequest);
 	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json; charset=UTF-8"));
 	HttpRequest->SetHeader(TEXT("Authorization"), *AuthorizationHeader);
+	HttpRequest->SetHeader(TEXT("X-Client-Clock-Utc-Now"), *FString::Printf(TEXT("%lld"), (int64)(FDateTime::UtcNow().ToUnixTimestamp())));
 	HttpRequest->SetTimeout((double)(TimeoutMillisec.GetValue()) / 1000.0);
 	switch (CompressionMode)
 	{
@@ -995,6 +996,14 @@ bool FsparklogsWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayl
 	}
 	HttpRequest->SetContent(JSONPayloadInUTF8);
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("HTTPPayloadProcessor::ProcessPayload|Headers and data prepared"));
+	HttpRequest->OnRequestWillRetry().BindLambda([&](FHttpRequestPtr Request, FHttpResponsePtr Response, float SecondsToRetry)
+		{
+			if (Request.IsValid())
+			{
+				// Important that this header reflects the current time when we actually submit the request (in the future)
+				HttpRequest->SetHeader(TEXT("X-Client-Clock-Utc-Now"), *FString::Printf(TEXT("%lld"), (int64)(FDateTime::UtcNow().ToUnixTimestamp() + (int64)SecondsToRetry)));
+			}
+		});
 
 	HttpRequest->OnProcessRequestComplete().BindLambda([&](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 		{
