@@ -879,6 +879,7 @@ void FsparklogsSettings::EnforceConstraints()
 	{
 		BytesPerRequest = MaxBytesPerRequest;
 	}
+	double MinProcessingIntervalSecs = GetValueForLaunchConfiguration<double>(MinServerProcessingIntervalSecs, MinEditorProcessingIntervalSecs, MinClientProcessingIntervalSecs, 60.0 * 5);
 	if (ProcessingIntervalSecs < MinProcessingIntervalSecs)
 	{
 		ProcessingIntervalSecs = MinProcessingIntervalSecs;
@@ -998,6 +999,7 @@ bool FsparklogsWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayl
 	SetHTTPTimezoneHeader(HttpRequest);
 	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json; charset=UTF-8"));
 	HttpRequest->SetHeader(TEXT("Authorization"), *AuthorizationHeader);
+	HttpRequest->SetHeader(TEXT("X-Calc-GeoIP"), TEXT("true"));
 	HttpRequest->SetHeader(TEXT("X-Client-Clock-Utc-Now"), *FString::Printf(TEXT("%lld"), (int64)(FDateTime::UtcNow().ToUnixTimestamp())));
 	HttpRequest->SetTimeout((double)(TimeoutMillisec.GetValue()) / 1000.0);
 	switch (CompressionMode)
@@ -2236,10 +2238,6 @@ FSparkLogsAnalyticsSessionDescriptor::FSparkLogsAnalyticsSessionDescriptor(const
 {
 }
 
-FSparkLogsAnalyticsSessionDescriptor::~FSparkLogsAnalyticsSessionDescriptor()
-{
-}
-
 // =============== UsparklogsAnalytics ===============================================================================
 
 UsparklogsAnalytics::UsparklogsAnalytics(const FObjectInitializer& OI) : Super(OI) { }
@@ -2249,6 +2247,7 @@ bool UsparklogsAnalytics::StartSessionWithReason(const FString& Reason) { return
 void UsparklogsAnalytics::EndSession() { FsparklogsModule::GetAnalyticsProvider()->EndSession(); }
 void UsparklogsAnalytics::EndSessionWithReason(const FString& Reason) { FsparklogsModule::GetAnalyticsProvider()->EndSession(*Reason); }
 FString UsparklogsAnalytics::GetSessionID() { return FsparklogsModule::GetAnalyticsProvider()->GetSessionID(); }
+FSparkLogsAnalyticsSessionDescriptor UsparklogsAnalytics::GetSessionDescriptor() { return FsparklogsModule::GetAnalyticsProvider()->GetSessionDescriptor(); }
 void UsparklogsAnalytics::SetBuildInfo(const FString& InBuildInfo) { FsparklogsModule::GetAnalyticsProvider()->SetBuildInfo(InBuildInfo); }
 void UsparklogsAnalytics::SetCommonAttribute(const FString& Field, const FString& Value) { FsparklogsModule::GetAnalyticsProvider()->SetMetaAttribute(Field, TSharedPtr<FJsonValue>(new FJsonValueString(Value))); }
 void UsparklogsAnalytics::SetCommonAttributeJSON(const FString& Field, const TSharedPtr<FJsonValue> Value) { FsparklogsModule::GetAnalyticsProvider()->SetMetaAttribute(Field, Value); }
@@ -3155,7 +3154,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventResource(EsparklogsAnalyti
 		ItemId = TEXT("");
 	}
 	Data->SetStringField(ResourceFieldEventId, EventID);
-	Data->SetArrayField(ResourceFieldEventId, EventIDParts);
+	Data->SetArrayField(ResourceFieldEventIdParts, EventIDParts);
 	Data->SetNumberField(ResourceFieldAmount, Amount);
 	if (Reason != nullptr && *Reason != 0)
 	{
@@ -3281,23 +3280,31 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventProgression(EsparklogsAnal
 	{
 		return false;
 	}
-	int Attempt = 0;
-	bool StoreAttemptField = (Status != EsparklogsAnalyticsProgressionStatus::Started);
-	FString AttemptID = (FString(EventTypeProgression) + ItemSeparator + Tiers).ToLower();
-	int AttemptNumber = Settings->GetAttemptNumber(AttemptID, StoreAttemptField, Status == EsparklogsAnalyticsProgressionStatus::Completed);
 
+	bool IncrementAttempt = (Status == EsparklogsAnalyticsProgressionStatus::Started);
+	FString AttemptID = (FString(EventTypeProgression) + ItemSeparator + Tiers).ToLower();
+	FScopeLock WriteLock(&DataCriticalSection);
+	bool AttemptWasInProgress = InProgressProgression.Contains(AttemptID);
 	if (Status == EsparklogsAnalyticsProgressionStatus::Started)
 	{
-		FScopeLock WriteLock(&DataCriticalSection);
-		bool AttemptWasInProgress = InProgressProgression.Contains(AttemptID);
 		InProgressProgression.Add(AttemptID);
-		WriteLock.Unlock();
-		if (AttemptWasInProgress)
-		{
-			// This particular progression event was already in progress and now we're trying to start again, so mark the previous one as failed.
-			CreateAnalyticsEventProgression(EsparklogsAnalyticsProgressionStatus::Failed, nullptr, PArray, TEXT("starting new attempt before finishing the previous attempt"), CustomAttrs, true, nullptr, OverrideSession);
-		}
 	}
+	else
+	{
+		InProgressProgression.Remove(AttemptID);
+	}
+	WriteLock.Unlock();
+	if (Status == EsparklogsAnalyticsProgressionStatus::Started && AttemptWasInProgress)
+	{
+		// This particular progression event was already in progress and now we're trying to start again, so mark the previous one as failed first.
+		CreateAnalyticsEventProgression(EsparklogsAnalyticsProgressionStatus::Failed, nullptr, PArray, TEXT("starting new attempt before finishing the previous attempt"), CustomAttrs, true, nullptr, OverrideSession);
+	}
+	else if (Status != EsparklogsAnalyticsProgressionStatus::Started && !AttemptWasInProgress)
+	{
+		// There was no previous start event active, so we need to increment the attempt number for this new attempt (that is now finishing)
+		IncrementAttempt = true;
+	}
+	int AttemptNumber = Settings->GetAttemptNumber(AttemptID, IncrementAttempt, Status == EsparklogsAnalyticsProgressionStatus::Completed);
 
 	FString StatusStr = UEnum::GetValueAsString(Status);
 	FString EventId = StatusStr + ItemSeparator + Tiers;
@@ -3318,20 +3325,14 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventProgression(EsparklogsAnal
 		const FString& P = PArray[i];
 		if (!P.IsEmpty())
 		{
-			Data->SetStringField(FString::Printf(TEXT("%s%d"), ProgressionFieldTierPrefix, i), P);
+			Data->SetStringField(FString::Printf(TEXT("%s%d"), ProgressionFieldTierPrefix, i+1), P);
 		}
 	}
 	if (Value != nullptr)
 	{
 		Data->SetNumberField(ProgressionFieldValue, *Value);
 	}
-	if (StoreAttemptField)
-	{
-		Data->SetNumberField(ProgressionFieldAttempt, (double)AttemptNumber);
-		FScopeLock WriteLock(&DataCriticalSection);
-		InProgressProgression.Remove(AttemptID);
-		WriteLock.Unlock();
-	}
+	Data->SetNumberField(ProgressionFieldAttempt, (double)AttemptNumber);
 	if (Reason != nullptr && *Reason != 0)
 	{
 		Data->SetStringField(ProgressionFieldReason, FString(Reason));
@@ -3454,7 +3455,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventLog(EsparklogsSeverity Sev
 	{
 		Data->SetObjectField(StandardFieldCustom, CustomAttrs);
 	}
-	FinalizeAnalyticsEvent(EventTypeDesign, OverrideSession, Data);
+	FinalizeAnalyticsEvent(EventTypeLog, OverrideSession, Data);
 	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, Message, RootData, false);
 }
 
@@ -3550,6 +3551,19 @@ FString FsparklogsAnalyticsProvider::GetSessionID() const
 {
 	FScopeLock ReadLock(&DataCriticalSection);
 	return CurrentSessionID;
+}
+
+FSparkLogsAnalyticsSessionDescriptor FsparklogsAnalyticsProvider::GetSessionDescriptor()
+{
+	FScopeLock ReadLock(&DataCriticalSection);
+	if (CurrentSessionID.IsEmpty())
+	{
+		return FSparkLogsAnalyticsSessionDescriptor();
+	}
+	else
+	{
+		return FSparkLogsAnalyticsSessionDescriptor(*CurrentSessionID, SessionNumber, SessionStarted, *Settings->GetEffectiveAnalyticsUserID());
+	}
 }
 
 bool FsparklogsAnalyticsProvider::SetSessionID(const FString& InSessionID)
@@ -4082,12 +4096,12 @@ void FsparklogsAnalyticsProvider::SetupDefaultMetaAttributes()
 	MetaAttributes->SetStringField(MetaFieldPlatform, OSPlatform);
 	MetaAttributes->SetStringField(MetaFieldOSVersion, OSVersion);
 		
-	constexpr TCHAR* EngineType = TEXT("unreal ");
+	constexpr TCHAR* EngineType = TEXT("unreal-");
 	FString SDKVersion = TEXT("?");
 	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(ITL_PLUGIN_MODULE_NAME);
 	if (Plugin.IsValid())
 	{
-		SDKVersion = EngineType + Plugin->GetDescriptor().VersionName;
+		SDKVersion = FString(EngineType) + FString(TEXT("plugin-")) + Plugin->GetDescriptor().VersionName;
 	}
 	MetaAttributes->SetStringField(MetaFieldSDKVersion, SDKVersion);
 	
@@ -4173,7 +4187,7 @@ void FsparklogsModule::StartupModule()
 	Settings->LoadSettings();
 	if (Settings->AutoStart)
 	{
-		StartShippingEngine(NULL, NULL, NULL, NULL, NULL, NULL, NULL, false);
+		StartShippingEngine(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, false);
 	}
 	else
 	{
@@ -4257,7 +4271,7 @@ FString FsparklogsModule::GetGameInstanceID()
 	return GameInstanceID;
 }
 
-bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAnalyticsUserID, const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHTTPEndpointURI, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, TMap<FString, FString>* AdditionalAttributes, bool AlwaysStart)
+bool FsparklogsModule::StartShippingEngine(bool* OverrideCollectLogs, bool* OverrideCollectAnalytics, const TCHAR* OverrideAnalyticsUserID, const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHTTPEndpointURI, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, TMap<FString, FString>* AdditionalAttributes, bool AlwaysStart)
 {
 	if (EngineActive)
 	{
@@ -4271,6 +4285,20 @@ bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAnalyticsUserID,
 	if (OverrideAnalyticsUserID != nullptr && FPlatformString::Strlen(OverrideAnalyticsUserID) > 0)
 	{
 		Settings->SetUserID(OverrideAnalyticsUserID);
+	}
+	bool EffectiveCollectLogs = Settings->CollectLogs;
+	if (OverrideCollectLogs != nullptr)
+	{
+		EffectiveCollectLogs = *OverrideCollectLogs;
+		// Temporarily override the setting in memory
+		Settings->CollectLogs = EffectiveCollectLogs;
+	}
+	bool EffectiveCollectAnalytics = Settings->CollectAnalytics;
+	if (OverrideCollectAnalytics != nullptr)
+	{
+		EffectiveCollectAnalytics = *OverrideCollectAnalytics;
+		// Temporarily override the setting in memory
+		Settings->CollectAnalytics = EffectiveCollectAnalytics;
 	}
 
 	FString EffectiveAgentID = Settings->AgentID;
@@ -4323,7 +4351,7 @@ bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAnalyticsUserID,
 		return false;
 	}
 
-	if (!Settings->CollectLogs && !Settings->CollectAnalytics)
+	if (!EffectiveCollectLogs && !EffectiveCollectAnalytics)
 	{
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Log collection and analytics collection are both disabled. No reason to start engine."));
 		return false;
@@ -4335,17 +4363,17 @@ bool FsparklogsModule::StartShippingEngine(const TCHAR* OverrideAnalyticsUserID,
 	{
 		// Log all plugin messages to the ITL operations log
 		GLog->AddOutputDevice(GetITLInternalOpsLog().LogDevice.Get());
-		if (Settings->CollectLogs)
+		if (EffectiveCollectLogs)
 		{
 			// Log all engine messages to an internal log just for this plugin, which we will then read from the file as we push log data to the cloud
 			GLog->AddOutputDevice(GetITLInternalGameLog(nullptr).LogDevice.Get());
 		}
 	}
-	UE_LOG(LogPluginSparkLogs, Log, TEXT("Starting up: LaunchConfiguration=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s, CollectLogs=%s, CollectAnalytics=%s"), GetITLLaunchConfiguration(true), *EffectiveHttpEndpointURI, *EffectiveAgentID, Settings->ActivationPercentage, DiceRoll, EngineActive ? TEXT("yes") : TEXT("no"), Settings->CollectLogs ? TEXT("yes") : TEXT("no"), Settings->CollectAnalytics ? TEXT("yes") : TEXT("no"));
+	UE_LOG(LogPluginSparkLogs, Log, TEXT("Starting up: LaunchConfiguration=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s, CollectLogs=%s, CollectAnalytics=%s"), GetITLLaunchConfiguration(true), *EffectiveHttpEndpointURI, *EffectiveAgentID, Settings->ActivationPercentage, DiceRoll, EngineActive ? TEXT("yes") : TEXT("no"), EffectiveCollectLogs ? TEXT("yes") : TEXT("no"), EffectiveCollectAnalytics ? TEXT("yes") : TEXT("no"));
 	if (EngineActive)
 	{
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Ingestion parameters: RequestTimeoutSecs=%lf, BytesPerRequest=%d, ProcessingIntervalSecs=%lf, RetryIntervalSecs=%lf, UnflushedBytesToAutoFlush=%d, MinIntervalBetweenFlushes=%lf"), Settings->RequestTimeoutSecs, Settings->BytesPerRequest, Settings->ProcessingIntervalSecs, Settings->RetryIntervalSecs, (int)Settings->UnflushedBytesToAutoFlush, Settings->MinIntervalBetweenFlushes);
-		if (Settings->CollectAnalytics)
+		if (EffectiveCollectAnalytics)
 		{
 			UE_LOG(LogPluginSparkLogs, Log, TEXT("Analytics collection is active. GameID='%s' UserID='%s' PlayerID='%s'"), *Settings->AnalyticsGameID, *Settings->GetEffectiveAnalyticsUserID(), *Settings->GetEffectiveAnalyticsPlayerID());
 			// Make sure analytics provider singleton is created and make sure any previously open session from a prior game instance is cleaned up...

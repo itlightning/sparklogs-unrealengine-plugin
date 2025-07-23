@@ -13,9 +13,9 @@ The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
 
 If the Software is used to create a derivative work whose primary purpose is
-to provide logging services, any description of such derivative work
-(including but not limited to Unreal Engine plugin descriptions) must include
-the following attribution:
+to provide logging or game engine analytics services, any description of such
+derivative work (including but not limited to Unreal Engine plugin descriptions)
+must include the following attribution:
 
 "This product uses source code originally developed by IT Lightning, LLC"
 and include a reference to https://sparklogs.com.

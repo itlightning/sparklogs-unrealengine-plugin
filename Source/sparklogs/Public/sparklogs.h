@@ -103,7 +103,6 @@ public:
 	static constexpr int MinUnflushedBytesToAutoFlush = 1024 * 16;
 	static constexpr double MinMinIntervalBetweenFlushes = 1.0;
 	static constexpr double DefaultMinIntervalBetweenFlushes = 2.0;
-	static constexpr double MinProcessingIntervalSecs = 0.5;
 	static constexpr double DefaultRetryIntervalSecs = 30.0;
 	static constexpr double MinRetryIntervalSecs = 15.0;
 	// This should not be longer than 5 minutes, because the ingest dedup cache expires a few minutes later
@@ -114,10 +113,13 @@ public:
 	static constexpr bool DefaultAutoStart = true;
 	static constexpr bool DefaultAddRandomGameInstanceID = true;
 
+	static constexpr double MinServerProcessingIntervalSecs = 0.5;
 	static constexpr double DefaultServerProcessingIntervalSecs = 2.0;
+	static constexpr double MinEditorProcessingIntervalSecs = 0.5;
 	static constexpr double DefaultEditorProcessingIntervalSecs = 2.0;
 	// There could be millions of clients, so give more time for data to queue up before flushing...
-	static constexpr double DefaultClientProcessingIntervalSecs = 60.0 * 10;
+	static constexpr double MinClientProcessingIntervalSecs = 60.0 * 10;
+	static constexpr double DefaultClientProcessingIntervalSecs = 60.0 * 15;
 
 	static constexpr bool DefaultServerCollectAnalytics = true;
 	static constexpr bool DefaultServerCollectLogs = true;
@@ -299,7 +301,7 @@ public:
 	bool ServerCollectAnalytics = FsparklogsSettings::DefaultServerCollectAnalytics;
 
 	// Whether or not to collect logs on server launch configurations. Defaults to true.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Auto Start")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Collect Logs")
 	bool ServerCollectLogs = FsparklogsSettings::DefaultServerCollectLogs;
 
 	// Set to 'us' or 'eu' based on what your SparkLogs workspace is provisioned to use.
@@ -345,7 +347,7 @@ public:
 	bool EditorCollectAnalytics = FsparklogsSettings::DefaultEditorCollectAnalytics;
 
 	// Whether or not to collect logs on editor launch configurations. Defaults to true. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Auto Start")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Collect Logs")
 	bool EditorCollectLogs = FsparklogsSettings::DefaultEditorCollectLogs;
 
 	// Set to 'us' or 'eu' based on what your SparkLogs workspace is provisioned to use. [EDITOR RESTART REQUIRED]
@@ -391,7 +393,7 @@ public:
 	bool ClientCollectAnalytics = FsparklogsSettings::DefaultClientCollectAnalytics;
 
 	// Whether or not to collect logs on client launch configurations. Defaults to false.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Auto Start")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Collect Logs")
 	bool ClientCollectLogs = FsparklogsSettings::DefaultClientCollectLogs;
 
 	// Set to 'us' or 'eu' based on what your SparkLogs workspace is provisioned to use.
@@ -512,7 +514,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Bytes Per Request")
 	int32 ClientBytesPerRequest = FsparklogsSettings::DefaultBytesPerRequest;
 
-	// Target seconds between attempts to read and process a chunk.
+	// Target seconds between attempts to read and process a chunk. For efficiency, data from game clients is only flushed every few minutes or at key points like end of session.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Processing Interval in Seconds")
 	float ClientProcessingIntervalSecs = FsparklogsSettings::DefaultClientProcessingIntervalSecs;
 
@@ -817,13 +819,15 @@ protected:
   * The bare minimum to have a valid session descriptor is the session ID and user ID.
   * If available, the session number and session start time will complete the optional info.
   */
-class FSparkLogsAnalyticsSessionDescriptor {
+USTRUCT(BlueprintType)
+struct FSparkLogsAnalyticsSessionDescriptor {
+	GENERATED_USTRUCT_BODY();
+
 public:
 	FSparkLogsAnalyticsSessionDescriptor();
 	FSparkLogsAnalyticsSessionDescriptor(const TCHAR* InSessionID, const TCHAR* InUserID);
 	FSparkLogsAnalyticsSessionDescriptor(const TCHAR* InSessionID, int InSessionNumber, const TCHAR* InUserID);
 	FSparkLogsAnalyticsSessionDescriptor(const TCHAR* InSessionID, int InSessionNumber, FDateTime InSessionStarted, const TCHAR* InUserID);
-	virtual ~FSparkLogsAnalyticsSessionDescriptor();
 
 	FString SessionID;
 	int SessionNumber;
@@ -936,6 +940,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
 	static FString GetSessionID();
 
+	/** Gets the session descriptor for the current session. The SessionID in the returned descriptor will be empty if no session is active. */
+	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
+	static FSparkLogsAnalyticsSessionDescriptor GetSessionDescriptor();
+
 	/** Sets the build information about this version of the game to include in all analytics events. */
 	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
 	static void SetBuildInfo(const FString& InBuildInfo);
@@ -950,7 +958,7 @@ public:
 	  *
 	  * For example, the user might purchase additional "gems" (a virtual currency) through
 	  * a 1000 gem pack, which could be identified with an ItemCategory of "in_app_purchase"
-	  * and an Itemid of "1000_gem_pack". When a purchase occurs that generates in-game virtual
+	  * and an ItemId of "1000_gem_pack". When a purchase occurs that generates in-game virtual
 	  * currency then you should also record a Resource source event with the appropriate
 	  * virtual currency for the same ItemCategory and ItemId.
 	  *
@@ -1033,15 +1041,18 @@ public:
 
 	/** Records a progression event, which records starting, failing, or completing a certain part of
 	  * a game. Progression events form a hierarchy and can have up to N arbitrary tiers (world,
-	  * region, level, segment, etc.).
+	  * region, level, segment, etc.). Note that you do not have to record a start event for a given
+	  * event ID, you can just record failure or success events as you wish.
 	  *
 	  * Later tiers are optional and can be an empty string or nullptr, but you cannot specify a later
 	  * tier value if an earlier tier is not set.
 	  *
 	  * While there is no limit on depth or cardinality of the combination of tier values, be smart about
 	  * how many total possible values of unique progression event IDs you create based on your planned analysis.
+	  * 
+	  * Automatically computes and records the number of attempts it took to successfully complete the event.
 	  *
-	  * Design events may optionally be associated with a numeric value as well.
+	  * Progression events may optionally be associated with a numeric value as well (e.g., score).
 	  *
 	  * If you're in a server process, then you may not have an active session, and instead you want to create an
 	  * event that is associated with a session for a given client process. In that case, create a
@@ -1179,8 +1190,7 @@ public:
 	static void RecordProgressionArrayWithValueWithReasonWithAttrs(EsparklogsAnalyticsProgressionStatus Status, float Value, const TArray<FString>& PArray, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs);
 
 	/** Records a design event. EventId is a colon delimited string that forms an event hierarchy of arbitrary depth
-	  * (e.g., "quest:trial_master_sword:beginning_floors:start" or "quest:trial_master_sword:middle_floors:finish" or
-	  * "tutorial:begin").
+	  * (e.g., "addonpack:quest:trial_master_sword:unlocked" or "achievements:single_player:beat_game").
 	  *
 	  * While there is no limit on depth or cardinality of EventId, be smart about how many categories you create based
 	  * on your planned analysis.
@@ -1406,6 +1416,9 @@ public:
 	virtual void EndSession(const TCHAR* Reason);
 	virtual FString GetSessionID() const override;
 
+	/** Gets the session descriptor for the current session. The SessionID in the returned descriptor will be empty if no session is active. */
+	virtual FSparkLogsAnalyticsSessionDescriptor GetSessionDescriptor();
+
 	/** It's recommended NOT to use this and instead pass OverrideSession arguments instead to other functions. */
 	virtual bool SetSessionID(const FString& InSessionID) override;
 	virtual void FlushEvents() override;
@@ -1574,6 +1587,9 @@ public:
 	/**
 	 * Starts the log/event shipping engine if it has not yet started.
 	 * 
+	 * You can override whether or not you want to collect logs and collect analytics
+	 * by specifying a non-null value for these parameters.
+	 * 
 	 * You can override the analytics user ID (normally we generate automatically) if desired
 	 * by specifying a non-null, non-empty value. Any custom analytics user ID should be globally
 	 * unique and make sure to respect any privacy rules for your app.
@@ -1595,7 +1611,7 @@ public:
 	 *
 	 * Returns true if the shipping engine was activated (may be false if diceroll + ActivationPercentage caused it to not start).
 	 */
-	bool StartShippingEngine(const TCHAR* OverrideAnalyticsUserID, const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHTTPEndpointURI, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, TMap<FString, FString>* AdditionalAttributes, bool AlwaysStart);
+	bool StartShippingEngine(bool* OverrideCollectLogs, bool* OverrideCollectAnalytics, const TCHAR* OverrideAnalyticsUserID, const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHTTPEndpointURI, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, TMap<FString, FString>* AdditionalAttributes, bool AlwaysStart);
 
 	/** Stops the log/event shipping engine. Any active analytics session (if any) will end. It will not start again unless StartShippingEngine is manually called. */
 	void StopShippingEngine();
