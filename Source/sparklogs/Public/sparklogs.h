@@ -84,11 +84,11 @@ SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length);
 class SPARKLOGS_API FsparklogsSettings
 {
 public:
-	static const TCHAR* PluginStateSection;
+	static constexpr const TCHAR* PluginStateSection = TEXT("PluginState");
 
-	static constexpr TCHAR* AnalyticsUserIDTypeDeviceID = TEXT("device_id");
-	static constexpr TCHAR* AnalyticsUserIDTypeGenerated = TEXT("generated");
-	static constexpr TCHAR* DefaultAnalyticsUserIDType = AnalyticsUserIDTypeDeviceID;
+	static constexpr const TCHAR* AnalyticsUserIDTypeDeviceID = TEXT("device_id");
+	static constexpr const TCHAR* AnalyticsUserIDTypeGenerated = TEXT("generated");
+	static constexpr const TCHAR* DefaultAnalyticsUserIDType = AnalyticsUserIDTypeDeviceID;
 	static constexpr bool DefaultAnalyticsMobileAutoSessionStart = true;
 	static constexpr bool DefaultAnalyticsMobileAutoSessionEnd = true;
 
@@ -132,9 +132,9 @@ public:
 	static constexpr bool DefaultEditorDebugLogForAnalyticsEvents = true;
 	static constexpr bool DefaultClientDebugLogForAnalyticsEvents = false;
 
-	static constexpr TCHAR* AnalyticsLastSessionID = TEXT("AnalyticsLastSessionID");
-	static constexpr TCHAR* AnalyticsLastSessionStarted = TEXT("AnalyticsLastSessionStarted");
-	static constexpr TCHAR* AnalyticsLastWrittenKey = TEXT("AnalyticsLastWritten");
+	static constexpr const TCHAR* AnalyticsLastSessionID = TEXT("AnalyticsLastSessionID");
+	static constexpr const TCHAR* AnalyticsLastSessionStarted = TEXT("AnalyticsLastSessionStarted");
+	static constexpr const TCHAR* AnalyticsLastWrittenKey = TEXT("AnalyticsLastWritten");
 
 	/** The game ID to use for analytics. If set, will also be added to log events. */
 	FString AnalyticsGameID;
@@ -620,7 +620,7 @@ public:
 class SPARKLOGS_API FsparklogsReadAndStreamToCloud : public FRunnable
 {
 protected:
-	static const TCHAR* ProgressMarkerValue;
+	static constexpr const TCHAR* ProgressMarkerValue = TEXT("ShippedLogOffset");
 
 	TWeakPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> WeakThisPtr;
 	TSharedRef<FsparklogsSettings> Settings;
@@ -1293,92 +1293,92 @@ public:
 class SPARKLOGS_API FsparklogsAnalyticsProvider : public IAnalyticsProvider
 {
 public:	
-	static constexpr TCHAR* RootAnalyticsFieldName = TEXT("g_analytics");
+	static constexpr const TCHAR* RootAnalyticsFieldName = TEXT("g_analytics");
 
-	static constexpr TCHAR* StandardFieldEventType = TEXT("type");
-	static constexpr TCHAR* EventTypeSessionStart = TEXT("session_start");
-	static constexpr TCHAR* EventTypeSessionEnd = TEXT("session_end");
-	static constexpr TCHAR* EventTypePurchase = TEXT("purchase");
-	static constexpr TCHAR* EventTypeResource = TEXT("resource");
-	static constexpr TCHAR* EventTypeProgression = TEXT("progression");
-	static constexpr TCHAR* EventTypeDesign = TEXT("design");
-	static constexpr TCHAR* EventTypeLog = TEXT("log");
+	static constexpr const TCHAR* StandardFieldEventType = TEXT("type");
+	static constexpr const TCHAR* EventTypeSessionStart = TEXT("session_start");
+	static constexpr const TCHAR* EventTypeSessionEnd = TEXT("session_end");
+	static constexpr const TCHAR* EventTypePurchase = TEXT("purchase");
+	static constexpr const TCHAR* EventTypeResource = TEXT("resource");
+	static constexpr const TCHAR* EventTypeProgression = TEXT("progression");
+	static constexpr const TCHAR* EventTypeDesign = TEXT("design");
+	static constexpr const TCHAR* EventTypeLog = TEXT("log");
 
-	static constexpr TCHAR* StandardFieldSessionId = TEXT("session_id");
-	static constexpr TCHAR* StandardFieldSessionNumber = TEXT("session_num");
-	static constexpr TCHAR* StandardFieldSessionStarted = TEXT("session_started");
-	static constexpr TCHAR* StandardFieldGameId = TEXT("game_id");
-	static constexpr TCHAR* StandardFieldUserId = TEXT("user_id");
-	static constexpr TCHAR* StandardFieldPlayerId = TEXT("player_id");
-	static constexpr TCHAR* StandardFieldFirstInstalled = TEXT("first_installed");
-	static constexpr TCHAR* StandardFieldMeta = TEXT("meta");
-	static constexpr TCHAR* StandardFieldCustom = TEXT("custom");
+	static constexpr const TCHAR* StandardFieldSessionId = TEXT("session_id");
+	static constexpr const TCHAR* StandardFieldSessionNumber = TEXT("session_num");
+	static constexpr const TCHAR* StandardFieldSessionStarted = TEXT("session_started");
+	static constexpr const TCHAR* StandardFieldGameId = TEXT("game_id");
+	static constexpr const TCHAR* StandardFieldUserId = TEXT("user_id");
+	static constexpr const TCHAR* StandardFieldPlayerId = TEXT("player_id");
+	static constexpr const TCHAR* StandardFieldFirstInstalled = TEXT("first_installed");
+	static constexpr const TCHAR* StandardFieldMeta = TEXT("meta");
+	static constexpr const TCHAR* StandardFieldCustom = TEXT("custom");
 
-	static constexpr TCHAR* SessionStartFieldReason = TEXT("reason");
+	static constexpr const TCHAR* SessionStartFieldReason = TEXT("reason");
 
-	static constexpr TCHAR* SessionEndFieldSessionEnded = TEXT("session_ended");
-	static constexpr TCHAR* SessionEndFieldSessionDurationSecs = TEXT("session_duration_secs");
-	static constexpr TCHAR* SessionEndFieldReason = TEXT("reason");
+	static constexpr const TCHAR* SessionEndFieldSessionEnded = TEXT("session_ended");
+	static constexpr const TCHAR* SessionEndFieldSessionDurationSecs = TEXT("session_duration_secs");
+	static constexpr const TCHAR* SessionEndFieldReason = TEXT("reason");
 
-	static constexpr TCHAR* MetaFieldPlatform = TEXT("platform");
-	static constexpr TCHAR* MetaFieldOSVersion = TEXT("os_version");
-	static constexpr TCHAR* MetaFieldSDKVersion = TEXT("sdk_version");
-	static constexpr TCHAR* MetaFieldEngineVersion = TEXT("engine_version");
-	static constexpr TCHAR* MetaFieldBuild = TEXT("build");
-	static constexpr TCHAR* MetaFieldDeviceMake = TEXT("device_make");
-	static constexpr TCHAR* MetaFieldDeviceModel = TEXT("device_model");
-	static constexpr TCHAR* MetaFieldConnectionType = TEXT("connection_type");
-	static constexpr TCHAR* MetaFieldGender = TEXT("gender");
-	static constexpr TCHAR* MetaFieldLocation = TEXT("location");
-	static constexpr TCHAR* MetaFieldAge = TEXT("age");
+	static constexpr const TCHAR* MetaFieldPlatform = TEXT("platform");
+	static constexpr const TCHAR* MetaFieldOSVersion = TEXT("os_version");
+	static constexpr const TCHAR* MetaFieldSDKVersion = TEXT("sdk_version");
+	static constexpr const TCHAR* MetaFieldEngineVersion = TEXT("engine_version");
+	static constexpr const TCHAR* MetaFieldBuild = TEXT("build");
+	static constexpr const TCHAR* MetaFieldDeviceMake = TEXT("device_make");
+	static constexpr const TCHAR* MetaFieldDeviceModel = TEXT("device_model");
+	static constexpr const TCHAR* MetaFieldConnectionType = TEXT("connection_type");
+	static constexpr const TCHAR* MetaFieldGender = TEXT("gender");
+	static constexpr const TCHAR* MetaFieldLocation = TEXT("location");
+	static constexpr const TCHAR* MetaFieldAge = TEXT("age");
 
-	static constexpr TCHAR* PurchaseFieldEventId = TEXT("event_id");
-	static constexpr TCHAR* PurchaseFieldEventIdParts = TEXT("event_ids");
-	static constexpr TCHAR* PurchaseFieldItemCategory = TEXT("item_category");
-	static constexpr TCHAR* PurchaseFieldItemId = TEXT("item_id");
-	static constexpr TCHAR* PurchaseFieldCurrency = TEXT("currency");
-	static constexpr TCHAR* PurchaseFieldAmount = TEXT("amount");
-	static constexpr TCHAR* PurchaseFieldReason = TEXT("reason");
+	static constexpr const TCHAR* PurchaseFieldEventId = TEXT("event_id");
+	static constexpr const TCHAR* PurchaseFieldEventIdParts = TEXT("event_ids");
+	static constexpr const TCHAR* PurchaseFieldItemCategory = TEXT("item_category");
+	static constexpr const TCHAR* PurchaseFieldItemId = TEXT("item_id");
+	static constexpr const TCHAR* PurchaseFieldCurrency = TEXT("currency");
+	static constexpr const TCHAR* PurchaseFieldAmount = TEXT("amount");
+	static constexpr const TCHAR* PurchaseFieldReason = TEXT("reason");
 
-	static constexpr TCHAR* ResourceFieldEventId = TEXT("event_id");
-	static constexpr TCHAR* ResourceFieldEventIdParts = TEXT("event_ids");
-	static constexpr TCHAR* ResourceFieldFlowType = TEXT("flow_type");
-	static constexpr TCHAR* ResourceFieldVirtualCurrency = TEXT("virtual_currency");
-	static constexpr TCHAR* ResourceFieldItemCategory = TEXT("item_category");
-	static constexpr TCHAR* ResourceFieldItemId = TEXT("item_id");
-	static constexpr TCHAR* ResourceFieldAmount = TEXT("amount");
-	static constexpr TCHAR* ResourceFieldReason = TEXT("reason");
+	static constexpr const TCHAR* ResourceFieldEventId = TEXT("event_id");
+	static constexpr const TCHAR* ResourceFieldEventIdParts = TEXT("event_ids");
+	static constexpr const TCHAR* ResourceFieldFlowType = TEXT("flow_type");
+	static constexpr const TCHAR* ResourceFieldVirtualCurrency = TEXT("virtual_currency");
+	static constexpr const TCHAR* ResourceFieldItemCategory = TEXT("item_category");
+	static constexpr const TCHAR* ResourceFieldItemId = TEXT("item_id");
+	static constexpr const TCHAR* ResourceFieldAmount = TEXT("amount");
+	static constexpr const TCHAR* ResourceFieldReason = TEXT("reason");
 
-	static constexpr TCHAR* ProgressionFieldEventId = TEXT("event_id");
-	static constexpr TCHAR* ProgressionFieldEventIdParts = TEXT("event_ids");
-	static constexpr TCHAR* ProgressionFieldStatus = TEXT("status");
-	static constexpr TCHAR* ProgressionFieldTiersString = TEXT("tiers");
-	static constexpr TCHAR* ProgressionFieldTiersArray = TEXT("tiers_array");
-	static constexpr TCHAR* ProgressionFieldTierPrefix = TEXT("tier");
-	static constexpr TCHAR* ProgressionFieldAttempt = TEXT("attempt");
-	static constexpr TCHAR* ProgressionFieldValue = TEXT("value");
-	static constexpr TCHAR* ProgressionFieldReason = TEXT("reason");
+	static constexpr const TCHAR* ProgressionFieldEventId = TEXT("event_id");
+	static constexpr const TCHAR* ProgressionFieldEventIdParts = TEXT("event_ids");
+	static constexpr const TCHAR* ProgressionFieldStatus = TEXT("status");
+	static constexpr const TCHAR* ProgressionFieldTiersString = TEXT("tiers");
+	static constexpr const TCHAR* ProgressionFieldTiersArray = TEXT("tiers_array");
+	static constexpr const TCHAR* ProgressionFieldTierPrefix = TEXT("tier");
+	static constexpr const TCHAR* ProgressionFieldAttempt = TEXT("attempt");
+	static constexpr const TCHAR* ProgressionFieldValue = TEXT("value");
+	static constexpr const TCHAR* ProgressionFieldReason = TEXT("reason");
 
-	static constexpr TCHAR* DesignFieldEventId = TEXT("event_id");
-	static constexpr TCHAR* DesignFieldEventIdParts = TEXT("event_ids");
-	static constexpr TCHAR* DesignFieldValue = TEXT("value");
-	static constexpr TCHAR* DesignFieldReason = TEXT("reason");
+	static constexpr const TCHAR* DesignFieldEventId = TEXT("event_id");
+	static constexpr const TCHAR* DesignFieldEventIdParts = TEXT("event_ids");
+	static constexpr const TCHAR* DesignFieldValue = TEXT("value");
+	static constexpr const TCHAR* DesignFieldReason = TEXT("reason");
 
-	static constexpr TCHAR* LogFieldSeverity = TEXT("severity");
-	static constexpr TCHAR* LogFieldReason = TEXT("reason");
+	static constexpr const TCHAR* LogFieldSeverity = TEXT("severity");
+	static constexpr const TCHAR* LogFieldReason = TEXT("reason");
 
-	static constexpr TCHAR* MessageHeader = TEXT("GAME_ENGINE_ANALYTICS");
-	static constexpr TCHAR* ItemSeparator = TEXT(":");
+	static constexpr const TCHAR* MessageHeader = TEXT("GAME_ENGINE_ANALYTICS");
+	static constexpr const TCHAR* ItemSeparator = TEXT(":");
 
-	static constexpr TCHAR* RecordEventGenericEventId = TEXT("generic");
-	static constexpr TCHAR* RecordItemPurchasePerItemCost = TEXT("per_item_cost");
-	static constexpr TCHAR* RecordItemPurchaseItemQuantity = TEXT("item_quantity");
-	static constexpr TCHAR* RecordItemPurchaseItemCategory = TEXT("item_purchase");
-	static constexpr TCHAR* RecordCurrencyPurchasePaymentProvider = TEXT("payment_provider");
-	static constexpr TCHAR* RecordCurrencyPurchasePurchaseItemCategory = TEXT("game_currency");
-	static constexpr TCHAR* RecordCurrencyPurchaseResourceItemCategory = TEXT("currency_purchase");
-	static constexpr TCHAR* RecordCurrencyGivenItemCategory = TEXT("currency_given");
-	static constexpr TCHAR* const RecordProgressDelimiters[2] = { TEXT(":"), TEXT(".") };
+	static constexpr const TCHAR* RecordEventGenericEventId = TEXT("generic");
+	static constexpr const TCHAR* RecordItemPurchasePerItemCost = TEXT("per_item_cost");
+	static constexpr const TCHAR* RecordItemPurchaseItemQuantity = TEXT("item_quantity");
+	static constexpr const TCHAR* RecordItemPurchaseItemCategory = TEXT("item_purchase");
+	static constexpr const TCHAR* RecordCurrencyPurchasePaymentProvider = TEXT("payment_provider");
+	static constexpr const TCHAR* RecordCurrencyPurchasePurchaseItemCategory = TEXT("game_currency");
+	static constexpr const TCHAR* RecordCurrencyPurchaseResourceItemCategory = TEXT("currency_purchase");
+	static constexpr const TCHAR* RecordCurrencyGivenItemCategory = TEXT("currency_given");
+	static const TCHAR* const RecordProgressDelimiters[2];
 
 public:
 	FsparklogsAnalyticsProvider(TSharedRef<FsparklogsSettings> InSettings);
@@ -1537,7 +1537,7 @@ class SPARKLOGS_API FsparklogsModule : public IAnalyticsProviderModule
 {
 public:
 	static constexpr const TCHAR* OverrideAutoExtractDisabled = TEXT("__autoextract_disabled");
-	static constexpr TCHAR* DebugForAnalyticsEventsPrefix = TEXT("ANALYTICS_DEBUG");
+	static constexpr const TCHAR* DebugForAnalyticsEventsPrefix = TEXT("ANALYTICS_DEBUG");
 
 public:
 	/**

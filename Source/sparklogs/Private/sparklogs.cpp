@@ -395,8 +395,6 @@ SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length)
 
 // =============== FsparklogsSettings ===============================================================================
 
-const TCHAR* FsparklogsSettings::PluginStateSection = TEXT("PluginState");
-
 FsparklogsSettings::FsparklogsSettings()
 	: AnalyticsUserIDType(ITLAnalyticsUserIDType::DeviceID)
 	, AnalyticsMobileAutoSessionStart(DefaultAnalyticsMobileAutoSessionStart)
@@ -475,7 +473,7 @@ FString FsparklogsSettings::GetEffectiveAnalyticsUserID()
 	// If another method hasn't given us a valid ID yet, then see if we have already saved a previously generated one, and if not, generate and save a new one.
 	if (!IsValidDeviceID(NewID))
 	{
-		constexpr TCHAR* UserIDKey = TEXT("AnalyticsUserID");
+		constexpr const TCHAR* UserIDKey = TEXT("AnalyticsUserID");
 		NewID = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, UserIDKey, GGameUserSettingsIni);
 		NewID.TrimStartAndEndInline();
 		if (NewID.IsEmpty())
@@ -527,7 +525,7 @@ FDateTime FsparklogsSettings::GetEffectiveAnalyticsInstallTime()
 	{
 		return CachedAnalyticsInstallTime;
 	}
-	constexpr TCHAR* InstallTimeKey = TEXT("AnalyticsInstallTime");
+	constexpr const TCHAR* InstallTimeKey = TEXT("AnalyticsInstallTime");
 	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, InstallTimeKey, GGameUserSettingsIni);
 	TimeStr.TrimStartAndEndInline();
 	FDateTime InstallTime = ITLParseDateTime(TimeStr);
@@ -553,7 +551,7 @@ void FsparklogsSettings::SetUserID(const TCHAR* UserID)
 
 int FsparklogsSettings::GetSessionNumber(bool Increment)
 {
-	constexpr TCHAR* Key = TEXT("AnalyticsSessionNumber");
+	constexpr const TCHAR* Key = TEXT("AnalyticsSessionNumber");
 	bool Changed = false;
 	FScopeLock WriteLock(&CachedCriticalSection);
 	if (CachedAnalyticsSessionNumber <= 0)
@@ -580,7 +578,7 @@ int FsparklogsSettings::GetSessionNumber(bool Increment)
 
 int FsparklogsSettings::GetTransactionNumber(bool Increment)
 {
-	constexpr TCHAR* Key = TEXT("AnalyticsTransactionNumber");
+	constexpr const TCHAR* Key = TEXT("AnalyticsTransactionNumber");
 	bool Changed = false;
 	FScopeLock WriteLock(&CachedCriticalSection);
 	if (CachedAnalyticsTransactionNumber <= 0)
@@ -1213,8 +1211,6 @@ void FsparklogsStressGenerator::Stop()
 }
 
 // =============== FsparklogsReadAndStreamToCloud ===============================================================================
-
-const TCHAR* FsparklogsReadAndStreamToCloud::ProgressMarkerValue = TEXT("ShippedLogOffset");
 
 void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMetadata, const TCHAR* GameInstanceID, TMap<FString, FString>* AdditionalAttributes)
 {
@@ -3020,6 +3016,8 @@ void UsparklogsAnalytics::RecordLogWithReasonWithAttr(EsparklogsSeverity Severit
 
 // =============== FsparklogsAnalyticsProvider ===============================================================================
 
+const TCHAR* const FsparklogsAnalyticsProvider::RecordProgressDelimiters[2] = { TEXT(":"), TEXT(".") };
+
 FsparklogsAnalyticsProvider::FsparklogsAnalyticsProvider(TSharedRef<FsparklogsSettings> InSettings)
 	: Settings(InSettings)
 	, SessionStarted(ITLEmptyDateTime)
@@ -3682,7 +3680,7 @@ void FsparklogsAnalyticsProvider::RecordItemPurchase(const FString& ItemId, int 
 	FString VirtualCurrency;
 	FString ItemCategory;
 	double Amount = (double)ItemQuantity;
-	for (const auto A : EventAttrs)
+	for (const FAnalyticsEventAttribute& A : EventAttrs)
 	{
 		if (0 == A.GetName().Compare(TEXT("itemcategory"), ESearchCase::IgnoreCase)
 			|| 0 == A.GetName().Compare(TEXT("item_category"), ESearchCase::IgnoreCase)
@@ -3736,7 +3734,7 @@ void FsparklogsAnalyticsProvider::RecordCurrencyPurchase(const FString& GameCurr
 		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
 		AddAnalyticsEventAttributesToJsonObject(CustomObject, EventAttrs);
 	}
-	for (const auto A : EventAttrs)
+	for (const FAnalyticsEventAttribute& A : EventAttrs)
 	{
 		if (0 == A.GetName().Compare(TEXT("currency"), ESearchCase::IgnoreCase)
 			|| 0 == A.GetName().Compare(TEXT("real_currency"), ESearchCase::IgnoreCase))
@@ -3812,7 +3810,7 @@ void FsparklogsAnalyticsProvider::RecordProgress(const FString& ProgressType, co
 	}
 	double* ValuePtr = nullptr;
 	double Value = 0.0;
-	for (const auto A : EventAttrs)
+	for (const FAnalyticsEventAttribute& A : EventAttrs)
 	{
 		if (0 == A.GetName().Compare(TEXT("value"), ESearchCase::IgnoreCase)
 			|| 0 == A.GetName().Compare(TEXT("amount"), ESearchCase::IgnoreCase)
@@ -4141,7 +4139,7 @@ void FsparklogsAnalyticsProvider::SetupDefaultMetaAttributes()
 	MetaAttributes->SetStringField(MetaFieldPlatform, OSPlatform);
 	MetaAttributes->SetStringField(MetaFieldOSVersion, OSVersion);
 		
-	constexpr TCHAR* EngineType = TEXT("unreal-");
+	constexpr const TCHAR* EngineType = TEXT("unreal-");
 	FString SDKVersion = TEXT("?");
 	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(ITL_PLUGIN_MODULE_NAME);
 	if (Plugin.IsValid())
