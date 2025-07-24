@@ -10,7 +10,7 @@
 #include "Misc/OutputDeviceHelper.h"
 #include "Misc/SecureHash.h"
 #include "ISettingsModule.h"
-#include "IPluginManager.h"
+#include "Interfaces/IPluginManager.h"
 #include "HAL/ThreadManager.h"
 #include "Runtime/Launch/Resources/Version.h"
 
@@ -2732,6 +2732,7 @@ void UsparklogsAnalytics::RecordProgressionArrayWithAttrs(EsparklogsAnalyticsPro
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
 	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
 		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
 	}
 	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, nullptr, PArray, nullptr, CustomObject);
@@ -2747,6 +2748,7 @@ void UsparklogsAnalytics::RecordProgressionArrayWithReasonWithAttrs(EsparklogsAn
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
 	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
 		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
 	}
 	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventProgression(Status, nullptr, PArray, *Reason, CustomObject);
@@ -2763,6 +2765,7 @@ void UsparklogsAnalytics::RecordProgressionArrayWithValueWithAttrs(EsparklogsAna
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
 	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
 		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
 	}
 	double ValueDouble = Value;
@@ -2780,6 +2783,7 @@ void UsparklogsAnalytics::RecordProgressionArrayWithValueWithReasonWithAttrs(Esp
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
 	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
 		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
 	}
 	double ValueDouble = Value;
@@ -2917,6 +2921,7 @@ void UsparklogsAnalytics::RecordDesignArrayWithValueWithAttr(const TArray<FStrin
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
 	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
 		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
 	}
 	double ValueDouble = Value;
@@ -2934,6 +2939,7 @@ void UsparklogsAnalytics::RecordDesignArrayWithValueWithReasonWithAttr(const TAr
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
 	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
 		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
 	}
 	double ValueDouble = Value;
@@ -2950,6 +2956,7 @@ void UsparklogsAnalytics::RecordDesignArrayWithAttr(const TArray<FString>& Event
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
 	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
 		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
 	}
 	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, nullptr, nullptr, CustomObject);
@@ -2965,6 +2972,7 @@ void UsparklogsAnalytics::RecordDesignArrayWithReasonWithAttr(const TArray<FStri
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
 	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
 		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
 	}
 	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, nullptr, *Reason, CustomObject);
@@ -3097,6 +3105,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventPurchase(const TCHAR* Item
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
 	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
 		AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
 	}
 	return CreateAnalyticsEventPurchase(ItemCategory, ItemId, RealCurrencyCode, Amount, Reason, CustomObject, IncludeDefaultMessage, ExtraMessage, OverrideSession);
@@ -3124,7 +3133,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventResource(EsparklogsAnalyti
 	}
 
 	TSharedPtr<FJsonObject> Data(new FJsonObject());
-	FString FlowTypeStr = UEnum::GetValueAsString(FlowType);
+	FString FlowTypeStr = UEnum::GetDisplayValueAsText(FlowType).ToString();
 	Data->SetStringField(ResourceFieldFlowType, FlowTypeStr);
 	Data->SetStringField(ResourceFieldVirtualCurrency, VirtualCurrency);
 	FString EventID = (FlowTypeStr + ItemSeparator) + VirtualCurrency;
@@ -3178,6 +3187,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventResource(EsparklogsAnalyti
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
 	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
 		AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
 	}
 	return CreateAnalyticsEventResource(FlowType, Amount, VirtualCurrency, ItemCategory, ItemId, Reason, CustomObject, IncludeDefaultMessage, ExtraMessage, OverrideSession);
@@ -3243,6 +3253,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventProgression(EsparklogsAnal
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
 	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
 		AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
 	}
 	return CreateAnalyticsEventProgression(Status, Value, P1, P2, P3, P4, P5, Reason, CustomObject, IncludeDefaultMessage, ExtraMessage, OverrideSession);
@@ -3264,6 +3275,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventProgression(EsparklogsAnal
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
 	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
 		AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
 	}
 	return CreateAnalyticsEventProgression(Status, P1, P2, P3, P4, P5, Reason, CustomObject, IncludeDefaultMessage, ExtraMessage, OverrideSession);
@@ -3306,7 +3318,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventProgression(EsparklogsAnal
 	}
 	int AttemptNumber = Settings->GetAttemptNumber(AttemptID, IncrementAttempt, Status == EsparklogsAnalyticsProgressionStatus::Completed);
 
-	FString StatusStr = UEnum::GetValueAsString(Status);
+	FString StatusStr = UEnum::GetDisplayValueAsText(Status).ToString();
 	FString EventId = StatusStr + ItemSeparator + Tiers;
 	TArray<TSharedPtr<FJsonValue>> EventIdParts;
 	EventIdParts.Add(TSharedPtr<FJsonValue>(new FJsonValueString(StatusStr)));
@@ -3367,6 +3379,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TCHAR* EventI
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
 	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
 		AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
 	}
 	return CreateAnalyticsEventDesign(EventId, Value, Reason, CustomObject, IncludeDefaultMessage, ExtraMessage, OverrideSession);
@@ -3389,6 +3402,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TCHAR* EventI
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
 	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
 		AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
 	}
 	return CreateAnalyticsEventDesign(EventId, Reason, CustomObject, IncludeDefaultMessage, ExtraMessage, OverrideSession);
@@ -3445,7 +3459,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventLog(EsparklogsSeverity Sev
 		return false;
 	}
 	TSharedPtr<FJsonObject> RootData(new FJsonObject());
-	RootData->SetStringField(LogFieldSeverity, UEnum::GetValueAsString(Severity));
+	RootData->SetStringField(LogFieldSeverity, UEnum::GetDisplayValueAsText(Severity).ToString());
 	TSharedPtr<FJsonObject> Data(new FJsonObject());
 	if (Reason != nullptr && *Reason != 0)
 	{
@@ -3464,6 +3478,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventLog(EsparklogsSeverity Sev
 	TSharedPtr<FJsonObject> CustomObject;
 	if (CustomAttrs.Num() > 0)
 	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
 		AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
 	}
 	return CreateAnalyticsEventLog(Severity, Message, Reason, CustomObject, OverrideSession);
@@ -3646,7 +3661,11 @@ void FsparklogsAnalyticsProvider::RecordEvent(const FString& EventName, const TA
 		EffectiveEventId = RecordEventGenericEventId;
 	}
 	TSharedPtr<FJsonObject> CustomObject;
-	AddAnalyticsEventAttributesToJsonObject(CustomObject, Attributes);
+	if (Attributes.Num() > 0)
+	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
+		AddAnalyticsEventAttributesToJsonObject(CustomObject, Attributes);
+	}
 	CreateAnalyticsEventDesign(*EffectiveEventId, nullptr, CustomObject);
 }
 
@@ -3712,7 +3731,11 @@ void FsparklogsAnalyticsProvider::RecordCurrencyPurchase(const FString& GameCurr
 	bool FoundCost = false;
 	double Cost=0.0;
 	TSharedPtr<FJsonObject> CustomObject;
-	AddAnalyticsEventAttributesToJsonObject(CustomObject, EventAttrs);
+	if (EventAttrs.Num() > 0)
+	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
+		AddAnalyticsEventAttributesToJsonObject(CustomObject, EventAttrs);
+	}
 	for (const auto A : EventAttrs)
 	{
 		if (0 == A.GetName().Compare(TEXT("currency"), ESearchCase::IgnoreCase)
@@ -3737,14 +3760,22 @@ void FsparklogsAnalyticsProvider::RecordCurrencyPurchase(const FString& GameCurr
 void FsparklogsAnalyticsProvider::RecordCurrencyGiven(const FString& GameCurrencyType, int GameCurrencyAmount, const TArray<FAnalyticsEventAttribute>& EventAttrs)
 {
 	TSharedPtr<FJsonObject> CustomObject;
-	AddAnalyticsEventAttributesToJsonObject(CustomObject, EventAttrs);
+	if (EventAttrs.Num() > 0)
+	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
+		AddAnalyticsEventAttributesToJsonObject(CustomObject, EventAttrs);
+	}
 	CreateAnalyticsEventResource(EsparklogsAnalyticsFlowType::Source, (double)GameCurrencyAmount, *GameCurrencyType, RecordCurrencyGivenItemCategory, nullptr, nullptr, CustomObject);
 }
 
 void FsparklogsAnalyticsProvider::RecordError(const FString& Error, const TArray<FAnalyticsEventAttribute>& EventAttrs)
 {
 	TSharedPtr<FJsonObject> CustomObject;
-	AddAnalyticsEventAttributesToJsonObject(CustomObject, EventAttrs);
+	if (EventAttrs.Num() > 0)
+	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
+		AddAnalyticsEventAttributesToJsonObject(CustomObject, EventAttrs);
+	}
 	CreateAnalyticsEventLog(EsparklogsSeverity::Error, *Error, nullptr, CustomObject);
 }
 
@@ -3792,7 +3823,11 @@ void FsparklogsAnalyticsProvider::RecordProgress(const FString& ProgressType, co
 		}
 	}
 	TSharedPtr<FJsonObject> CustomObject;
-	AddAnalyticsEventAttributesToJsonObject(CustomObject, EventAttrs);
+	if (EventAttrs.Num() > 0)
+	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
+		AddAnalyticsEventAttributesToJsonObject(CustomObject, EventAttrs);
+	}
 	CreateAnalyticsEventProgression(Status, ValuePtr, ProgressHierarchy, nullptr, CustomObject);
 }
 
@@ -4077,6 +4112,16 @@ void FsparklogsAnalyticsProvider::AddAnalyticsEventAttributeToJsonObject(const T
 	if (!Object.IsValid())
 	{
 		return;
+	}
+	if (Attr.Value.Len() >= 2 && Attr.Value[0] == TEXT('{') && Attr.Value[Attr.Value.Len() - 1] == TEXT('}'))
+	{
+		TSharedPtr<FJsonValue> FragmentValue;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Attr.Value);
+		if (FJsonSerializer::Deserialize(Reader, FragmentValue) && FragmentValue.IsValid())
+		{
+			Object->SetField(Attr.Key, FragmentValue);
+			return;
+		}
 	}
 	Object->SetStringField(Attr.Key, Attr.Value);
 }
