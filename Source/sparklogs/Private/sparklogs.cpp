@@ -81,7 +81,11 @@ bool ITLFStringTrimCharStartEndInline(FString& s, TCHAR c)
 	}
 	if (Removed)
 	{
+#if (ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4))
+		s.MidInline(Start, NewLength - Start, EAllowShrinking::No);
+#else
 		s.MidInline(Start, NewLength - Start, false);
+#endif
 	}
 	return Removed;
 }
@@ -105,7 +109,11 @@ void ITLGetOSPlatformVersion(FString& OutPlatform, FString& OutMajorVersion)
 	int FirstSpace = OSPlatform.Find(TEXT(" "));
 	if (FirstSpace != INDEX_NONE)
 	{
+#if (ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4))
+		OSPlatform.LeftInline(FirstSpace, EAllowShrinking::No);
+#else
 		OSPlatform.LeftInline(FirstSpace, false);
+#endif
 	}
 	OSPlatform.ToLowerInline();
 
@@ -118,7 +126,11 @@ void ITLGetOSPlatformVersion(FString& OutPlatform, FString& OutMajorVersion)
 		Period = OSRawVersion.Find(".", ESearchCase::IgnoreCase, ESearchDir::FromStart, Period + 1);
 		if (Period != INDEX_NONE)
 		{
+#if (ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4))
+			OSRawVersion.LeftInline(Period, EAllowShrinking::No);
+#else
 			OSRawVersion.LeftInline(Period, false);
+#endif
 		}
 	}
 
@@ -357,7 +369,11 @@ bool ITLCompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen
 			return false;
 		}
 		CompressedBufSize = (int32)ITLLZ4::LZ4_compressBound(InDataLen);
+#if (ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4))
+		OutData.SetNumUninitialized(CompressedBufSize, EAllowShrinking::No);
+#else
 		OutData.SetNumUninitialized(CompressedBufSize, false);
+#endif
 		if (InDataLen <= 0)
 		{
 			// no-op
@@ -368,10 +384,18 @@ bool ITLCompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen
 		{
 			return false;
 		}
+#if (ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4))
+		OutData.SetNumUninitialized(CompressedSize, EAllowShrinking::No);
+#else
 		OutData.SetNumUninitialized(CompressedSize, false);
+#endif
 		return true;
 	case ITLCompressionMode::None:
+#if (ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4))
+		OutData.SetNumUninitialized(0, EAllowShrinking::No);
+#else
 		OutData.SetNumUninitialized(0, false);
+#endif
 		OutData.Append(InData, (int32)InDataLen);
 		return true;
 	default:
@@ -385,7 +409,11 @@ bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InData, int InDataL
 	switch (Mode)
 	{
 	case ITLCompressionMode::LZ4:
+#if (ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4))
+		OutData.SetNumUninitialized(InOriginalDataLen, EAllowShrinking::No);
+#else
 		OutData.SetNumUninitialized(InOriginalDataLen, false);
+#endif
 		if (InOriginalDataLen <= 0)
 		{
 			// no-op
@@ -396,10 +424,18 @@ bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InData, int InDataL
 		{
 			return false;
 		}
+#if (ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4))
+		OutData.SetNumUninitialized(DecompressedBytes, EAllowShrinking::No);
+#else
 		OutData.SetNumUninitialized(DecompressedBytes, false);
+#endif
 		return true;
 	case ITLCompressionMode::None:
+#if (ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4))
+		OutData.SetNumUninitialized(0, EAllowShrinking::No);
+#else
 		OutData.SetNumUninitialized(0, false);
+#endif
 		OutData.Append(InData, (int32)InDataLen);
 		return true;
 	default:
@@ -1330,9 +1366,13 @@ void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMe
 	{
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Common event JSON computed. unreal_engine_common_event_data={%s}"), *CommonEventJSON);
 		int64 CommonEventJSONLen = FTCHARToUTF8_Convert::ConvertedLength(*CommonEventJSON, CommonEventJSON.Len());
+#if (ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4))
+		CommonEventJSONData.SetNum(0, EAllowShrinking::No);
+#else
 		CommonEventJSONData.SetNum(0, false);
+#endif
 		CommonEventJSONData.AddUninitialized(CommonEventJSONLen);
-		FTCHARToUTF8_Convert::Convert(CommonEventJSONData.GetData(), CommonEventJSONLen, *CommonEventJSON, CommonEventJSON.Len());
+		FTCHARToUTF8_Convert::Convert((ANSICHAR*)CommonEventJSONData.GetData(), CommonEventJSONLen, *CommonEventJSON, CommonEventJSON.Len());
 	}
 }
 
@@ -1502,7 +1542,11 @@ bool FsparklogsReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer, b
 				// HTTP requests and other things won't be processed unless we tick
 				double DeltaTime = Now - LastTime;
 				FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+#if ENGINE_MAJOR_VERSION >= 5
+				FTSTicker::GetCoreTicker().Tick(DeltaTime);
+#else
 				FTicker::GetCoreTicker().Tick(DeltaTime);
+#endif
 				FThreadManager::Get().Tick();
 				// NOTE: the game does not normally progress the frame count during shutdown, follow the same logic here
 				// GFrameCounter++;
@@ -1599,7 +1643,8 @@ bool FindFirstByte(const uint8* Haystack, uint8 Needle, int MaxToSearch, int& Ou
 void AppendUTF8AsEscapedJsonString(TITLJSONStringBuilder& Builder, const ANSICHAR* String, int N)
 {
 	ANSICHAR ControlFormatBuf[16];
-	Builder.Append('\"');
+	ANSICHAR OneCharBuf[2] = {0, 0};
+	Builder.Append("\"");
 	for (const ANSICHAR* RESTRICT Data = String, *RESTRICT End = Data + N; Data != End; ++Data)
 	{
 		switch (*Data)
@@ -1632,17 +1677,18 @@ void AppendUTF8AsEscapedJsonString(TITLJSONStringBuilder& Builder, const ANSICHA
 			// Any character 0x20 and above can be included as-is
 			if ((uint8)(*Data) >= static_cast<UTF8CHAR>(0x20))
 			{
-				Builder.Append(*Data);
+				OneCharBuf[0] = *Data;
+				Builder.Append(OneCharBuf);
 			}
 			else
 			{
 				// Rare control character
 				FCStringAnsi::Snprintf(ControlFormatBuf, sizeof(ControlFormatBuf), "\\u%04x", static_cast<int>(*Data));
-				Builder.AppendAnsi(ControlFormatBuf);
+				Builder.Append(ControlFormatBuf);
 			}
 		}
 	}
-	Builder.Append('\"');
+	Builder.Append("\"");
 }
 
 bool FsparklogsReadAndStreamToCloud::WorkerReadNextPayload(int& OutNumToRead, int64& OutEffectiveShippedLogOffset, int64& OutRemainingBytes)
@@ -1720,7 +1766,7 @@ bool FsparklogsReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int& 
 	const uint8* BufferData = WorkerBuffer.GetData();
 	OutNumCapturedLines = 0;
 	WorkerNextPayload.Reset();
-	WorkerNextPayload.Append('[');
+	WorkerNextPayload.Append("[");
 	int NextOffset = 0;
 	while (NextOffset < NumToRead)
 	{
@@ -1802,13 +1848,13 @@ bool FsparklogsReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int& 
 		// NOTE: the data in the logfile was already written in UTF-8 format
 		if (OutNumCapturedLines > 0)
 		{
-			WorkerNextPayload.Append(',');
+			WorkerNextPayload.Append(",");
 		}
-		WorkerNextPayload.Append('{');
+		WorkerNextPayload.Append("{");
 		if (CommonEventJSONData.Num() > 0)
 		{
 			WorkerNextPayload.Append((const ANSICHAR*)(CommonEventJSONData.GetData()), CommonEventJSONData.Num());
-			WorkerNextPayload.Append(',');
+			WorkerNextPayload.Append(",");
 		}
 		// If we have raw JSON in the payload extract that portion and append it, setting up just the message text to remain for appending...
 		if (FoundIndex > 2 && *(BufferData + NextOffset) == CharInternalJSONStart)
@@ -1819,7 +1865,7 @@ bool FsparklogsReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int& 
 				WorkerNextPayload.Append((const ANSICHAR*)(BufferData + NextOffset + 1), FoundJSONEndIndex);
 				if (FoundJSONEndIndex > 0)
 				{
-					WorkerNextPayload.Append(',');
+					WorkerNextPayload.Append(",");
 				}
 				NextOffset += (FoundJSONEndIndex + 2);
 				FoundIndex -= (FoundJSONEndIndex + 2);
@@ -1830,12 +1876,12 @@ bool FsparklogsReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int& 
 #if ITL_INTERNAL_DEBUG_LOG_DATA == 1
 		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerBuildNextPayload|adding message to payload: %s"), *ITLConvertUTF8(BufferData + NextOffset, FoundIndex));
 #endif
-		WorkerNextPayload.Append('}');
+		WorkerNextPayload.Append("}");
 		OutNumCapturedLines++;
 		NextOffset += FoundIndex + ExtraToSkip;
 		OutCapturedOffset = NextOffset;
 	}
-	WorkerNextPayload.Append(']');
+	WorkerNextPayload.Append("]");
 	return true;
 }
 
@@ -3415,7 +3461,8 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventProgression(EsparklogsAnal
 		Data->SetObjectField(StandardFieldCustom, CustomAttrs);
 	}
 	FinalizeAnalyticsEvent(EventTypeProgression, OverrideSession, Data);
-	FString DefaultMessage = FString::Printf(TEXT("%s: %s: event_id=`%s` value=%s reason=`%s`"), MessageHeader, EventTypeProgression, *EventId, Value == nullptr ? TEXT("null") : *FString::Printf(TEXT("%f"), Value), Reason);
+	FString ValueDesc = Value == nullptr ? FString(TEXT("null")) : FString::Printf(TEXT("%f"), *Value);
+	FString DefaultMessage = FString::Printf(TEXT("%s: %s: event_id=`%s` value=%s reason=`%s`"), MessageHeader, EventTypeProgression, *EventId, *ValueDesc, Reason);
 	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage);
 }
 
@@ -3501,7 +3548,8 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TArray<FStrin
 		Data->SetObjectField(StandardFieldCustom, CustomAttrs);
 	}
 	FinalizeAnalyticsEvent(EventTypeDesign, OverrideSession, Data);
-	FString DefaultMessage = FString::Printf(TEXT("%s: %s: event_id=`%s` value=%s reason=`%s`"), MessageHeader, EventTypeDesign, *EventId, Value == nullptr ? TEXT("null") : *FString::Printf(TEXT("%f"), Value), Reason);
+	FString ValueDesc = Value == nullptr ? TEXT("null") : FString::Printf(TEXT("%f"), *Value);
+	FString DefaultMessage = FString::Printf(TEXT("%s: %s: event_id=`%s` value=%s reason=`%s`"), MessageHeader, EventTypeDesign, *EventId, *ValueDesc, Reason);
 	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage);
 }
 
