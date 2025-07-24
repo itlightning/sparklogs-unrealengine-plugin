@@ -183,6 +183,39 @@ bool ITLIsMobilePlatform()
 #endif
 }
 
+FString ITLParseHttpResponseCookies(FHttpResponsePtr Response)
+{
+	FString AllCookies;
+	const TArray<FString> AllHeaders = Response->GetAllHeaders();
+	for (const FString& Header : AllHeaders)
+	{
+		FString HeaderName;
+		FString HeaderValue;
+		if (Header.Split(TEXT(":"), &HeaderName, &HeaderValue))
+		{
+			HeaderName.TrimStartAndEndInline();
+			if (HeaderName.Equals(TEXT("Set-Cookie"), ESearchCase::IgnoreCase))
+			{
+				FString NextCookie, NextCookieParameters;
+				if (!HeaderValue.Split(TEXT(";"), &NextCookie, &NextCookieParameters))
+				{
+					NextCookie = HeaderValue;
+				}
+				NextCookie.TrimStartAndEndInline();
+				if (!NextCookie.IsEmpty())
+				{
+					if (!AllCookies.IsEmpty())
+					{
+						AllCookies += TEXT("; ");
+					}
+					AllCookies += NextCookie;
+				}
+			}
+		}
+	}
+	return AllCookies;
+}
+
 const TCHAR* INISectionForEditor = TEXT("Editor");
 const TCHAR* INISectionForCommandlet = TEXT("Commandlet");
 const TCHAR* INISectionForServer = TEXT("Server");
@@ -997,6 +1030,11 @@ bool FsparklogsWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayl
 	SetHTTPTimezoneHeader(HttpRequest);
 	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json; charset=UTF-8"));
 	HttpRequest->SetHeader(TEXT("Authorization"), *AuthorizationHeader);
+	FString LocalCookieHeader = GetDataCookieHeader();
+	if (LocalCookieHeader.Len() > 0)
+	{
+		HttpRequest->SetHeader(TEXT("Cookie"), LocalCookieHeader);
+	}
 	HttpRequest->SetHeader(TEXT("X-Calc-GeoIP"), TEXT("true"));
 	HttpRequest->SetHeader(TEXT("X-Client-Clock-Utc-Now"), *FString::Printf(TEXT("%lld"), (int64)(FDateTime::UtcNow().ToUnixTimestamp())));
 	HttpRequest->SetTimeout((double)(TimeoutMillisec.GetValue()) / 1000.0);
@@ -1044,11 +1082,20 @@ bool FsparklogsWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayl
 				int32 ResponseCode = Response->GetResponseCode();
 				if (EHttpResponseCodes::IsOk(ResponseCode))
 				{
+					// Remember any session affinity cookies for the next request...
+					FString NewCookies = ITLParseHttpResponseCookies(Response);
+					if (!NewCookies.IsEmpty())
+					{
+						SetDataCookieHeader(NewCookies);
+					}
+					// Mark that we've successfully processed the request...
 					RequestSucceeded.AtomicSet(true);
 				}
 				else if (EHttpResponseCodes::TooManyRequests == ResponseCode || ResponseCode >= EHttpResponseCodes::ServerError)
 				{
 					UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Retryable HTTP response: status=%d, msg=%s"), (int)ResponseCode, *ResponseBody.TrimStartAndEnd());
+					// Clear any session affinity cookies in case that is part of the issue...
+					SetDataCookieHeader(TEXT(""));
 					RequestSucceeded.AtomicSet(false);
 					RetryableFailure.AtomicSet(true);
 				}
@@ -1160,6 +1207,18 @@ bool FsparklogsWriteHTTPPayloadProcessor::SleepWaitingForHTTPRequest(TSharedRef<
 		FPlatformProcess::Sleep(0.1f);
 	}
 	return true;
+}
+
+FString FsparklogsWriteHTTPPayloadProcessor::GetDataCookieHeader()
+{
+	FScopeLock WriteLock(&DataCriticalSection);
+	return DataCookieHeader;
+}
+
+void FsparklogsWriteHTTPPayloadProcessor::SetDataCookieHeader(const FString& Value)
+{
+	FScopeLock WriteLock(&DataCriticalSection);
+	DataCookieHeader = Value;
 }
 
 // =============== FsparklogsStressGenerator ===============================================================================

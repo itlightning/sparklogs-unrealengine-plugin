@@ -58,6 +58,10 @@ SPARKLOGS_API FDateTime ITLParseDateTime(const FString & TimeStr);
 /** Returns true if we're on a mobile platform. */
 SPARKLOGS_API bool ITLIsMobilePlatform();
 
+/** Parses all cookies in Set-Cookie headers in the given HTTP response and returns the combined value that would be used for the
+  * Cookie header on a new HTTP request. It strips all optional fields from cookies and just adds the name=value for each cookie. */
+SPARKLOGS_API FString ITLParseHttpResponseCookies(FHttpResponsePtr Response);
+
 /** The type of data compression to use. */
 enum class SPARKLOGS_API ITLCompressionMode
 {
@@ -578,6 +582,11 @@ protected:
 	FString AuthorizationHeader;
 	FThreadSafeCounter TimeoutMillisec;
 	bool LogRequests;
+
+	// Protects access to any of data below this declaration.
+	mutable FCriticalSection DataCriticalSection;
+	FString DataCookieHeader;
+
 public:
 	FsparklogsWriteHTTPPayloadProcessor(const TCHAR* InEndpointURI, const TCHAR* InAuthorizationHeader, double InTimeoutSecs, bool InLogRequests);
 	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, TWeakPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> StreamerWeakPtr) override;
@@ -588,6 +597,12 @@ protected:
 	void SetHTTPTimezoneHeader(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest);
 	/** Wait for the HTTP request to complete. Returns false on timeout or true if the request completed. */
 	bool SleepWaitingForHTTPRequest(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest, FThreadSafeBool& RequestEnded, FThreadSafeBool& RequestSucceeded, FThreadSafeBool& RetryableFailure, double StartTime);
+
+	/** Thread-safe. Gets the current Cookie Header value. */
+	FString GetDataCookieHeader();
+
+	/** Thread-safe. Sets the value of the Cookie header. */
+	void SetDataCookieHeader(const FString& Value);
 };
 
 using TITLJSONStringBuilder = TAnsiStringBuilder<4 * 1024>;
