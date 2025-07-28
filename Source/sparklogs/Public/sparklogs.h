@@ -300,7 +300,7 @@ public:
 
 	// ------------------------------------------ SERVER LAUNCH CONFIGURATION SETTINGS
 
-	// Whether or not to collect analytics on server launch configurations. Defaults to true; however, on server, session and client identity are not automatic -- you must manually specify the session ID and user ID with each event you ingest.
+	// Whether or not to collect analytics on server launch configurations. Defaults to true. Servers will have their own session apart from clients. You can also manually specify client identity (client session ID and client user ID) with each analytics event you create on the server to have it be a part of a certain player's analytics session.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Enable Analytics")
 	bool ServerCollectAnalytics = FsparklogsSettings::DefaultServerCollectAnalytics;
 
@@ -910,9 +910,12 @@ struct FsparklogsAnalyticsAttribute
  * Either rely on the plugin's session auto-start and auto-end features (when game
  * launches and when game finally exits and for mobile when app activates/deactivates),
  * or use StartSession and EndSession to start/end analytics sessions.
+ * 
+ * Servers can also have their own analytics session separate from client sessions.
+ * You can use this to record information about the behavior of game servers themselves.
  *
- * If you're on a server and you want to record analytics events for a given client,
- * you should explicitly pass overridden session information when creating each
+ * Additionally, if you're on a server and you want to record analytics events for a given
+ * client, you can explicitly pass overridden session information when creating each
  * analytics event by passing a SparkLogsAnalyticsSessionDescriptor (recommended).
  * It is NOT recommended to use the Unreal Engine analytics plugin method SetSession
  * and SetUserID as these set server session information globally (NOT recommended
@@ -994,8 +997,8 @@ public:
 	  * You can optionally specify additional message text to be associated with the analytics event (instead of or
 	  * in addition to a default message text that will describe this purchase event in natural language).
 	  *
-	  * If you're in a server process, then you may not have an active session, and instead you want to create an
-	  * event that is associated with a session for a given client process. In that case, create a
+	  * If you're in a server process, then you can either use a server-side session or you could associate
+	  * the analytics event with a specific game client's analytics session. In that case, create a
 	  * FSparkLogsAnalyticsSessionDescriptor specifying at least the session ID and user ID and pass to OverrideSessionInfo.
 	  *
 	  * Returns whether or not the event was created/queued.
@@ -1034,8 +1037,8 @@ public:
 	 *
 	 * You can optionally specify an additional textual reason describing more information why the event occurred.
 	 *
-	 * If you're in a server process, then you may not have an active session, and instead you want to create an
-	 * event that is associated with a session for a given client process. In that case, create a
+	 * If you're in a server process, then you can either use a server-side session or you could associate
+	 * the analytics event with a specific game client's analytics session. In that case, create a
 	 * FSparkLogsAnalyticsSessionDescriptor specifying at least the session ID and user ID and pass to OverrideSessionInfo.
 	 *
 	 * Returns whether or not the event was created/queued.
@@ -1069,8 +1072,8 @@ public:
 	  *
 	  * Progression events may optionally be associated with a numeric value as well (e.g., score).
 	  *
-	  * If you're in a server process, then you may not have an active session, and instead you want to create an
-	  * event that is associated with a session for a given client process. In that case, create a
+	  * If you're in a server process, then you can either use a server-side session or you could associate
+	  * the analytics event with a specific game client's analytics session. In that case, create a
 	  * FSparkLogsAnalyticsSessionDescriptor specifying at least the session ID and user ID and pass to OverrideSessionInfo.
 	  *
 	  * Returns whether or not the event was created/queued.
@@ -1212,8 +1215,8 @@ public:
 	  *
 	  * Design events may optionally be associated with a numeric value as well.
 	  *
-	  * If you're in a server process, then you may not have an active session, and instead you want to create an
-	  * event that is associated with a session for a given client process. In that case, create a
+	  * If you're in a server process, then you can either use a server-side session or you could associate
+	  * the analytics event with a specific game client's analytics session. In that case, create a
 	  * FSparkLogsAnalyticsSessionDescriptor specifying at least the session ID and user ID and pass to OverrideSessionInfo.
 	  *
 	  * Returns whether or not the event was created/queued.
@@ -1278,8 +1281,8 @@ public:
 	 *
 	 * You can optionally specify a reason for this log event.
 	 *
-	 * If you're in a server process, then you may not have an active session, and instead you want to create an
-	 * event that is associated with a session for a given client process. In that case, create a
+	 * If you're in a server process, then you can either use a server-side session or you could associate
+	 * the analytics event with a specific game client's analytics session. In that case, create a
 	 * FSparkLogsAnalyticsSessionDescriptor specifying at least the session ID and user ID and pass to OverrideSessionInfo.
 	 *
 	 * Returns whether or not the event was created/queued.
@@ -1322,6 +1325,7 @@ public:
 	static constexpr const TCHAR* StandardFieldSessionId = TEXT("session_id");
 	static constexpr const TCHAR* StandardFieldSessionNumber = TEXT("session_num");
 	static constexpr const TCHAR* StandardFieldSessionStarted = TEXT("session_started");
+	static constexpr const TCHAR* StandardFieldSessionType = TEXT("session_type");
 	static constexpr const TCHAR* StandardFieldGameId = TEXT("game_id");
 	static constexpr const TCHAR* StandardFieldUserId = TEXT("user_id");
 	static constexpr const TCHAR* StandardFieldPlayerId = TEXT("player_id");
@@ -1470,7 +1474,7 @@ public:
 #endif
 	//~ End IAnalyticsProvider Interface
 
-	// Prepares for an analytics event to be generated. Ensures a session is started (except for server launch config). Returns false if we should not proceed.
+	// Prepares for an analytics event to be generated. Ensures a session is started. Returns false if we should not proceed.
 	virtual bool AutoStartSessionBeforeEvent();
 	// Automatically cleanup any active session, except for server launch configurations where we only send session data if they explicitly use StartSession and EndSession.
 	virtual void AutoCleanupSession();

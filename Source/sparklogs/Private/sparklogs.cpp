@@ -4017,14 +4017,8 @@ void FsparklogsAnalyticsProvider::SetDefaultEventAttributes(TArray<FAnalyticsEve
 
 bool FsparklogsAnalyticsProvider::AutoStartSessionBeforeEvent()
 {
-	if (IsRunningDedicatedServer())
-	{
-		return !(GetSessionID().IsEmpty());
-	}
-	else
-	{
-		return StartSession(TArray<FAnalyticsEventAttribute>());
-	}
+	// Always start a session if we don't have one active, even on servers
+	return StartSession(TEXT("auto started when first analytics event queued"), TArray<FAnalyticsEventAttribute>());
 }
 
 void FsparklogsAnalyticsProvider::AutoCleanupSession()
@@ -4154,6 +4148,7 @@ void FsparklogsAnalyticsProvider::InternalFinalizeAnalyticsEvent(const TCHAR* Ev
 	{
 		Object->SetStringField(StandardFieldSessionStarted, ITLGetUTCDateTimeAsRFC3339(EffectiveSessionStarted));
 	}
+	Object->SetStringField(StandardFieldSessionType, GetITLLaunchConfiguration(false));
 	Object->SetStringField(StandardFieldGameId, GameID);
 	Object->SetStringField(StandardFieldUserId, UserID);
 	Object->SetStringField(StandardFieldPlayerId, PlayerID);
