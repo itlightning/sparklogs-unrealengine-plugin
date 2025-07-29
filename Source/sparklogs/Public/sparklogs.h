@@ -201,7 +201,7 @@ public:
 	void LoadSettings();
 
 	/** Gets the effective HTTP endpoint URI (either using the overridden HTTP endpoint URI if non-empty, or using the HttpEndpointURI if configured, or the CloudRegion). Returns empty if not configured. */
-	FString GetEffectiveHttpEndpointURI(const TCHAR* OverrideHTTPEndpointURI);
+	FString GetEffectiveHttpEndpointURI(const FString& OverrideHTTPEndpointURI);
 
 	/** Thread-safe. Returns the User ID to use based on the analytics user ID type. */
 	FString GetEffectiveAnalyticsUserID();
@@ -684,11 +684,11 @@ protected:
 	/** The amount of bytes queued up since last flush. */
 	std::atomic<int64> BytesQueuedSinceLastFlush;
 
-	virtual void ComputeCommonEventJSON(bool IncludeCommonMetadata, const TCHAR* GameInstanceID, TMap<FString, FString>* AdditionalAttributes);
+	virtual void ComputeCommonEventJSON(bool IncludeCommonMetadata, const FString& GameInstanceID, const TMap<FString, FString>* AdditionalAttributes);
 
 public:
 
-	FsparklogsReadAndStreamToCloud(const TCHAR* SourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor, ESPMode::ThreadSafe> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName, const TCHAR* GameInstanceID, TMap<FString, FString>* AdditionalAttributes);
+	FsparklogsReadAndStreamToCloud(const FString& SourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor, ESPMode::ThreadSafe> InPayloadProcessor, int InMaxLineLength, const FString& InOverrideComputerName, const FString& GameInstanceID, const TMap<FString, FString>* AdditionalAttributes);
 	~FsparklogsReadAndStreamToCloud();
 
 	// After constructing this object you must give it a weak pointer to itself before running it. Needed to pass to payload processor.
@@ -1549,6 +1549,60 @@ protected:
 	FString GetProgressionEventID(const TArray<FString>& PArray);
 };
 
+enum class SPARKLOGS_API ESparkLogsOverrideBool {
+	False = 0,
+	True = 1,
+	Default = 2
+};
+
+/**
+ * Allows you to override certain plugin plugin configuration options when calling StartShippingEngine.
+ */
+class SPARKLOGS_API FSparkLogsEngineOptions
+{
+public:
+	/** If not Default, will override the config setting whether or not to collect and ship logs during this run. */
+	ESparkLogsOverrideBool OverrideCollectLogs;
+
+	/** If not Default, will override the config setting whether or not to collect and ship logs during this run. */
+	ESparkLogsOverrideBool OverrideCollectAnalytics;
+
+	/** If not empty, will override the analytics user ID that is automatically generated (how depends on the config setting).
+	 * Any custom analytics user ID should be globally unique and make sure to respect any privacy rules for your app. */
+	FString OverrideAnalyticsUserID;
+	
+	/** If not empty, will override the config setting for the agent ID used to authenticate with the SparkLogs cloud. */
+	FString OverrideAgentID;
+	
+	/** If not empty, will override the config setting for the agent auth token used to authenticate with the SparkLogs cloud. */
+	FString OverrideAgentAuthToken;
+	
+	/** If not empty, will override the config setting for the HTTP token authorization header. For example to specify custom token auth use something like "Bearer my_token_value" */
+	FString OverrideHttpAuthorizationHeaderValue;
+	
+	/** If not empty, will override the config setting for the HTTP(S) endpoint used to receive the shipped data. */
+	FString OverrideHTTPEndpointURI;
+	
+	/** If not empty, will override the hostname value used for the the hostname standard field in all shipped events. Defaults to FPlatformProcess::ComputerName(). */
+	FString OverrideComputerName;
+
+	/** Adds additional JSON field values that will be included with every log and analytics event shipped. */
+	TMap<FString, FString> AdditionalAttributes;
+
+	/** If true, then the plugin will always activate, even if the ActivationPercentage config setting is less than 100%.
+	  * If this value is false then it will activate ActivationPercentage percent of the time (random selection).
+	  * Note that ActivationPercentage defaults to 100%, so even if this is false, the plugin will by default activate every time. */
+	bool AlwaysStart;
+
+public:
+	FSparkLogsEngineOptions()
+		: OverrideCollectLogs(ESparkLogsOverrideBool::Default)
+		, OverrideCollectAnalytics(ESparkLogsOverrideBool::Default)
+		, AlwaysStart(false)
+	{
+	}
+};
+
 /**
 * Main plugin module. Reads settings and handles startup/shutdown.
 */
@@ -1595,7 +1649,7 @@ public:
 	  * Normally you would interact with the analytics provider (see GetAnalyticsProvider)
 	  * for a higher level API that will produce and queue raw analytics events in a standard format.
 	  * If analytics is not enabled, returns false. Returns true if the data was queued. */
-	virtual bool AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalyticsData, const TCHAR* LogMessage, TSharedPtr<FJsonObject> CustomRootFields, bool ForceDisableAutoExtract);
+	virtual bool AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalyticsData, const TCHAR* LogMessage, TSharedPtr<FJsonObject> CustomRootFields, bool ForceDisableAutoExtract, bool ForceDebugLogEvent);
 
 	/** Returns the random game_instance_id used for this run of the engine.
 	  * There may be multiple game engine analytics sessions during a single game instance.
@@ -1606,31 +1660,12 @@ public:
 	/**
 	 * Starts the log/event shipping engine if it has not yet started.
 	 * 
-	 * You can override whether or not you want to collect logs and collect analytics
-	 * by specifying a non-null value for these parameters.
-	 * 
-	 * You can override the analytics user ID (normally we generate automatically) if desired
-	 * by specifying a non-null, non-empty value. Any custom analytics user ID should be globally
-	 * unique and make sure to respect any privacy rules for your app.
-	 * 
-	 * You can override the agent ID and/or agent auth token by specifying non-empty values.
-	 *
-	 * If you are sending data to your own HTTP endpoint URI instead of the SparkLogs cloud,
-	 * then you can choose to override the destination HTTP endpoint and/or override the
-	 * authentication header value directly.
-	 * 
-	 * You can also optionally override the computer name that will be used in the metadata
-	 * sent with all log agents -- the default is to use FPlatformProcess::ComputerName().
-	 * (If NULL or empty values are passed for override strings, then the default values will be used, etc.)
-	 * 
-	 * You can optionally pass additional custom attributes that will be added to all shipped log/analytics events.
-	 * 
-	 * This will still only activate if a random roll of the dice passed the "ActivationPercentage" check, or pass
-	 * AlwaysStart as true to force the engine to start regardless of this setting.
+	 * You can override certain configuration parameters by setting up non-default
+	 * values in the options value you pass.
 	 *
 	 * Returns true if the shipping engine was activated (may be false if diceroll + ActivationPercentage caused it to not start).
 	 */
-	bool StartShippingEngine(bool* OverrideCollectLogs, bool* OverrideCollectAnalytics, const TCHAR* OverrideAnalyticsUserID, const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHTTPEndpointURI, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, TMap<FString, FString>* AdditionalAttributes, bool AlwaysStart);
+	bool StartShippingEngine(const FSparkLogsEngineOptions& options);
 
 	/** Stops the log/event shipping engine. Any active analytics session (if any) will end. It will not start again unless StartShippingEngine is manually called. */
 	void StopShippingEngine();

@@ -149,7 +149,7 @@ bool FsparklogsPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters)
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     bool FlushedEverything=false;
     TestTrue(TEXT("FlushAndWait[1] should succeed"), Streamer->FlushAndWait(1, false, false, false, 10.0, FlushedEverything));
@@ -186,7 +186,7 @@ bool FsparklogsPluginUnitTestSkipEmptyPayloads::RunTest(const FString& Parameter
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     // Test completely empty file
     bool FlushedEverything = false;
@@ -242,7 +242,7 @@ bool FsparklogsPluginUnitTestMultipleEvents::RunTest(const FString& Parameters)
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Second line is longer\"},{\"message\":\"3\"},{\"message\":\"   fourth line    \\t\"}]"));
     bool FlushedEverything = false;
@@ -274,7 +274,7 @@ bool FsparklogsPluginUnitTestNewlines::RunTest(const FString& Parameters)
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"\\t\"},{\"message\":\"linux\"},{\"message\":\"skip\\rslash\\rR\"},{\"message\":\" \"},{\"message\":\" \"}]"));
     bool FlushedEverything = false;
@@ -306,7 +306,7 @@ bool FsparklogsPluginUnitTestControlChars::RunTest(const FString& Parameters)
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"line 1\\t\\b\\f\"},{\"message\":\"line 2 \\\"hello\\\"\"},{\"message\":\"line 3 \\\\world\\\\\"}]"));
     bool FlushedEverything = false;
@@ -339,7 +339,7 @@ bool FsparklogsPluginUnitTestUnicode::RunTest(const FString& Parameters)
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     ExpectedPayloads.Add(FString::Format(TEXT("[{\"message\":\"{0}\"}]"), { TestPayload1 }));
     bool FlushedEverything = false;
@@ -373,7 +373,7 @@ bool FsparklogsPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, MaxLineSize, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, MaxLineSize, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"12345678\"},{\"message\":\"12345678\"}]"));
     bool FlushedEverything = false;
@@ -417,7 +417,7 @@ bool FsparklogsPluginUnitTestMaxLineSizeUnicode::RunTest(const FString& Paramete
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, MaxLineSize, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, MaxLineSize, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"1234\"},{\"message\":\"ππ5678\"},{\"message\":\"π34\"}]"));
     bool FlushedEverything = false;
@@ -458,7 +458,7 @@ bool FsparklogsPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
     bool FlushedEverything = false;
@@ -473,7 +473,7 @@ bool FsparklogsPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
     
     // When we resume, it should remember that we already processed the first two lines and not generate a new payload
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor2(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer2 = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor2, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer2 = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor2, 16 * 1024, FString(), FString(), nullptr));
     Streamer2->SetWeakThisPtr(Streamer2);
     TArray<FString> ExpectedPayloads2;
     TestTrue(TEXT("FlushAndWait[2-1] should succeed"), Streamer2->FlushAndWait(2, false, false, false, 10.0, FlushedEverything));
@@ -512,7 +512,7 @@ bool FsparklogsPluginUnitTestHandleLogRotation::RunTest(const FString& Parameter
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"123456789012345678901234567890\"}]"));
     bool FlushedEverything = false;
@@ -568,7 +568,7 @@ bool FsparklogsPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
     Settings->ProcessingIntervalSecs = TestProcessingIntervalSecs;
     Settings->RetryIntervalSecs = TestRetryIntervalSecs;
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
     bool FlushedEverything = false;
@@ -629,7 +629,7 @@ bool FsparklogsPluginUnitTestRetrySamePayloadSize::RunTest(const FString& Parame
     Settings->ProcessingIntervalSecs = TestProcessingIntervalSecs;
     Settings->RetryIntervalSecs = TestRetryIntervalSecs;
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
     bool FlushedEverything = false;
@@ -706,7 +706,7 @@ bool FsparklogsPluginUnitTestClearRetryTimer::RunTest(const FString& Parameters)
     Settings->ProcessingIntervalSecs = TestProcessingIntervalSecs;
     Settings->RetryIntervalSecs = TestRetryIntervalSecs;
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     ExpectedPayloads.Add(TEXT("[{\"message\":\"Line 1\"},{\"message\":\"Line 2\"}]"));
     bool FlushedEverything = false;
@@ -762,7 +762,7 @@ bool FsparklogsPluginUnitTestGameInstanceID::RunTest(const FString& Parameters)
     Settings->AddRandomGameInstanceID = true;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, TEXT("abcd_1234_EFGH"), nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), TEXT("abcd_1234_EFGH"), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     ExpectedPayloads.Add(FString::Format(TEXT("[{\"game_instance_id\": \"abcd_1234_EFGH\",\"message\":\"{0}\"}]"), { TestPayload1 }));
     bool FlushedEverything = false;
@@ -798,7 +798,7 @@ bool FsparklogsPluginUnitTestAdditionalAttributes::RunTest(const FString& Parame
     TMap<FString, FString> AdditionalAttributes;
     AdditionalAttributes.Add(TEXT("game_version"), TEXT("v1.2.3"));
     AdditionalAttributes.Add(TEXT("game_name"), TEXT("hello world"));
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, &AdditionalAttributes));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), &AdditionalAttributes));
     Streamer->SetWeakThisPtr(Streamer);
     ExpectedPayloads.Add(FString::Format(TEXT("[{\"game_version\":\"v1.2.3\",\"game_name\":\"hello world\",\"message\":\"{0}\"}]"), { TestPayload1 }));
     bool FlushedEverything = false;
@@ -827,7 +827,7 @@ bool FsparklogsPluginIntegrationTestInfoMessage::RunTest(const FString& Paramete
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud (*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud (*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     
     FsparklogsOutputDeviceFile OutputDevice(*TestLogFile, Streamer);
@@ -863,7 +863,7 @@ bool FsparklogsPluginIntegrationTestInfoMessageNoTags::RunTest(const FString& Pa
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud (*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud (*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
 
     FsparklogsOutputDeviceFile OutputDevice(*TestLogFile, Streamer);
@@ -900,7 +900,7 @@ bool FsparklogsPluginIntegrationTestMultiline::RunTest(const FString& Parameters
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     
     FsparklogsOutputDeviceFile OutputDevice(*TestLogFile, Streamer);
@@ -936,7 +936,7 @@ bool FsparklogsPluginIntegrationTestAddRawEvent::RunTest(const FString& Paramete
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
     
     FsparklogsOutputDeviceFile OutputDevice(*TestLogFile, Streamer);
@@ -993,7 +993,7 @@ bool FsparklogsPluginIntegrationTestAutoFlushLog::RunTest(const FString& Paramet
     // Make sure that without auto-flush we would not trigger a periodic processing of the log.
     Settings->ProcessingIntervalSecs = 1000.0;
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
 
     FsparklogsOutputDeviceFile OutputDevice(*TestLogFile, Streamer);
@@ -1053,7 +1053,7 @@ bool FsparklogsPluginIntegrationTestAutoFlushRawEvent::RunTest(const FString& Pa
     // Make sure that without auto-flush we would not trigger a periodic processing of the log.
     Settings->ProcessingIntervalSecs = 1000.0;
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
-    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, nullptr, nullptr, nullptr));
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
 
     FsparklogsOutputDeviceFile OutputDevice(*TestLogFile, Streamer);

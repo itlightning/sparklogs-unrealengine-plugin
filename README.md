@@ -1,6 +1,6 @@
 # SparkLogs Unreal Engine Plugin
 
-This is an [open source](LICENSE) plugin for [Unreal Engine](https://unrealengine.com/) to efficiently send game engine analytics (client) and/or logs (server)
+This is an [open source](LICENSE) plugin for [Unreal Engine](https://unrealengine.com/) to efficiently send game engine analytics (client/server) and/or logs (server)
 data to any HTTPS endpoint that can receive JSON data, including the [SparkLogs Cloud](https://sparklogs.com/).
 
 Join the [discord](https://discord.gg/Yu8F8w8tDw) to ask questions, provide feedback, or collaborate on enhancements.

@@ -491,13 +491,13 @@ FsparklogsSettings::FsparklogsSettings()
 {
 }
 
-FString FsparklogsSettings::GetEffectiveHttpEndpointURI(const TCHAR* OverrideHTTPEndpointURI)
+FString FsparklogsSettings::GetEffectiveHttpEndpointURI(const FString& OverrideHTTPEndpointURI)
 {
 	CloudRegion.TrimStartAndEndInline();
 	HttpEndpointURI.TrimStartAndEndInline();
-	if (OverrideHTTPEndpointURI != NULL && FPlatformString::Strlen(OverrideHTTPEndpointURI) > 0)
+	if (OverrideHTTPEndpointURI.Len() > 0)
 	{
-		return FString(OverrideHTTPEndpointURI);
+		return OverrideHTTPEndpointURI;
 	}
 	if (HttpEndpointURI.Len() > 0)
 	{
@@ -1307,7 +1307,7 @@ void FsparklogsStressGenerator::Stop()
 
 // =============== FsparklogsReadAndStreamToCloud ===============================================================================
 
-void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMetadata, const TCHAR* GameInstanceID, TMap<FString, FString>* AdditionalAttributes)
+void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMetadata, const FString& GameInstanceID, const TMap<FString, FString>* AdditionalAttributes)
 {
 	FString CommonEventJSON;
 
@@ -1331,7 +1331,7 @@ void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMe
 		}
 	}
 
-	if (Settings->AddRandomGameInstanceID && GameInstanceID != nullptr && *GameInstanceID != 0)
+	if (Settings->AddRandomGameInstanceID && GameInstanceID.Len() > 0)
 	{
 		if (!CommonEventJSON.IsEmpty())
 		{
@@ -1350,7 +1350,7 @@ void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMe
 		CommonEventJSON.Appendf(TEXT("\"game_id\": %s"), *EscapeJsonString(Settings->AnalyticsGameID));
 	}
 
-	if (nullptr != AdditionalAttributes)
+	if (nullptr != AdditionalAttributes && AdditionalAttributes->Num() > 0)
 	{
 		for (const TPair<FString, FString>& Pair : *AdditionalAttributes)
 		{
@@ -1376,12 +1376,12 @@ void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMe
 	}
 }
 
-FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const TCHAR* InSourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor, ESPMode::ThreadSafe> InPayloadProcessor, int InMaxLineLength, const TCHAR* InOverrideComputerName, const TCHAR* GameInstanceID, TMap<FString, FString>* AdditionalAttributes)
+FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const FString& InSourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor, ESPMode::ThreadSafe> InPayloadProcessor, int InMaxLineLength, const FString& InOverrideComputerName, const FString& GameInstanceID, const TMap<FString, FString>* AdditionalAttributes)
 	: Settings(InSettings)
 	, PayloadProcessor(InPayloadProcessor)
 	, SourceLogFile(InSourceLogFile)
 	, MaxLineLength(InMaxLineLength)
-	, OverrideComputerName(InOverrideComputerName == nullptr ? TEXT("") : InOverrideComputerName)
+	, OverrideComputerName(InOverrideComputerName)
 	, Thread(nullptr)
 	, WorkerShippedLogOffset(0)
 	, WorkerMinNextFlushPlatformTime(0)
@@ -3200,7 +3200,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventPurchase(const TCHAR* Item
 	}
 	FinalizeAnalyticsEvent(EventTypePurchase, OverrideSession, Data);
 	FString DefaultMessage = FString::Printf(TEXT("%s: %s: purchase of item made; item_category=`%s` item_id=`%s` currency=`%s` amount=%.2f reason=`%s`"), MessageHeader, EventTypePurchase, ItemCategory, ItemId, RealCurrencyCode, Amount, Reason);
-	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage, false);
 }
 
 bool FsparklogsAnalyticsProvider::CreateAnalyticsEventPurchase(const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* RealCurrencyCode, double Amount, const TCHAR* Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
@@ -3282,7 +3282,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventResource(EsparklogsAnalyti
 	}
 	FinalizeAnalyticsEvent(EventTypeResource, OverrideSession, Data);
 	FString DefaultMessage = FString::Printf(TEXT("%s: %s: flow_type=%s virtual_currency=`%s` item_category=`%s` item_id=`%s` amount=%f reason=`%s`"), MessageHeader, EventTypeResource, *FlowTypeStr, VirtualCurrency, ItemCategory, ItemId, Amount, Reason);
-	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage, false);
 }
 
 bool FsparklogsAnalyticsProvider::CreateAnalyticsEventResource(EsparklogsAnalyticsFlowType FlowType, double Amount, const TCHAR* VirtualCurrency, const TCHAR* ItemCategory, const TCHAR* ItemId, const TCHAR* Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
@@ -3463,7 +3463,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventProgression(EsparklogsAnal
 	FinalizeAnalyticsEvent(EventTypeProgression, OverrideSession, Data);
 	FString ValueDesc = Value == nullptr ? FString(TEXT("null")) : FString::Printf(TEXT("%f"), *Value);
 	FString DefaultMessage = FString::Printf(TEXT("%s: %s: event_id=`%s` value=%s reason=`%s`"), MessageHeader, EventTypeProgression, *EventId, *ValueDesc, Reason);
-	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage, false);
 }
 
 bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TCHAR* EventId, double Value, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
@@ -3550,7 +3550,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TArray<FStrin
 	FinalizeAnalyticsEvent(EventTypeDesign, OverrideSession, Data);
 	FString ValueDesc = Value == nullptr ? TEXT("null") : FString::Printf(TEXT("%f"), *Value);
 	FString DefaultMessage = FString::Printf(TEXT("%s: %s: event_id=`%s` value=%s reason=`%s`"), MessageHeader, EventTypeDesign, *EventId, *ValueDesc, Reason);
-	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage, false);
 }
 
 bool FsparklogsAnalyticsProvider::CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
@@ -3575,7 +3575,7 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventLog(EsparklogsSeverity Sev
 		Data->SetObjectField(StandardFieldCustom, CustomAttrs);
 	}
 	FinalizeAnalyticsEvent(EventTypeLog, OverrideSession, Data);
-	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, Message, RootData, false);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, Message, RootData, false, false);
 }
 
 bool FsparklogsAnalyticsProvider::CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, const TCHAR* Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
@@ -3617,7 +3617,7 @@ bool FsparklogsAnalyticsProvider::StartSession(const TCHAR* Reason, const TArray
 	InternalFinalizeAnalyticsEvent(EventTypeSessionStart, nullptr, Data);
 	WriteLock.Unlock();
 	Settings->MarkStartOfAnalyticsSession(CurrentSessionID, SessionStarted);
-	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *FString::Printf(TEXT("%s: %s: started new session"), MessageHeader, EventTypeSessionStart), nullptr, false);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *FString::Printf(TEXT("%s: %s: started new session"), MessageHeader, EventTypeSessionStart), nullptr, false, true);
 }
 
 void FsparklogsAnalyticsProvider::EndSession()
@@ -3661,7 +3661,7 @@ void FsparklogsAnalyticsProvider::DoEndSession(const TCHAR* Reason, FDateTime Se
 	SessionStarted = ITLEmptyDateTime;
 	SessionNumber = 0;
 	WriteLock.Unlock();
-	FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *FString::Printf(TEXT("%s: %s: finished session normally"), MessageHeader, EventTypeSessionEnd), nullptr, false);
+	FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *FString::Printf(TEXT("%s: %s: finished session normally"), MessageHeader, EventTypeSessionEnd), nullptr, false, true);
 	// The app might end or go inactive soon, try to get the data to the cloud asap...
 	FsparklogsModule::GetModule().Flush();
 	Settings->MarkEndOfAnalyticsSession();
@@ -4332,7 +4332,8 @@ void FsparklogsModule::StartupModule()
 	Settings->LoadSettings();
 	if (Settings->AutoStart)
 	{
-		StartShippingEngine(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, false);
+		FSparkLogsEngineOptions DefaultOptions;
+		StartShippingEngine(DefaultOptions);
 	}
 	else
 	{
@@ -4368,7 +4369,7 @@ TSharedPtr<FsparklogsAnalyticsProvider> FsparklogsModule::GetAnalyticsProvider()
 	return AnalyticsProvider;
 }
 
-bool FsparklogsModule::AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalyticsData, const TCHAR* LogMessage, TSharedPtr<FJsonObject> CustomRootFields, bool ForceDisableAutoExtract)
+bool FsparklogsModule::AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalyticsData, const TCHAR* LogMessage, TSharedPtr<FJsonObject> CustomRootFields, bool ForceDisableAutoExtract, bool ForceDebugLogEvent)
 {
 	if (!EngineActive || !Settings->CollectAnalytics || !RawAnalyticsData.IsValid())
 	{
@@ -4396,7 +4397,7 @@ bool FsparklogsModule::AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalytics
 		return false;
 	}
 	Writer->Close();
-	if (Settings->DebugLogForAnalyticsEvents)
+	if (Settings->DebugLogForAnalyticsEvents || ForceDebugLogEvent)
 	{
 		if (LogMessage != nullptr)
 		{
@@ -4416,7 +4417,7 @@ FString FsparklogsModule::GetGameInstanceID()
 	return GameInstanceID;
 }
 
-bool FsparklogsModule::StartShippingEngine(bool* OverrideCollectLogs, bool* OverrideCollectAnalytics, const TCHAR* OverrideAnalyticsUserID, const TCHAR* OverrideAgentID, const TCHAR* OverrideAgentAuthToken, const TCHAR* OverrideHTTPEndpointURI, const TCHAR* OverrideHttpAuthorizationHeaderValue, const TCHAR* OverrideComputerName, TMap<FString, FString>* AdditionalAttributes, bool AlwaysStart)
+bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& options)
 {
 	if (EngineActive)
 	{
@@ -4427,21 +4428,21 @@ bool FsparklogsModule::StartShippingEngine(bool* OverrideCollectLogs, bool* Over
 	// Lock in the application install date early even if analytics is not necessarily enabled yet
 	Settings->GetEffectiveAnalyticsInstallTime();
 
-	if (OverrideAnalyticsUserID != nullptr && FPlatformString::Strlen(OverrideAnalyticsUserID) > 0)
+	if (options.OverrideAnalyticsUserID.Len() > 0)
 	{
-		Settings->SetUserID(OverrideAnalyticsUserID);
+		Settings->SetUserID(*options.OverrideAnalyticsUserID);
 	}
 	bool EffectiveCollectLogs = Settings->CollectLogs;
-	if (OverrideCollectLogs != nullptr)
+	if (options.OverrideCollectLogs != ESparkLogsOverrideBool::Default)
 	{
-		EffectiveCollectLogs = *OverrideCollectLogs;
+		EffectiveCollectLogs = options.OverrideCollectLogs == ESparkLogsOverrideBool::True;
 		// Temporarily override the setting in memory
 		Settings->CollectLogs = EffectiveCollectLogs;
 	}
 	bool EffectiveCollectAnalytics = Settings->CollectAnalytics;
-	if (OverrideCollectAnalytics != nullptr)
+	if (options.OverrideCollectAnalytics != ESparkLogsOverrideBool::Default)
 	{
-		EffectiveCollectAnalytics = *OverrideCollectAnalytics;
+		EffectiveCollectAnalytics = options.OverrideCollectAnalytics == ESparkLogsOverrideBool::True;
 		// Temporarily override the setting in memory
 		Settings->CollectAnalytics = EffectiveCollectAnalytics;
 	}
@@ -4449,21 +4450,21 @@ bool FsparklogsModule::StartShippingEngine(bool* OverrideCollectLogs, bool* Over
 	FString EffectiveAgentID = Settings->AgentID;
 	FString EffectiveAgentAuthToken = Settings->AgentAuthToken;
 	FString EffectiveHttpAuthorizationHeaderValue = Settings->HttpAuthorizationHeaderValue;
-	if (NULL != OverrideAgentID && FPlatformString::Strlen(OverrideAgentID) > 0)
+	if (options.OverrideAgentID.Len() > 0)
 	{
-		EffectiveAgentID = OverrideAgentID;
+		EffectiveAgentID = options.OverrideAgentID;
 	}
-	if (NULL != OverrideAgentAuthToken && FPlatformString::Strlen(OverrideAgentAuthToken) > 0)
+	if (options.OverrideAgentAuthToken.Len() > 0)
 	{
-		EffectiveAgentAuthToken = OverrideAgentAuthToken;
+		EffectiveAgentAuthToken = options.OverrideAgentAuthToken;
 	}
-	if (NULL != OverrideHttpAuthorizationHeaderValue && FPlatformString::Strlen(OverrideHttpAuthorizationHeaderValue) > 0)
+	if (options.OverrideHttpAuthorizationHeaderValue.Len() > 0)
 	{
-		EffectiveHttpAuthorizationHeaderValue = OverrideHttpAuthorizationHeaderValue;
+		EffectiveHttpAuthorizationHeaderValue = options.OverrideHttpAuthorizationHeaderValue;
 	}
 
 	bool UsingSparkLogsCloud = !Settings->CloudRegion.IsEmpty();
-	FString EffectiveHttpEndpointURI = Settings->GetEffectiveHttpEndpointURI(OverrideHTTPEndpointURI);
+	FString EffectiveHttpEndpointURI = Settings->GetEffectiveHttpEndpointURI(options.OverrideHTTPEndpointURI);
 	if (EffectiveHttpEndpointURI.IsEmpty())
 	{
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Not yet configured for this launch configuration. In plugin settings for %s launch configuration, configure CloudRegion to 'us' or 'eu' for your SparkLogs cloud region (or if you are sending data to your own HTTP service, configure HttpEndpointURI to the appropriate endpoint, such as http://localhost:9880/ or https://ingestlogs.myservice.com/ingest/v1)"), *GetITLINISettingPrefix());
@@ -4502,7 +4503,7 @@ bool FsparklogsModule::StartShippingEngine(bool* OverrideCollectLogs, bool* Over
 		return false;
 	}
 
-	float DiceRoll = AlwaysStart ? 10000.0 : FMath::FRandRange(0.0, 100.0);
+	float DiceRoll = options.AlwaysStart ? 10000.0 : FMath::FRandRange(0.0, 100.0);
 	EngineActive = DiceRoll < Settings->ActivationPercentage;
 	if (EngineActive)
 	{
@@ -4520,7 +4521,7 @@ bool FsparklogsModule::StartShippingEngine(bool* OverrideCollectLogs, bool* Over
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Ingestion parameters: RequestTimeoutSecs=%lf, BytesPerRequest=%d, ProcessingIntervalSecs=%lf, RetryIntervalSecs=%lf, UnflushedBytesToAutoFlush=%d, MinIntervalBetweenFlushes=%lf"), Settings->RequestTimeoutSecs, Settings->BytesPerRequest, Settings->ProcessingIntervalSecs, Settings->RetryIntervalSecs, (int)Settings->UnflushedBytesToAutoFlush, Settings->MinIntervalBetweenFlushes);
 		if (EffectiveCollectAnalytics)
 		{
-			UE_LOG(LogPluginSparkLogs, Log, TEXT("Analytics collection is active. GameID='%s' UserID='%s' PlayerID='%s'"), *Settings->AnalyticsGameID, *Settings->GetEffectiveAnalyticsUserID(), *Settings->GetEffectiveAnalyticsPlayerID());
+			UE_LOG(LogPluginSparkLogs, Log, TEXT("Analytics collection is active. GameID='%s' UserID='%s' PlayerID='%s' DebugLogAllAnalyticsEvents=%s"), *Settings->AnalyticsGameID, *Settings->GetEffectiveAnalyticsUserID(), *Settings->GetEffectiveAnalyticsPlayerID(), Settings->DebugLogForAnalyticsEvents ? TEXT("true") : TEXT("false"));
 			// Make sure analytics provider singleton is created and make sure any previously open session from a prior game instance is cleaned up...
 			GetAnalyticsProvider()->CheckForStaleSessionAtStartup();
 			if (ITLIsMobilePlatform() && Settings->AnalyticsMobileAutoSessionStart)
@@ -4540,7 +4541,7 @@ bool FsparklogsModule::StartShippingEngine(bool* OverrideCollectLogs, bool* Over
 			AuthorizationHeader = EffectiveHttpAuthorizationHeaderValue;
 		}
 		CloudPayloadProcessor = TSharedPtr<FsparklogsWriteHTTPPayloadProcessor, ESPMode::ThreadSafe>(new FsparklogsWriteHTTPPayloadProcessor(*EffectiveHttpEndpointURI, *AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests));
-		CloudStreamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(*SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, OverrideComputerName, *GameInstanceID, AdditionalAttributes));
+		CloudStreamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, options.OverrideComputerName, GameInstanceID, &options.AdditionalAttributes));
 		CloudStreamer->SetWeakThisPtr(CloudStreamer);
 		FCoreDelegates::OnExit.AddRaw(this, &FsparklogsModule::OnEngineExit);
 		GetITLInternalGameLog(CloudStreamer).LogDevice->SetCloudStreamer(CloudStreamer);
