@@ -1397,7 +1397,13 @@ FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const FString& In
 	}
 	else
 	{
-		ProgressMarkerPath = FConfigCacheIni::NormalizeConfigIniPath((FPaths::Combine(FPaths::GetPath(InSourceLogFile), GetITLPluginStateFilename())));
+		ProgressMarkerPath = FPaths::Combine(FPaths::GetPath(InSourceLogFile), GetITLPluginStateFilename());
+#if ENGINE_MAJOR_VERSION >= 5
+		ProgressMarkerPath = FConfigCacheIni::NormalizeConfigIniPath(ProgressMarkerPath);
+#else
+		FPaths::RemoveDuplicateSlashes(ProgressMarkerPath);
+		ProgressMarkerPath = FPaths::CreateStandardFilename(ProgressMarkerPath);
+#endif
 		// In UE5 the INI file must exist before attempting to use it in INI functions
 		if (!IFileManager::Get().FileExists(*ProgressMarkerPath))
 		{
