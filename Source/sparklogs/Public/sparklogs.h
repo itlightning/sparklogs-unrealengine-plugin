@@ -88,8 +88,6 @@ SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length);
 class SPARKLOGS_API FsparklogsSettings
 {
 public:
-	static constexpr const TCHAR* PluginStateSection = TEXT("PluginState");
-
 	static constexpr const TCHAR* AnalyticsUserIDTypeDeviceID = TEXT("device_id");
 	static constexpr const TCHAR* AnalyticsUserIDTypeGenerated = TEXT("generated");
 	static constexpr const TCHAR* DefaultAnalyticsUserIDType = AnalyticsUserIDTypeDeviceID;
@@ -118,7 +116,7 @@ public:
 	static constexpr bool DefaultAddRandomGameInstanceID = true;
 
 	static constexpr double MinServerProcessingIntervalSecs = 0.5;
-	static constexpr double DefaultServerProcessingIntervalSecs = 2.0;
+	static constexpr double DefaultServerProcessingIntervalSecs = 3.0;
 	static constexpr double MinEditorProcessingIntervalSecs = 0.5;
 	static constexpr double DefaultEditorProcessingIntervalSecs = 2.0;
 	// There could be millions of clients, so give more time for data to queue up before flushing...
@@ -634,9 +632,10 @@ public:
 */
 class SPARKLOGS_API FsparklogsReadAndStreamToCloud : public FRunnable
 {
-protected:
+public:
 	static constexpr const TCHAR* ProgressMarkerValue = TEXT("ShippedLogOffset");
 
+protected:
 	TWeakPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> WeakThisPtr;
 	TSharedRef<FsparklogsSettings> Settings;
 	TSharedRef<IsparklogsPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor;

@@ -31,25 +31,39 @@ private:
     T OriginalValue;
 };
 
-class FTempDirectory
+class FITLTestTempDirectory
 {
 public:
-    FTempDirectory(const FString& InDirectoryPath) : DirectoryPath(InDirectoryPath)
+    FITLTestTempDirectory(const FString& InDirectoryPath) : DirectoryPath(InDirectoryPath)
     {
         Created = false;
         if (!IFileManager::Get().DirectoryExists(*DirectoryPath))
         {
             Created = IFileManager::Get().MakeDirectory(*DirectoryPath);
         }
+        ClearUserProgressMarker();
     }
-    ~FTempDirectory()
+    ~FITLTestTempDirectory()
     {
         if (Created)
         {
             IFileManager::Get().DeleteDirectory(*DirectoryPath, false, true);
         }
+        ClearUserProgressMarker();
     }
     FString GetTempDir() { return DirectoryPath; }
+    void ClearUserProgressMarker()
+    {
+        // Manually clear out any progress marker value if we were testing this in the game user config dir
+        bool WasDisabled = GConfig->AreFileOperationsDisabled();
+        GConfig->EnableFileOperations();
+        GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, FsparklogsReadAndStreamToCloud::ProgressMarkerValue, GGameUserSettingsIni);
+        GConfig->Flush(false, GGameUserSettingsIni);
+        if (WasDisabled)
+        {
+            GConfig->DisableFileOperations();
+        }
+    }
 
 private:
     bool Created;
@@ -58,9 +72,9 @@ private:
 
 static FString ITLGetTestDir()
 {
-    FString ParentDir = FPaths::EngineIntermediateDir();
+    FString ParentDir = FPaths::ProjectIntermediateDir();
     if (ParentDir.Len() <= 0) { ParentDir = FPaths::ProjectDir(); }
-    if (ParentDir.Len() <= 0) { ParentDir = FPaths::EngineIntermediateDir(); }
+    if (ParentDir.Len() <= 0) { ParentDir = FPaths::ProjectSavedDir(); }
     check(ParentDir.Len() > 0);
     FString TempDir = FPaths::CreateTempFilename(*ParentDir, TEXT("itl-test-"));
     check(TempDir.Len() > 0);
@@ -134,7 +148,7 @@ void FsparklogsPluginUnitTestSkipByteMarker::GetTests(TArray<FString>& OutBeauti
 }
 bool FsparklogsPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
     
     TArray<FString> ExpectedPayloads;
@@ -175,7 +189,7 @@ void FsparklogsPluginUnitTestSkipEmptyPayloads::GetTests(TArray<FString>& OutBea
 }
 bool FsparklogsPluginUnitTestSkipEmptyPayloads::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -229,7 +243,7 @@ void FsparklogsPluginUnitTestMultipleEvents::GetTests(TArray<FString>& OutBeauti
 }
 bool FsparklogsPluginUnitTestMultipleEvents::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -261,7 +275,7 @@ void FsparklogsPluginUnitTestNewlines::GetTests(TArray<FString>& OutBeautifiedNa
 }
 bool FsparklogsPluginUnitTestNewlines::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -293,7 +307,7 @@ void FsparklogsPluginUnitTestControlChars::GetTests(TArray<FString>& OutBeautifi
 }
 bool FsparklogsPluginUnitTestControlChars::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -325,7 +339,7 @@ void FsparklogsPluginUnitTestUnicode::GetTests(TArray<FString>& OutBeautifiedNam
 }
 bool FsparklogsPluginUnitTestUnicode::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -358,7 +372,7 @@ void FsparklogsPluginUnitTestMaxLineSize::GetTests(TArray<FString>& OutBeautifie
 }
 bool FsparklogsPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -400,7 +414,7 @@ void FsparklogsPluginUnitTestMaxLineSizeUnicode::GetTests(TArray<FString>& OutBe
 }
 bool FsparklogsPluginUnitTestMaxLineSizeUnicode::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -445,7 +459,7 @@ void FsparklogsPluginUnitTestStopAndResume::GetTests(TArray<FString>& OutBeautif
 }
 bool FsparklogsPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -499,7 +513,7 @@ void FsparklogsPluginUnitTestHandleLogRotation::GetTests(TArray<FString>& OutBea
 }
 bool FsparklogsPluginUnitTestHandleLogRotation::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -550,7 +564,7 @@ void FsparklogsPluginUnitTestRetryDelay::GetTests(TArray<FString>& OutBeautified
 }
 bool FsparklogsPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -611,7 +625,7 @@ void FsparklogsPluginUnitTestRetrySamePayloadSize::GetTests(TArray<FString>& Out
 }
 bool FsparklogsPluginUnitTestRetrySamePayloadSize::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -688,7 +702,7 @@ void FsparklogsPluginUnitTestClearRetryTimer::GetTests(TArray<FString>& OutBeaut
 }
 bool FsparklogsPluginUnitTestClearRetryTimer::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -747,7 +761,7 @@ void FsparklogsPluginUnitTestGameInstanceID::GetTests(TArray<FString>& OutBeauti
 }
 bool FsparklogsPluginUnitTestGameInstanceID::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -781,7 +795,7 @@ void FsparklogsPluginUnitTestAdditionalAttributes::GetTests(TArray<FString>& Out
 }
 bool FsparklogsPluginUnitTestAdditionalAttributes::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -818,7 +832,7 @@ void FsparklogsPluginIntegrationTestInfoMessage::GetTests(TArray<FString>& OutBe
 bool FsparklogsPluginIntegrationTestInfoMessage::RunTest(const FString& Parameters)
 {
     FScopedValueSetter<ELogTimes::Type> DoNotPrintTimes(GPrintLogTimes, ELogTimes::None);
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -854,7 +868,7 @@ void FsparklogsPluginIntegrationTestInfoMessageNoTags::GetTests(TArray<FString>&
 }
 bool FsparklogsPluginIntegrationTestInfoMessageNoTags::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -891,7 +905,7 @@ void FsparklogsPluginIntegrationTestMultiline::GetTests(TArray<FString>& OutBeau
 bool FsparklogsPluginIntegrationTestMultiline::RunTest(const FString& Parameters)
 {
     FScopedValueSetter<ELogTimes::Type> DoNotPrintTimes(GPrintLogTimes, ELogTimes::None);
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -927,7 +941,7 @@ void FsparklogsPluginIntegrationTestAddRawEvent::GetTests(TArray<FString>& OutBe
 }
 bool FsparklogsPluginIntegrationTestAddRawEvent::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -979,7 +993,7 @@ void FsparklogsPluginIntegrationTestAutoFlushLog::GetTests(TArray<FString>& OutB
 bool FsparklogsPluginIntegrationTestAutoFlushLog::RunTest(const FString& Parameters)
 {
     FScopedValueSetter<ELogTimes::Type> DoNotPrintTimes(GPrintLogTimes, ELogTimes::None);
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;
@@ -1039,7 +1053,7 @@ void FsparklogsPluginIntegrationTestAutoFlushRawEvent::GetTests(TArray<FString>&
 }
 bool FsparklogsPluginIntegrationTestAutoFlushRawEvent::RunTest(const FString& Parameters)
 {
-    FTempDirectory TempDir(ITLGetTestDir());
+    FITLTestTempDirectory TempDir(ITLGetTestDir());
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), TEXT("test-sparklogs.log"));
 
     TArray<FString> ExpectedPayloads;

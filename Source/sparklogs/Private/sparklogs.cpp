@@ -1390,7 +1390,21 @@ FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const FString& In
 	, LastFlushPlatformTime(0)
 	, BytesQueuedSinceLastFlush(0)
 {
-	ProgressMarkerPath = FPaths::Combine(FPaths::GetPath(InSourceLogFile), GetITLPluginStateFilename());
+	if (FPlatformProperties::RequiresCookedData())
+	{
+		ProgressMarkerPath = GGameUserSettingsIni;
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Constructor|Cooked data is required, using game user settings INI for progress marker..."));
+	}
+	else
+	{
+		ProgressMarkerPath = FConfigCacheIni::NormalizeConfigIniPath((FPaths::Combine(FPaths::GetPath(InSourceLogFile), GetITLPluginStateFilename())));
+		// In UE5 the INI file must exist before attempting to use it in INI functions
+		if (!IFileManager::Get().FileExists(*ProgressMarkerPath))
+		{
+			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Constructor|Creating empty INI for progress marker state|ProgressMarkerPath=%s"), *ProgressMarkerPath);
+			FFileHelper::SaveStringToFile(TEXT(""), *ProgressMarkerPath);
+		}
+	}
 	ComputeCommonEventJSON(Settings->IncludeCommonMetadata, GameInstanceID, AdditionalAttributes);
 
 	WorkerBuffer.AddUninitialized(Settings->BytesPerRequest);
@@ -1582,22 +1596,20 @@ bool FsparklogsReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer, b
 
 bool FsparklogsReadAndStreamToCloud::ReadProgressMarker(int64& OutMarker)
 {
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|ReadProgressMarker|inifile='%s'|BEGIN"), *ProgressMarkerPath);
 	OutMarker = 0;
 	double OutDouble = 0.0;
-	if (IFileManager::Get().FileExists(*ProgressMarkerPath))
+	bool WasDisabled = GConfig->AreFileOperationsDisabled();
+	GConfig->EnableFileOperations();
+	bool Result = GConfig->GetDouble(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, OutDouble, ProgressMarkerPath);
+	if (WasDisabled)
 	{
-		bool WasDisabled = GConfig->AreFileOperationsDisabled();
-		GConfig->EnableFileOperations();
-		bool Result = GConfig->GetDouble(FsparklogsSettings::PluginStateSection, ProgressMarkerValue, OutDouble, *ProgressMarkerPath);
-		if (WasDisabled)
-		{
-			GConfig->DisableFileOperations();
-		}
-		if (!Result)
-		{
-			UE_LOG(LogPluginSparkLogs, Warning, TEXT("Failed to read progress marker from %s"), *ProgressMarkerPath);
-			return false;
-		}
+		GConfig->DisableFileOperations();
+	}
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|ReadProgressMarker|inifile='%s'|Result=%s|Marker=%f"), *ProgressMarkerPath, Result ? TEXT("success") : TEXT("failure"), OutDouble);
+	if (!Result)
+	{
+		OutDouble = 0.0;
 	}
 	// Precise to 52+ bits
 	OutMarker = (int64)(OutDouble);
@@ -1606,11 +1618,12 @@ bool FsparklogsReadAndStreamToCloud::ReadProgressMarker(int64& OutMarker)
 
 bool FsparklogsReadAndStreamToCloud::WriteProgressMarker(int64 InMarker)
 {
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WriteProgressMarker|inifile='%s'|Marker=%lld"), *ProgressMarkerPath, InMarker);
 	// TODO: should we use the sqlite plugin instead, maybe it's not as much overhead as writing INI file each time?
 	// Precise to 52+ bits
 	bool WasDisabled = GConfig->AreFileOperationsDisabled();
 	GConfig->EnableFileOperations();
-	GConfig->SetDouble(FsparklogsSettings::PluginStateSection, ProgressMarkerValue, (double)(InMarker), *ProgressMarkerPath);
+	GConfig->SetDouble(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, (double)(InMarker), ProgressMarkerPath);
 	GConfig->Flush(false, ProgressMarkerPath);
 	if (WasDisabled)
 	{
@@ -1621,7 +1634,15 @@ bool FsparklogsReadAndStreamToCloud::WriteProgressMarker(int64 InMarker)
 
 void FsparklogsReadAndStreamToCloud::DeleteProgressMarker()
 {
-	IFileManager::Get().Delete(*ProgressMarkerPath, false, true, false);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|DeleteProgressMarker|inifile='%s'"), *ProgressMarkerPath);
+	bool WasDisabled = GConfig->AreFileOperationsDisabled();
+	GConfig->EnableFileOperations();
+	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, ProgressMarkerPath);
+	GConfig->Flush(false, ProgressMarkerPath);
+	if (WasDisabled)
+	{
+		GConfig->DisableFileOperations();
+	}
 }
 
 bool FindFirstByte(const uint8* Haystack, uint8 Needle, int MaxToSearch, int& OutIndex)
@@ -1708,7 +1729,7 @@ bool FsparklogsReadAndStreamToCloud::WorkerReadNextPayload(int& OutNumToRead, in
 			OutEffectiveShippedLogOffset = 0;
 			OutNumToRead = 0;
 			OutRemainingBytes = 0;
-			ITL_DBG_UE_LOG(LogPluginSparkLogs, Log, TEXT("STREAMER|WorkerReadNextPayload|Logfile does not yet exist, nothing to read|logfile='%s'"), *SourceLogFile);
+			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerReadNextPayload|Logfile does not yet exist, nothing to read|logfile='%s'"), *SourceLogFile);
 			return true;
 		}
 		else
