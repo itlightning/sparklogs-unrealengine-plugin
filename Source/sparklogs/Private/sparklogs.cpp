@@ -228,6 +228,42 @@ FString ITLParseHttpResponseCookies(FHttpResponsePtr Response)
 	return AllCookies;
 }
 
+FString ITLCalcUniqueFieldName(const TSharedPtr<FJsonObject> Object, const FString& BaseName, int HintStartingNum)
+{
+	if (HintStartingNum < 1)
+	{
+		HintStartingNum = 1;
+	}
+	for (int i=HintStartingNum; true; i++)
+	{
+		FString NextKey = FString::Printf(TEXT("%s%d"), *BaseName, i);
+		if (!Object.IsValid() || !Object->HasField(NextKey))
+		{
+			return NextKey;
+		}
+	}
+}
+
+FString ITLSanitizeINIKeyName(const FString& In)
+{
+	FString SanitizedName(TEXT(""), In.Len() + 8);
+	for (int i = 0; i < In.Len(); i++)
+	{
+		TCHAR C = In[i];
+		if (FChar::IsAlnum(C) || FChar::IsUnderscore(C) || C == TEXT('.'))
+		{
+			// valid
+		}
+		else if (FChar::IsControl(C) || FChar::IsGraph(C) || FChar::IsLinebreak(C) || FChar::IsWhitespace(C) || FChar::IsPrint(C) || FChar::IsPunct(C))
+		{
+			C = TEXT('_');
+		}
+		// else char is considered valid (e.g., some other unicode character that should be OK in key names)
+		SanitizedName += C;
+	}
+	return SanitizedName;
+}
+
 const TCHAR* INISectionForEditor = TEXT("Editor");
 const TCHAR* INISectionForCommandlet = TEXT("Commandlet");
 const TCHAR* INISectionForServer = TEXT("Server");
@@ -674,7 +710,7 @@ int FsparklogsSettings::GetTransactionNumber(bool Increment)
 
 int FsparklogsSettings::GetAttemptNumber(const FString& EventID, bool Increment, bool DeleteAfter)
 {
-	FString MapKey = EventID.ToLower();
+	FString MapKey = ITLSanitizeINIKeyName(EventID.ToLower());
 	FString Key = TEXT("AnalyticsAttemptNumber_") + MapKey;
 	bool Changed = false;
 	FScopeLock WriteLock(&CachedCriticalSection);
@@ -3757,28 +3793,28 @@ void FsparklogsAnalyticsProvider::SetBuildInfo(const FString& InBuildInfo)
 {
 	FAnalyticsEventAttribute Attr(MetaFieldBuild, InBuildInfo);
 	FScopeLock WriteLock(&DataCriticalSection);
-	AddAnalyticsEventAttributeToJsonObject(MetaAttributes, Attr);
+	AddAnalyticsEventAttributeToJsonObject(MetaAttributes, Attr, 1);
 }
 
 void FsparklogsAnalyticsProvider::SetGender(const FString& InGender)
 {
 	FAnalyticsEventAttribute Attr(MetaFieldGender, InGender);
 	FScopeLock WriteLock(&DataCriticalSection);
-	AddAnalyticsEventAttributeToJsonObject(MetaAttributes, Attr);
+	AddAnalyticsEventAttributeToJsonObject(MetaAttributes, Attr, 1);
 }
 
 void FsparklogsAnalyticsProvider::SetLocation(const FString& InLocation)
 {
 	FAnalyticsEventAttribute Attr(MetaFieldLocation, InLocation);
 	FScopeLock WriteLock(&DataCriticalSection);
-	AddAnalyticsEventAttributeToJsonObject(MetaAttributes, Attr);
+	AddAnalyticsEventAttributeToJsonObject(MetaAttributes, Attr, 1);
 }
 
 void FsparklogsAnalyticsProvider::SetAge(const int32 InAge)
 {
 	FAnalyticsEventAttribute Attr(MetaFieldAge, InAge);
 	FScopeLock WriteLock(&DataCriticalSection);
-	AddAnalyticsEventAttributeToJsonObject(MetaAttributes, Attr);
+	AddAnalyticsEventAttributeToJsonObject(MetaAttributes, Attr, 1);
 }
 
 void FsparklogsAnalyticsProvider::RecordEvent(const FString& EventName, const TArray<FAnalyticsEventAttribute>& Attributes)
@@ -4207,11 +4243,16 @@ FString FsparklogsAnalyticsProvider::CalculateFinalMessage(const FString& Defaul
 	return FinalMessage;
 }
 
-void FsparklogsAnalyticsProvider::AddAnalyticsEventAttributeToJsonObject(const TSharedPtr<FJsonObject> Object, const FAnalyticsEventAttribute& Attr)
+void FsparklogsAnalyticsProvider::AddAnalyticsEventAttributeToJsonObject(const TSharedPtr<FJsonObject> Object, const FAnalyticsEventAttribute& Attr, int AttrNumber)
 {
 	if (!Object.IsValid())
 	{
 		return;
+	}
+	FString AttrName = Attr.GetName().TrimStartAndEnd();
+	if (AttrName.IsEmpty())
+	{
+		AttrName = ITLCalcUniqueFieldName(Object, TEXT("Custom"), AttrNumber);
 	}
 	if (Attr.IsJsonFragment())
 	{
@@ -4219,26 +4260,33 @@ void FsparklogsAnalyticsProvider::AddAnalyticsEventAttributeToJsonObject(const T
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Attr.GetValue());
 		if (FJsonSerializer::Deserialize(Reader, FragmentValue) && FragmentValue.IsValid())
 		{
-			Object->SetField(Attr.GetName(), FragmentValue);
+			Object->SetField(AttrName, FragmentValue);
 			return;
 		}
 	}
-	Object->SetStringField(Attr.GetName(), Attr.GetValue());
+	Object->SetStringField(AttrName, Attr.GetValue());
 }
 
 void FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(const TSharedPtr<FJsonObject> Object, const TArray<FAnalyticsEventAttribute>& EventAttrs)
 {
+	int AttrNumber = 1;
 	for (const FAnalyticsEventAttribute& Attr : EventAttrs)
 	{
-		AddAnalyticsEventAttributeToJsonObject(Object, Attr);
+		AddAnalyticsEventAttributeToJsonObject(Object, Attr, AttrNumber);
+		AttrNumber++;
 	}
 }
 
-void FsparklogsAnalyticsProvider::AddAnalyticsEventAttributeToJsonObject(const TSharedPtr<FJsonObject> Object, const FsparklogsAnalyticsAttribute& Attr)
+void FsparklogsAnalyticsProvider::AddAnalyticsEventAttributeToJsonObject(const TSharedPtr<FJsonObject> Object, const FsparklogsAnalyticsAttribute& Attr, int AttrNumber)
 {
 	if (!Object.IsValid())
 	{
 		return;
+	}
+	FString AttrName = Attr.Key.TrimStartAndEnd();
+	if (AttrName.IsEmpty())
+	{
+		AttrName = ITLCalcUniqueFieldName(Object, TEXT("Custom"), AttrNumber);
 	}
 	if (Attr.Value.Len() >= 2 && Attr.Value[0] == TEXT('{') && Attr.Value[Attr.Value.Len() - 1] == TEXT('}'))
 	{
@@ -4246,18 +4294,20 @@ void FsparklogsAnalyticsProvider::AddAnalyticsEventAttributeToJsonObject(const T
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Attr.Value);
 		if (FJsonSerializer::Deserialize(Reader, FragmentValue) && FragmentValue.IsValid())
 		{
-			Object->SetField(Attr.Key, FragmentValue);
+			Object->SetField(AttrName, FragmentValue);
 			return;
 		}
 	}
-	Object->SetStringField(Attr.Key, Attr.Value);
+	Object->SetStringField(AttrName, Attr.Value);
 }
 
 void FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(const TSharedPtr<FJsonObject> Object, const TArray<FsparklogsAnalyticsAttribute>& EventAttrs)
 {
+	int AttrNumber = 1;
 	for (const FsparklogsAnalyticsAttribute& Attr : EventAttrs)
 	{
-		AddAnalyticsEventAttributeToJsonObject(Object, Attr);
+		AddAnalyticsEventAttributeToJsonObject(Object, Attr, AttrNumber);
+		AttrNumber++;
 	}
 }
 

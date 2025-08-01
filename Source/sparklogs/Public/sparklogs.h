@@ -62,6 +62,13 @@ SPARKLOGS_API bool ITLIsMobilePlatform();
   * Cookie header on a new HTTP request. It strips all optional fields from cookies and just adds the name=value for each cookie. */
 SPARKLOGS_API FString ITLParseHttpResponseCookies(FHttpResponsePtr Response);
 
+/** Returns a unique field name that does not already have a value in the given JSON object, based on the base field name.
+  * Appends a number to the base name and iterates forward from there. Can optionally start searching farther along. */
+SPARKLOGS_API FString ITLCalcUniqueFieldName(const TSharedPtr<FJsonObject> Object, const FString& BaseName, int HintStartingNum);
+
+/** Returns a sanitized version of the given string that is safe to use as an INI key name */
+SPARKLOGS_API FString ITLSanitizeINIKeyName(const FString & In);
+
 /** The type of data compression to use. */
 enum class SPARKLOGS_API ITLCompressionMode
 {
@@ -1506,9 +1513,9 @@ public:
 	void FinalizeAnalyticsEvent(const TCHAR* EventType, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession, TSharedPtr<FJsonObject>& Object);
 
 public:
-	static void AddAnalyticsEventAttributeToJsonObject(const TSharedPtr<FJsonObject> Object, const FAnalyticsEventAttribute& Attr);
+	static void AddAnalyticsEventAttributeToJsonObject(const TSharedPtr<FJsonObject> Object, const FAnalyticsEventAttribute& Attr, int AttrNumber);
 	static void AddAnalyticsEventAttributesToJsonObject(const TSharedPtr<FJsonObject> Object, const TArray<FAnalyticsEventAttribute>& EventAttrs);
-	static void AddAnalyticsEventAttributeToJsonObject(const TSharedPtr<FJsonObject> Object, const FsparklogsAnalyticsAttribute& Attr);
+	static void AddAnalyticsEventAttributeToJsonObject(const TSharedPtr<FJsonObject> Object, const FsparklogsAnalyticsAttribute& Attr, int AttrNumber);
 	static void AddAnalyticsEventAttributesToJsonObject(const TSharedPtr<FJsonObject> Object, const TArray<FsparklogsAnalyticsAttribute>& EventAttrs);
 	static FAnalyticsEventAttribute ConvertJsonValueToEventAttribute(const FString& Key, TSharedPtr<FJsonValue> Value);
 	// Returns a JSON array value that contains the strings from the given array. Ignores empty string values in the array.
