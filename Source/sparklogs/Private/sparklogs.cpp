@@ -254,7 +254,13 @@ FString ITLSanitizeINIKeyName(const FString& In)
 		{
 			// valid
 		}
-		else if (FChar::IsControl(C) || FChar::IsGraph(C) || FChar::IsLinebreak(C) || FChar::IsWhitespace(C) || FChar::IsPrint(C) || FChar::IsPunct(C))
+#if ENGINE_MAJOR_VERSION >= 5
+		else if (FChar::IsControl(C))
+		{
+			C = TEXT('_');
+		}
+#endif
+		else if (FChar::IsGraph(C) || FChar::IsLinebreak(C) || FChar::IsWhitespace(C) || FChar::IsPrint(C) || FChar::IsPunct(C))
 		{
 			C = TEXT('_');
 		}
