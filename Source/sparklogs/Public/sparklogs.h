@@ -98,6 +98,7 @@ public:
 	static constexpr const TCHAR* AnalyticsUserIDTypeDeviceID = TEXT("device_id");
 	static constexpr const TCHAR* AnalyticsUserIDTypeGenerated = TEXT("generated");
 	static constexpr const TCHAR* DefaultAnalyticsUserIDType = AnalyticsUserIDTypeDeviceID;
+	static constexpr const TCHAR* DefaultAnalyticsTargetCurrency = TEXT("USD");
 	static constexpr bool DefaultAnalyticsMobileAutoSessionStart = true;
 	static constexpr bool DefaultAnalyticsMobileAutoSessionEnd = true;
 
@@ -149,6 +150,8 @@ public:
 	FString AnalyticsGameID;
 	/** The type of user ID to use for analytics. */
 	ITLAnalyticsUserIDType AnalyticsUserIDType;
+	/** The target currency to use for automatic currency conversion. */
+	FString AnalyticsTargetCurrency;
 	/** On mobile platforms whether or not to auto-start a session when the game starts or when the app enters the foreground. */
 	bool AnalyticsMobileAutoSessionStart;
 	/** On mobile platforms whether or not to auto-end a session when the app enters the background. */
@@ -276,6 +279,16 @@ class SPARKLOGS_API USparkLogsRuntimeSettings : public UObject
 	GENERATED_BODY()
 
 public:
+	UFUNCTION()
+	static TArray<FString> GetSparkLogsCloudRegionOptions()
+	{
+		return {
+			TEXT(""),
+			TEXT("us"),
+			TEXT("eu"),
+		};
+	}
+
 	// ------------------------------------------ ANALYTICS
 	
 	// ID to identify this game when storing analytics (can be any arbitrary string, e.g., "my_platformer_game"). Required for analytics data to be sent.
@@ -292,6 +305,27 @@ public:
 		return {
 			FsparklogsSettings::AnalyticsUserIDTypeDeviceID,
 			FsparklogsSettings::AnalyticsUserIDTypeGenerated,
+		};
+	}
+
+	// The target currency to use for automatic currency conversion.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Analytics", DisplayName = "Automatic Currency Conversion Target Currency", meta = (GetOptions = "GetAnalyticsTargetCurrencyOptions"))
+	FString AnalyticsTargetCurrency = FsparklogsSettings::DefaultAnalyticsTargetCurrency;
+
+	UFUNCTION()
+	static TArray<FString> GetAnalyticsTargetCurrencyOptions()
+	{
+		return {
+			TEXT("AUD"),
+			TEXT("CAD"),
+			TEXT("CHF"),
+			TEXT("CNY"),
+			TEXT("EUR"),
+			TEXT("GBP"),
+			TEXT("INR"),
+			TEXT("JPY"),
+			TEXT("USD"),
+			TEXT("None"),
 		};
 	}
 
@@ -314,7 +348,7 @@ public:
 	bool ServerCollectLogs = FsparklogsSettings::DefaultServerCollectLogs;
 
 	// Set to 'us' or 'eu' based on what your SparkLogs workspace is provisioned to use.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "SparkLogs Cloud Region")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "SparkLogs Cloud Region", meta = (GetOptions = "GetSparkLogsCloudRegionOptions"))
 	FString ServerCloudRegion;
 
 	// For authentication: ID of the cloud agent that will receive the ingested log data.
@@ -329,7 +363,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Custom HTTP Endpoint URI")
 	FString ServerHTTPEndpointURI;
 
-	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue */
+	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Custom HTTP Authorization Header Value")
 	FString ServerHTTPAuthorizationHeaderValue;
 
@@ -360,7 +394,7 @@ public:
 	bool EditorCollectLogs = FsparklogsSettings::DefaultEditorCollectLogs;
 
 	// Set to 'us' or 'eu' based on what your SparkLogs workspace is provisioned to use. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "SparkLogs Cloud Region")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true, GetOptions = "GetSparkLogsCloudRegionOptions"), DisplayName = "SparkLogs Cloud Region")
 	FString EditorCloudRegion;
 
 	// For authentication: ID of the cloud agent that will receive the ingested log data. [EDITOR RESTART REQUIRED]
@@ -375,7 +409,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Custom HTTP Endpoint URI")
 	FString EditorHTTPEndpointURI;
 
-	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue [EDITOR RESTART REQUIRED] */
+	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Custom HTTP Authorization Header Value")
 	FString EditorHTTPAuthorizationHeaderValue;
 
@@ -406,7 +440,7 @@ public:
 	bool ClientCollectLogs = FsparklogsSettings::DefaultClientCollectLogs;
 
 	// Set to 'us' or 'eu' based on what your SparkLogs workspace is provisioned to use.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "SparkLogs Cloud Region")
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "SparkLogs Cloud Region", meta = (GetOptions = "GetSparkLogsCloudRegionOptions"))
 	FString ClientCloudRegion;
 
 	// For authentication: ID of the cloud agent that will receive the ingested log data.
@@ -421,7 +455,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Custom HTTP Endpoint URI")
 	FString ClientHTTPEndpointURI;
 
-	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue */
+	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Custom HTTP Authorization Header Value")
 	FString ClientHTTPAuthorizationHeaderValue;
 
@@ -585,6 +619,7 @@ class SPARKLOGS_API FsparklogsWriteHTTPPayloadProcessor : public IsparklogsPaylo
 protected:
 	FString EndpointURI;
 	FString AuthorizationHeader;
+	FString TargetCurrency;
 	FThreadSafeCounter TimeoutMillisec;
 	bool LogRequests;
 
@@ -593,7 +628,7 @@ protected:
 	FString DataCookieHeader;
 
 public:
-	FsparklogsWriteHTTPPayloadProcessor(const TCHAR* InEndpointURI, const TCHAR* InAuthorizationHeader, double InTimeoutSecs, bool InLogRequests);
+	FsparklogsWriteHTTPPayloadProcessor(const FString& InEndpointURI, const FString& InAuthorizationHeader, double InTimeoutSecs, bool InLogRequests, const FString& InTargetCurrency);
 	virtual bool ProcessPayload(TArray<uint8>& JSONPayloadInUTF8, int PayloadLen, int OriginalPayloadLen, ITLCompressionMode CompressionMode, TWeakPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> StreamerWeakPtr) override;
 	void SetTimeoutSecs(double InTimeoutSecs);
 
@@ -1576,6 +1611,9 @@ public:
 	/** If not empty, will override the analytics user ID that is automatically generated (how depends on the config setting).
 	 * Any custom analytics user ID should be globally unique and make sure to respect any privacy rules for your app. */
 	FString OverrideAnalyticsUserID;
+
+	/** Override the target currency for automatic currency conversion (one of AUD, CAD, CHF, CNY, EUR, GBP, INR, JPY, and USD) */
+	FString OverrideAnalyticsTargetCurrency;
 	
 	/** If not empty, will override the config setting for the agent ID used to authenticate with the SparkLogs cloud. */
 	FString OverrideAgentID;

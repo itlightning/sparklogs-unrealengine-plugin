@@ -508,6 +508,7 @@ SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length)
 
 FsparklogsSettings::FsparklogsSettings()
 	: AnalyticsUserIDType(ITLAnalyticsUserIDType::DeviceID)
+	, AnalyticsTargetCurrency(DefaultAnalyticsTargetCurrency)
 	, AnalyticsMobileAutoSessionStart(DefaultAnalyticsMobileAutoSessionStart)
 	, AnalyticsMobileAutoSessionEnd(DefaultAnalyticsMobileAutoSessionEnd)
 	, CollectAnalytics(true)
@@ -843,6 +844,11 @@ void FsparklogsSettings::LoadSettings()
 		}
 		AnalyticsUserIDType = ITLAnalyticsUserIDType::DeviceID;
 	}
+	AnalyticsTargetCurrency = GConfig->GetStr(*Section, TEXT("AnalyticsTargetCurrency"), GEngineIni).ToUpper().TrimStartAndEnd();
+	if (AnalyticsTargetCurrency.IsEmpty())
+	{
+		AnalyticsTargetCurrency = DefaultAnalyticsTargetCurrency;
+	}
 	if (!GConfig->GetBool(*Section, TEXT("AnalyticsMobileAutoSessionStart"), AnalyticsMobileAutoSessionStart, GEngineIni))
 	{
 		AnalyticsMobileAutoSessionStart = DefaultAnalyticsMobileAutoSessionStart;
@@ -1077,9 +1083,10 @@ bool FsparklogsWriteNDJSONPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPa
 
 // =============== FsparklogsWriteHTTPPayloadProcessor ===============================================================================
 
-FsparklogsWriteHTTPPayloadProcessor::FsparklogsWriteHTTPPayloadProcessor(const TCHAR* InEndpointURI, const TCHAR* InAuthorizationHeader, double InTimeoutSecs, bool InLogRequests)
+FsparklogsWriteHTTPPayloadProcessor::FsparklogsWriteHTTPPayloadProcessor(const FString& InEndpointURI, const FString& InAuthorizationHeader, double InTimeoutSecs, bool InLogRequests, const FString& InTargetCurrency)
 	: EndpointURI(InEndpointURI)
 	, AuthorizationHeader(InAuthorizationHeader)
+	, TargetCurrency(InTargetCurrency)
 	, LogRequests(InLogRequests)
 {
 	SetTimeoutSecs(InTimeoutSecs);
@@ -1108,6 +1115,10 @@ bool FsparklogsWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayl
 	SetHTTPTimezoneHeader(HttpRequest);
 	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json; charset=UTF-8"));
 	HttpRequest->SetHeader(TEXT("Authorization"), *AuthorizationHeader);
+	if (!TargetCurrency.IsEmpty())
+	{
+		HttpRequest->SetHeader(TEXT("X-Target-Currency"), *TargetCurrency);
+	}
 	FString LocalCookieHeader = GetDataCookieHeader();
 	if (LocalCookieHeader.Len() > 0)
 	{
@@ -4515,6 +4526,11 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 	{
 		Settings->SetUserID(*options.OverrideAnalyticsUserID);
 	}
+	FString EffectiveTargetCurrency = Settings->AnalyticsTargetCurrency;
+	if (!options.OverrideAnalyticsTargetCurrency.IsEmpty())
+	{
+		EffectiveTargetCurrency = options.OverrideAnalyticsTargetCurrency;
+	}
 	bool EffectiveCollectLogs = Settings->CollectLogs;
 	if (options.OverrideCollectLogs != ESparkLogsOverrideBool::Default)
 	{
@@ -4623,7 +4639,7 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 		{
 			AuthorizationHeader = EffectiveHttpAuthorizationHeaderValue;
 		}
-		CloudPayloadProcessor = TSharedPtr<FsparklogsWriteHTTPPayloadProcessor, ESPMode::ThreadSafe>(new FsparklogsWriteHTTPPayloadProcessor(*EffectiveHttpEndpointURI, *AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests));
+		CloudPayloadProcessor = TSharedPtr<FsparklogsWriteHTTPPayloadProcessor, ESPMode::ThreadSafe>(new FsparklogsWriteHTTPPayloadProcessor(EffectiveHttpEndpointURI, AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests, EffectiveTargetCurrency));
 		CloudStreamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, options.OverrideComputerName, GameInstanceID, &options.AdditionalAttributes));
 		CloudStreamer->SetWeakThisPtr(CloudStreamer);
 		FCoreDelegates::OnExit.AddRaw(this, &FsparklogsModule::OnEngineExit);
