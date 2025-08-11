@@ -31,6 +31,9 @@ DECLARE_LOG_CATEGORY_EXTERN(LogPluginSparkLogs, Log, All);
 	do { } while (0);
 #endif
 
+/** Returns the version of this plugin */
+SPARKLOGS_API FString ITLGetPluginVersion();
+
 /** Convenience function to convert UTF8 data to an FString. Can incur allocations so use sparingly or only on debug paths. */
 SPARKLOGS_API FString ITLConvertUTF8(const void* Data, int Len);
 

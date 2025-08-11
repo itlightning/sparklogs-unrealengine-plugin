@@ -52,6 +52,19 @@ const FName SparkLogsCategoryName(LogPluginSparkLogs.GetCategoryName());
 const FName SparkLogsCategoryName(TEXT("LogPluginSparkLogs"));
 #endif
 
+FString ITLGetPluginVersion()
+{
+	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(ITL_PLUGIN_MODULE_NAME);
+	if (Plugin.IsValid())
+	{
+		return Plugin->GetDescriptor().VersionName;
+	}
+	else
+	{
+		return TEXT("?");
+	}
+}
+
 FString ITLConvertUTF8(const void* Data, int Len)
 {
 	FUTF8ToTCHAR Converter((const ANSICHAR*)(Data), Len);
@@ -4336,12 +4349,7 @@ void FsparklogsAnalyticsProvider::SetupDefaultMetaAttributes()
 	MetaAttributes->SetStringField(MetaFieldOSVersion, OSVersion);
 		
 	constexpr const TCHAR* EngineType = TEXT("unreal-");
-	FString SDKVersion = TEXT("?");
-	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(ITL_PLUGIN_MODULE_NAME);
-	if (Plugin.IsValid())
-	{
-		SDKVersion = FString(EngineType) + FString(TEXT("plugin-")) + Plugin->GetDescriptor().VersionName;
-	}
+	FString SDKVersion = FString(EngineType) + FString(TEXT("plugin-")) + ITLGetPluginVersion();
 	MetaAttributes->SetStringField(MetaFieldSDKVersion, SDKVersion);
 	
 	FEngineVersion EngineVersion = FEngineVersion::Current();
@@ -4389,6 +4397,9 @@ void FsparklogsModule::StartupModule()
 	FCoreDelegates::OnPostEngineInit.AddRaw(this, &FsparklogsModule::OnPostEngineInit);
 	FCoreDelegates::ApplicationWillEnterBackgroundDelegate.AddRaw(this, &FsparklogsModule::OnAppEnterBackground);
 	FCoreDelegates::ApplicationHasEnteredForegroundDelegate.AddRaw(this, &FsparklogsModule::OnAppEnterForeground);
+
+	UE_LOG(LogPluginSparkLogs, Display, TEXT("SparkLogsPlugin is starting up! Build_Version=%s SettingsConfiguration=%s"), *ITLGetPluginVersion(), GetITLLaunchConfiguration(true));
+
 	// TODO: does it matter if we are loaded later and miss a bunch of log entries during engine initialization?
 	// TODO: Should run plugin earlier and check command line to determine if this is running in an editor with
 	//       similar logic to FEngineLoop::PreInitPreStartupScreen [LaunchEngineLoop.cpp] (GIsEditor not available earlier).
@@ -4519,6 +4530,9 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 		return true;
 	}
 
+	// Always make sure that we're using current settings
+	Settings->LoadSettings();
+
 	// Lock in the application install date early even if analytics is not necessarily enabled yet
 	Settings->GetEffectiveAnalyticsInstallTime();
 
@@ -4596,12 +4610,6 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 		return false;
 	}
 
-	if (!EffectiveCollectLogs && !EffectiveCollectAnalytics)
-	{
-		UE_LOG(LogPluginSparkLogs, Log, TEXT("Log collection and analytics collection are both disabled. No reason to start engine."));
-		return false;
-	}
-
 	float DiceRoll = options.AlwaysStart ? 10000.0 : FMath::FRandRange(0.0, 100.0);
 	EngineActive = DiceRoll < Settings->ActivationPercentage;
 	if (EngineActive)
@@ -4614,7 +4622,14 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 			GLog->AddOutputDevice(GetITLInternalGameLog(nullptr).LogDevice.Get());
 		}
 	}
+
 	UE_LOG(LogPluginSparkLogs, Log, TEXT("Starting up: LaunchConfiguration=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s, CollectLogs=%s, CollectAnalytics=%s"), GetITLLaunchConfiguration(true), *EffectiveHttpEndpointURI, *EffectiveAgentID, Settings->ActivationPercentage, DiceRoll, EngineActive ? TEXT("yes") : TEXT("no"), EffectiveCollectLogs ? TEXT("yes") : TEXT("no"), EffectiveCollectAnalytics ? TEXT("yes") : TEXT("no"));
+	if (!EffectiveCollectLogs && !EffectiveCollectAnalytics)
+	{
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("Log collection and analytics collection are both disabled. No reason to start engine."));
+		return false;
+	}
+
 	if (EngineActive)
 	{
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Ingestion parameters: RequestTimeoutSecs=%lf, BytesPerRequest=%d, ProcessingIntervalSecs=%lf, RetryIntervalSecs=%lf, UnflushedBytesToAutoFlush=%d, MinIntervalBetweenFlushes=%lf"), Settings->RequestTimeoutSecs, Settings->BytesPerRequest, Settings->ProcessingIntervalSecs, Settings->RetryIntervalSecs, (int)Settings->UnflushedBytesToAutoFlush, Settings->MinIntervalBetweenFlushes);
