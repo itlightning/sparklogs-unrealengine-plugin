@@ -1027,7 +1027,7 @@ public:
 	  * There are no cardinality limits on the combination of values for ItemCategory & ItemId,
 	  * but we recommend you limit the category and item IDs to make your analysis more meaningful.
 	  *
-	  * RealCurrencyCode should be an alphabetic ISO 4217 code (e.g., USD, EUR, etc.) (if nullptr will assume USD).
+	  * RealCurrencyCode should be an alphabetic ISO 4217 code (e.g., USD, EUR, etc.).
 	  * Amount should be the actual amount of that local currency. e.g., one dollar and 99 cents would be "1.99".
 	  *
 	  * You can optionally specify a reason that triggered the purchase.
@@ -1401,6 +1401,7 @@ public:
 	static constexpr const TCHAR* PurchaseFieldItemId = TEXT("item_id");
 	static constexpr const TCHAR* PurchaseFieldCurrency = TEXT("currency");
 	static constexpr const TCHAR* PurchaseFieldAmount = TEXT("amount");
+	static constexpr const TCHAR* PurchaseFieldTransactionNumber = TEXT("transaction_num");
 	static constexpr const TCHAR* PurchaseFieldReason = TEXT("reason");
 
 	static constexpr const TCHAR* ResourceFieldEventId = TEXT("event_id");

@@ -3273,12 +3273,17 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventPurchase(const TCHAR* Item
 	}
 	if (RealCurrencyCode == nullptr || *RealCurrencyCode == 0)
 	{
-		RealCurrencyCode = TEXT("USD");
+		RealCurrencyCode = TEXT("?");
 	}
 	FString RealCurrencyCodeStr(RealCurrencyCode);
 	RealCurrencyCodeStr.ToUpperInline();
 	Data->SetStringField(PurchaseFieldCurrency, RealCurrencyCodeStr);
 	Data->SetNumberField(PurchaseFieldAmount, Amount);
+	int TransactionNumber = Settings->GetTransactionNumber(true);
+	if (TransactionNumber > 0)
+	{
+		Data->SetNumberField(PurchaseFieldTransactionNumber, (double)TransactionNumber);
+	}
 	if (Reason != nullptr && *Reason != 0)
 	{
 		Data->SetStringField(PurchaseFieldReason, Reason);
