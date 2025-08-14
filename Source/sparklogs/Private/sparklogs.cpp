@@ -3422,8 +3422,13 @@ FString FsparklogsAnalyticsProvider::GetProgressionEventID(const TArray<FString>
 	{
 		return FString();
 	}
+	return FlattenEventIDs(PArray);
+}
+
+FString FsparklogsAnalyticsProvider::FlattenEventIDs(const TArray<FString>& A)
+{
 	FString EventID;
-	for (auto it = PArray.CreateConstIterator(); it; ++it)
+	for (auto it = A.CreateConstIterator(); it; ++it)
 	{
 		const FString& S = *it;
 		if (!S.IsEmpty())
@@ -4196,6 +4201,19 @@ void FsparklogsAnalyticsProvider::SetSessionStarted(FDateTime DT)
 	SessionStarted = DT;
 }
 
+TArray<FString> FsparklogsAnalyticsProvider::GetUserLabels()
+{
+	FScopeLock ReadLock(&DataCriticalSection);
+	return UserLabels;
+}
+
+void FsparklogsAnalyticsProvider::SetUserLabels(const TArray<FString>& Labels)
+{
+	FScopeLock WriteLock(&DataCriticalSection);
+	UserLabels = Labels;
+	UserLabels.StableSort();
+}
+
 void FsparklogsAnalyticsProvider::FinalizeAnalyticsEvent(const TCHAR* EventType, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession, TSharedPtr<FJsonObject>& Object)
 {
 	FScopeLock ReadLock(&DataCriticalSection);
@@ -4213,6 +4231,9 @@ void FsparklogsAnalyticsProvider::InternalFinalizeAnalyticsEvent(const TCHAR* Ev
 	{
 		Object->SetStringField(StandardFieldEventType, EventType);
 	}
+
+	TArray<FString> UserLabelsArray = GetUserLabels();
+	FString UserLabels = FlattenEventIDs(UserLabelsArray);
 
 	FString GameID = Settings->AnalyticsGameID;
 	FString UserID = Settings->GetEffectiveAnalyticsUserID();
@@ -4248,6 +4269,11 @@ void FsparklogsAnalyticsProvider::InternalFinalizeAnalyticsEvent(const TCHAR* Ev
 	}
 	Object->SetStringField(StandardFieldSessionType, GetITLLaunchConfiguration(false));
 	Object->SetStringField(StandardFieldGameId, GameID);
+	if (!UserLabels.IsEmpty())
+	{
+		Object->SetStringField(StandardFieldUserLabels, UserLabels);
+		Object->SetField(StandardFieldUserLabelsArray, ConvertNonEmptyStringArrayToJSON(UserLabelsArray));
+	}
 	Object->SetStringField(StandardFieldUserId, UserID);
 	Object->SetStringField(StandardFieldPlayerId, PlayerID);
 
@@ -4545,6 +4571,11 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 	{
 		Settings->SetUserID(*options.OverrideAnalyticsUserID);
 	}
+	if (options.UserLabels.Num() > 0)
+	{
+		GetAnalyticsProvider()->SetUserLabels(options.UserLabels);
+	}
+
 	FString EffectiveTargetCurrency = Settings->AnalyticsTargetCurrency;
 	if (!options.OverrideAnalyticsTargetCurrency.IsEmpty())
 	{
