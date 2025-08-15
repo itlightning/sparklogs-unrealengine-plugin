@@ -3172,6 +3172,110 @@ void UsparklogsAnalytics::RecordDesignArrayWithReasonWithAttr(const TArray<FStri
 	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventDesign(EventIDParts, nullptr, *Reason, CustomObject);
 }
 
+bool UsparklogsAnalytics::AddAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventAd(AdProvider, AdPlacement, AdType, AdAction, AdFailReason, RevenueCurrency, Revenue, DurationSecs, Count, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventAd(AdProvider, AdPlacement, AdType, AdAction, AdFailReason, RevenueCurrency, Revenue, DurationSecs, Count, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventAd(AdProvider, AdPlacement, AdType, AdAction, AdFailReason, RevenueCurrency, Revenue, DurationSecs, Count, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventAd(AdProvider, AdPlacement, AdType, AdAction, AdFailReason, RevenueCurrency, Revenue, DurationSecs, Count, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, const TCHAR* AdType, const TCHAR* AdAction, const TCHAR* AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventAd(AdProvider, AdPlacement, AdType, AdAction, AdFailReason, RevenueCurrency, Revenue, DurationSecs, Count, nullptr, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, const TCHAR* AdType, const TCHAR* AdAction, const TCHAR* AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventAd(AdProvider, AdPlacement, AdType, AdAction, AdFailReason, RevenueCurrency, Revenue, DurationSecs, Count, nullptr, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, const TCHAR* AdType, const TCHAR* AdAction, const TCHAR* AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, const TCHAR* Reason, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventAd(AdProvider, AdPlacement, AdType, AdAction, AdFailReason, RevenueCurrency, Revenue, DurationSecs, Count, Reason, nullptr, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool UsparklogsAnalytics::AddAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, const TCHAR* AdType, const TCHAR* AdAction, const TCHAR* AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventAd(AdProvider, AdPlacement, AdType, AdAction, AdFailReason, RevenueCurrency, Revenue, DurationSecs, Count, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+void UsparklogsAnalytics::RecordAd(const FString& AdProvider, const FString& AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const FString& RevenueCurrency, float Revenue, float DurationSecs, int Count)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventAd(*AdProvider, *AdPlacement, AdType, AdAction, AdFailReason, *RevenueCurrency, Revenue, DurationSecs, Count, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordAdWithAttrs(const FString& AdProvider, const FString& AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const FString& RevenueCurrency, float Revenue, float DurationSecs, int Count, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	TSharedPtr<FJsonObject> CustomObject;
+	if (CustomAttrs.Num() > 0)
+	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
+		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
+	}
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventAd(*AdProvider, *AdPlacement, AdType, AdAction, AdFailReason, *RevenueCurrency, Revenue, DurationSecs, Count, nullptr, CustomObject);
+}
+
+void UsparklogsAnalytics::RecordAdWithReason(const FString& AdProvider, const FString& AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const FString& RevenueCurrency, float Revenue, float DurationSecs, int Count, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventAd(*AdProvider, *AdPlacement, AdType, AdAction, AdFailReason, *RevenueCurrency, Revenue, DurationSecs, Count, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordAdWithReasonWithAttrs(const FString& AdProvider, const FString& AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const FString& RevenueCurrency, float Revenue, float DurationSecs, int Count, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	TSharedPtr<FJsonObject> CustomObject;
+	if (CustomAttrs.Num() > 0)
+	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
+		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
+	}
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventAd(*AdProvider, *AdPlacement, AdType, AdAction, AdFailReason, *RevenueCurrency, Revenue, DurationSecs, Count, *Reason, CustomObject);
+}
+
+void UsparklogsAnalytics::RecordAdWithStrings(const FString& AdProvider, const FString& AdPlacement, const FString& AdType, const FString& AdAction, const FString& AdFailReason, const FString& RevenueCurrency, float Revenue, float DurationSecs, int Count)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventAd(*AdProvider, *AdPlacement, *AdType, *AdAction, *AdFailReason, *RevenueCurrency, Revenue, DurationSecs, Count, nullptr, nullptr);
+}
+
+void UsparklogsAnalytics::RecordAdWithStringsWithAttrs(const FString& AdProvider, const FString& AdPlacement, const FString& AdType, const FString& AdAction, const FString& AdFailReason, const FString& RevenueCurrency, float Revenue, float DurationSecs, int Count, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	TSharedPtr<FJsonObject> CustomObject;
+	if (CustomAttrs.Num() > 0)
+	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
+		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
+	}
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventAd(*AdProvider, *AdPlacement, *AdType, *AdAction, *AdFailReason, *RevenueCurrency, Revenue, DurationSecs, Count, nullptr, CustomObject);
+}
+
+void UsparklogsAnalytics::RecordAdWithStringsWithReason(const FString& AdProvider, const FString& AdPlacement, const FString& AdType, const FString& AdAction, const FString& AdFailReason, const FString& RevenueCurrency, float Revenue, float DurationSecs, int Count, const FString& Reason)
+{
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventAd(*AdProvider, *AdPlacement, *AdType, *AdAction, *AdFailReason, *RevenueCurrency, Revenue, DurationSecs, Count, *Reason, nullptr);
+}
+
+void UsparklogsAnalytics::RecordAdWithStringsWithReasonWithAttrs(const FString& AdProvider, const FString& AdPlacement, const FString& AdType, const FString& AdAction, const FString& AdFailReason, const FString& RevenueCurrency, float Revenue, float DurationSecs, int Count, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs)
+{
+	TSharedPtr<FJsonObject> CustomObject;
+	if (CustomAttrs.Num() > 0)
+	{
+		CustomObject = TSharedPtr<FJsonObject>(new FJsonObject());
+		FsparklogsAnalyticsProvider::AddAnalyticsEventAttributesToJsonObject(CustomObject, CustomAttrs);
+	}
+	FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventAd(*AdProvider, *AdPlacement, *AdType, *AdAction, *AdFailReason, *RevenueCurrency, Revenue, DurationSecs, Count, *Reason, CustomObject);
+}
+
 bool UsparklogsAnalytics::AddLog(EsparklogsSeverity Severity, const TCHAR* Message, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
 {
 	return FsparklogsModule::GetAnalyticsProvider()->CreateAnalyticsEventLog(Severity, Message, nullptr, nullptr, OverrideSession);
@@ -3653,6 +3757,89 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TArray<FStrin
 	FinalizeAnalyticsEvent(EventTypeDesign, OverrideSession, Data);
 	FString ValueDesc = Value == nullptr ? TEXT("null") : FString::Printf(TEXT("%f"), *Value);
 	FString DefaultMessage = FString::Printf(TEXT("%s: %s: event_id=`%s` value=%s reason=`%s`"), MessageHeader, EventTypeDesign, *EventId, *ValueDesc, Reason);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage, false);
+}
+
+bool FsparklogsAnalyticsProvider::CreateAnalyticsEventAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	return CreateAnalyticsEventAd(AdProvider, AdPlacement, *UEnum::GetDisplayValueAsText(AdType).ToString(), *UEnum::GetDisplayValueAsText(AdAction).ToString(), *UEnum::GetDisplayValueAsText(AdFailReason).ToString(), RevenueCurrency, Revenue, DurationSecs, Count, Reason, CustomAttrs, IncludeDefaultMessage, ExtraMessage, OverrideSession);
+}
+
+bool FsparklogsAnalyticsProvider::CreateAnalyticsEventAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, const TCHAR* AdType, const TCHAR* AdAction, const TCHAR* AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage, const TCHAR* ExtraMessage, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession)
+{
+	if (!FsparklogsModule::IsModuleLoaded() || nullptr == AdProvider || *AdProvider == 0 || nullptr == AdPlacement || *AdPlacement == 0)
+	{
+		return false;
+	}
+	if (!AutoStartSessionBeforeEvent())
+	{
+		return false;
+	}
+
+	TArray<FString> EventIDParts;
+	EventIDParts.Add(AdProvider);
+	EventIDParts.Add(AdPlacement);
+	if (AdType != nullptr && 0 != *AdType)
+	{
+		EventIDParts.Add(AdType);
+	}
+	FString EventId = FlattenEventIDs(EventIDParts);
+
+	TSharedPtr<FJsonObject> Data(new FJsonObject());
+	Data->SetStringField(AdFieldEventId, EventId);
+	TArray<TSharedPtr<FJsonValue>> EventIdPartsJson;
+	for (const FString& Part : EventIDParts)
+	{
+		EventIdPartsJson.Add(TSharedPtr<FJsonValue>(new FJsonValueString(Part)));
+	}
+	Data->SetArrayField(AdFieldEventIdParts, EventIdPartsJson);
+	Data->SetStringField(AdFieldProvider, AdProvider);
+	Data->SetStringField(AdFieldPlacement, AdPlacement);
+	if (AdType != nullptr && *AdType != 0)
+	{
+		Data->SetStringField(AdFieldType, AdType);
+	}
+	if (AdAction != nullptr && *AdAction != 0)
+	{
+		Data->SetStringField(AdFieldAction, AdAction);
+	}
+	if (AdFailReason != nullptr && *AdFailReason != 0)
+	{
+		Data->SetStringField(AdFieldFailReason, AdFailReason);
+	}
+	if (RevenueCurrency != nullptr && *RevenueCurrency != 0)
+	{
+		Data->SetStringField(AdFieldCurrency, RevenueCurrency);
+	}
+	if ((RevenueCurrency != nullptr && *RevenueCurrency != 0) || Revenue > 0)
+	{
+		Data->SetNumberField(AdFieldRevenue, Revenue);
+	}
+	if (DurationSecs > 0.0)
+	{
+		Data->SetNumberField(AdFieldDurationSecs, DurationSecs);
+	}
+	if (Count < 1)
+	{
+		Count = 1;
+	}
+	Data->SetNumberField(AdFieldCount, (double)Count);
+	if (Reason != nullptr && *Reason != 0)
+	{
+		Data->SetStringField(AdFieldReason, Reason);
+	}
+	else
+	{
+		Reason = TEXT("");
+	}
+	if (CustomAttrs.IsValid() && CustomAttrs->Values.Num() > 0)
+	{
+		Data->SetObjectField(StandardFieldCustom, CustomAttrs);
+	}
+	FinalizeAnalyticsEvent(EventTypeAd, OverrideSession, Data);
+	FString DefaultMessage = FString::Printf(TEXT("%s: %s: event_id=`%s` ad_provider=`%s` ad_placement=`%s` ad_type=`%s` ad_action=`%s` ad_fail_reason=`%s` currency=`%s` revenue=%f duration_secs=%f count=%d reason=`%s`"),
+		MessageHeader, EventTypeAd, *EventId, AdProvider == nullptr ? TEXT("") : AdProvider, AdPlacement == nullptr ? TEXT("") : AdPlacement, AdType == nullptr ? TEXT("") : AdType, AdAction == nullptr ? TEXT("") : AdAction, AdFailReason == nullptr ? TEXT("") : AdFailReason, RevenueCurrency == nullptr ? TEXT("") : RevenueCurrency, Revenue, DurationSecs, Count, Reason
+	);
 	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage, false);
 }
 

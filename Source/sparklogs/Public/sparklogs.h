@@ -922,6 +922,39 @@ enum class EsparklogsAnalyticsFlowType : uint8 {
 	Sink UMETA(DisplayName = "Sink")
 };
 
+UENUM(BlueprintType)
+enum class EsparklogsAnalyticsAdType : uint8 {
+	interstitial UMETA(DisplayName = "interstitial"),
+	video UMETA(DisplayName = "video"),
+	rewarded_video UMETA(DisplayName = "rewarded_video"),
+	banner UMETA(DisplayName = "banner"),
+	native UMETA(DisplayName = "native"),
+	playable UMETA(DisplayName = "playable"),
+	app_open UMETA(DisplayName = "app_open"),
+	offerwall UMETA(DisplayName = "offerwall"),
+	cross_promo UMETA(DisplayName = "cross_promo"),
+	other UMETA(DisplayName = "other")
+};
+
+UENUM(BlueprintType)
+enum class EsparklogsAnalyticsAdAction : uint8 {
+	completed UMETA(DisplayName = "completed"),
+	skipped UMETA(DisplayName = "skipped"),
+	clicked UMETA(DisplayName = "clicked"),
+	rewarded UMETA(DisplayName = "rewarded"),
+	failed_to_show UMETA(DisplayName = "failed_to_show"),
+	other UMETA(DisplayName = "other")
+};
+
+UENUM(BlueprintType)
+enum class EsparklogsAnalyticsAdFailReason : uint8 {
+	no_fill UMETA(DisplayName = "no_fill"),
+	offline UMETA(DisplayName = "offline"),
+	network_error UMETA(DisplayName = "network_error"),
+	invalid_request UMETA(DisplayName = "invalid_request"),
+	other UMETA(DisplayName = "other")
+};
+
 USTRUCT(BlueprintType)
 struct FsparklogsAnalyticsAttribute
 {
@@ -1318,6 +1351,52 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
 	static void RecordDesignArrayWithReasonWithAttr(const TArray<FString>& EventIDParts, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs);
 
+	/** Records an ad event (info about one or more ad impressions). AdProvider and AdPlacement are required.
+	  * - AdProvider identifies the ad network, such as unity, applovin, admob, ironsource, and chartboost.
+	  * - AdPlacement should be an identifier for the ad placement in your app, such as end_of_level, treasure_chest, etc.
+	  * - AdType (optional) indicates the ad type and could be one of the EsparklogsAnalyticsAdType values or any custom string.
+	  * - AdAction (optional) indicates the overall result of the ad and could be one of the EsparklogsAnalyticsAdAction values or any custom string.
+	  * - AdFailReason (optional) indicates the reason the ad failed to show (if relevant) and could be one of the EsparklogsAnalyticsAdFailReason values or any custom string.
+	  * - Revenue and RevenueCurrency (both optional) indicate the amount of revenue earned from the ad, if known. If you are recording an event summarizing multiple ad impressions this should be the total sum of all revenue for ads.
+	  * - DurationSecs if non-zero indicates the length of the ad (or for an event summarizing multiple ad impressions, the average ad duration).
+	  * - Count indicates the number of ad impressions this analytics event represents (allows you to use one event to summarize multiple ad events if desired, or record one by one for more granularity).
+	  * - Reason optionally indicates additional information why the ad was shown.
+	  *
+	  * AdProvider, AdPlacement, and AdType should NOT have a colon in their value.
+	  *
+	  * If you're in a server process, then you can either use a server-side session or you could associate
+	  * the analytics event with a specific game client's analytics session. In that case, create a
+	  * FSparkLogsAnalyticsSessionDescriptor specifying at least the session ID and user ID and pass to OverrideSessionInfo.
+	  *
+	  * Returns whether or not the event was created/queued.
+	  */
+	static bool AddAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	static bool AddAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	static bool AddAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, const TCHAR* Reason, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	static bool AddAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	static bool AddAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, const TCHAR* AdType, const TCHAR* AdAction, const TCHAR* AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	static bool AddAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, const TCHAR* AdType, const TCHAR* AdAction, const TCHAR* AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	static bool AddAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, const TCHAR* AdType, const TCHAR* AdAction, const TCHAR* AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, const TCHAR* Reason, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	static bool AddAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, const TCHAR* AdType, const TCHAR* AdAction, const TCHAR* AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+
+	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
+	static void RecordAd(const FString& AdProvider, const FString& AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const FString& RevenueCurrency, float Revenue, float DurationSecs, int Count);
+	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
+	static void RecordAdWithAttrs(const FString& AdProvider, const FString& AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const FString& RevenueCurrency, float Revenue, float DurationSecs, int Count, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs);
+	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
+	static void RecordAdWithReason(const FString& AdProvider, const FString& AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const FString& RevenueCurrency, float Revenue, float DurationSecs, int Count, const FString& Reason);
+	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
+	static void RecordAdWithReasonWithAttrs(const FString& AdProvider, const FString& AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const FString& RevenueCurrency, float Revenue, float DurationSecs, int Count, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs);
+	
+	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
+	static void RecordAdWithStrings(const FString& AdProvider, const FString& AdPlacement, const FString& AdType, const FString& AdAction, const FString& AdFailReason, const FString& RevenueCurrency, float Revenue, float DurationSecs, int Count);
+	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
+	static void RecordAdWithStringsWithAttrs(const FString& AdProvider, const FString& AdPlacement, const FString& AdType, const FString& AdAction, const FString& AdFailReason, const FString& RevenueCurrency, float Revenue, float DurationSecs, int Count, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs);
+	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
+	static void RecordAdWithStringsWithReason(const FString& AdProvider, const FString& AdPlacement, const FString& AdType, const FString& AdAction, const FString& AdFailReason, const FString& RevenueCurrency, float Revenue, float DurationSecs, int Count, const FString& Reason);
+	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
+	static void RecordAdWithStringsWithReasonWithAttrs(const FString& AdProvider, const FString& AdPlacement, const FString& AdType, const FString& AdAction, const FString& AdFailReason, const FString& RevenueCurrency, float Revenue, float DurationSecs, int Count, const FString& Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs);
+
 	/** Records a log event with key information you want to associate with this analytics session & user.
 	 * This could be an error, a key debug event, etc. There are no limits on how many events you can record,
 	 * but take care not to ingest too much data (e.g., if you have millions of users, you may want to log
@@ -1364,6 +1443,7 @@ public:
 	static constexpr const TCHAR* EventTypeResource = TEXT("resource");
 	static constexpr const TCHAR* EventTypeProgression = TEXT("progression");
 	static constexpr const TCHAR* EventTypeDesign = TEXT("design");
+	static constexpr const TCHAR* EventTypeAd = TEXT("ad");
 	static constexpr const TCHAR* EventTypeLog = TEXT("log");
 
 	static constexpr const TCHAR* StandardFieldSessionId = TEXT("session_id");
@@ -1430,6 +1510,19 @@ public:
 	static constexpr const TCHAR* DesignFieldValue = TEXT("value");
 	static constexpr const TCHAR* DesignFieldReason = TEXT("reason");
 
+	static constexpr const TCHAR* AdFieldEventId = TEXT("event_id");
+	static constexpr const TCHAR* AdFieldEventIdParts = TEXT("event_ids");
+	static constexpr const TCHAR* AdFieldProvider = TEXT("ad_provider");
+	static constexpr const TCHAR* AdFieldPlacement = TEXT("ad_placement");
+	static constexpr const TCHAR* AdFieldType = TEXT("ad_type");
+	static constexpr const TCHAR* AdFieldAction = TEXT("ad_action");
+	static constexpr const TCHAR* AdFieldFailReason = TEXT("ad_fail_reason");
+	static constexpr const TCHAR* AdFieldCurrency = TEXT("currency");
+	static constexpr const TCHAR* AdFieldRevenue = TEXT("revenue");
+	static constexpr const TCHAR* AdFieldDurationSecs = TEXT("duration_secs");
+	static constexpr const TCHAR* AdFieldCount = TEXT("count");
+	static constexpr const TCHAR* AdFieldReason = TEXT("reason");
+
 	static constexpr const TCHAR* LogFieldSeverity = TEXT("severity");
 	static constexpr const TCHAR* LogFieldReason = TEXT("reason");
 
@@ -1467,6 +1560,9 @@ public:
 	virtual bool CreateAnalyticsEventDesign(const TCHAR* EventId, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
 	virtual bool CreateAnalyticsEventDesign(const TCHAR* EventId, const TCHAR* Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
 	virtual bool CreateAnalyticsEventDesign(const TArray<FString>& EventIDParts, double* Value, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+
+	virtual bool CreateAnalyticsEventAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, EsparklogsAnalyticsAdType AdType, EsparklogsAnalyticsAdAction AdAction, EsparklogsAnalyticsAdFailReason AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
+	virtual bool CreateAnalyticsEventAd(const TCHAR* AdProvider, const TCHAR* AdPlacement, const TCHAR* AdType, const TCHAR* AdAction, const TCHAR* AdFailReason, const TCHAR* RevenueCurrency, double Revenue, double DurationSecs, int Count, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, bool IncludeDefaultMessage = true, const TCHAR* ExtraMessage = nullptr, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
 
 	virtual bool CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, const TCHAR* Reason, TSharedPtr<FJsonObject> CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
 	virtual bool CreateAnalyticsEventLog(EsparklogsSeverity Severity, const TCHAR* Message, const TCHAR* Reason, const TArray<FsparklogsAnalyticsAttribute>& CustomAttrs, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession = nullptr);
