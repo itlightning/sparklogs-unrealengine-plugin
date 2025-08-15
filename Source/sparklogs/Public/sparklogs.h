@@ -1039,6 +1039,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
 	static FSparkLogsAnalyticsSessionDescriptor GetSessionDescriptor();
 
+	/** Sets the user tags included in all analytics events. Useful for analyzing segments of your users. You could include your A/B testing tags or other segmentation tags. This is dynamic and does not persist across game engine restarts. */
+	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
+	static void SetUserTags(const TArray<FString>& UserTags);
+
 	/** Sets the build information about this version of the game to include in all analytics events. */
 	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
 	static void SetBuildInfo(const FString& InBuildInfo);
@@ -1451,8 +1455,8 @@ public:
 	static constexpr const TCHAR* StandardFieldSessionStarted = TEXT("session_started");
 	static constexpr const TCHAR* StandardFieldSessionType = TEXT("session_type");
 	static constexpr const TCHAR* StandardFieldGameId = TEXT("game_id");
-	static constexpr const TCHAR* StandardFieldUserLabels = TEXT("user_labels");
-	static constexpr const TCHAR* StandardFieldUserLabelsArray = TEXT("user_labels_array");
+	static constexpr const TCHAR* StandardFieldUserTags = TEXT("user_tags");
+	static constexpr const TCHAR* StandardFieldUserTagsArray = TEXT("user_tags_array");
 	static constexpr const TCHAR* StandardFieldUserId = TEXT("user_id");
 	static constexpr const TCHAR* StandardFieldPlayerId = TEXT("player_id");
 	static constexpr const TCHAR* StandardFieldFirstInstalled = TEXT("first_installed");
@@ -1640,11 +1644,11 @@ public:
 	/** Thread-safe. Do not use this, use OverrideSession arguments instead. */
 	void SetSessionStarted(FDateTime DT);
 
-	/** Thread-safe to get current user labels (multiple separated by :) */
-	TArray<FString> GetUserLabels();
+	/** Thread-safe to get current user tags (multiple separated by :) */
+	TArray<FString> GetUserTags();
 
-	/** Thread-safe to set current user labels. Labels will be stored in alphabetical order. */
-	void SetUserLabels(const TArray<FString>& Labels);
+	/** Thread-safe to set current user tags. Tags will be stored in alphabetical order. */
+	void SetUserTags(const TArray<FString>& Tags);
 
 	/** Thread-safe. Adds all standard fields to the given analytics logical event so it can be queued as a raw event. It modifies Object in-place.
 	  * This will automatically add meta attributes to the raw analytics event data. Normally you should call higher-level Analytics* methods that
@@ -1679,8 +1683,8 @@ protected:
 	TSharedRef<FJsonObject> MetaAttributes;
 	// The flattened tiers (e.g., tier1:tier2,tier3) of the progression events that are currently in progress.
 	TSet<FString> InProgressProgression;
-	// The current labels associated with this user
-	TArray<FString> UserLabels;
+	// The current tags associated with this user
+	TArray<FString> UserTags;
 
 	// Does the work to end the session, using the given date/time (in UTC) as the session end date.
 	void DoEndSession(const TCHAR* Reason, FDateTime SessionEnded);
@@ -1745,8 +1749,8 @@ public:
 	/** Adds additional JSON field values that will be included with every log and analytics event shipped. */
 	TMap<FString, FString> AdditionalAttributes;
 
-	/** If not empty, will override the user labels that are associated with this analytics user. Labels will be stored in alphabetical order. */
-	TArray<FString> UserLabels;
+	/** If not empty, will override the user tags that are associated with this analytics user. Tags will be stored in alphabetical order. */
+	TArray<FString> UserTags;
 
 	/** If true, then the plugin will always activate, even if the ActivationPercentage config setting is less than 100%.
 	  * If this value is false then it will activate ActivationPercentage percent of the time (random selection).

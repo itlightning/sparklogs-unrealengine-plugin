@@ -2442,6 +2442,7 @@ void UsparklogsAnalytics::EndSession() { FsparklogsModule::GetAnalyticsProvider(
 void UsparklogsAnalytics::EndSessionWithReason(const FString& Reason) { FsparklogsModule::GetAnalyticsProvider()->EndSession(*Reason); }
 FString UsparklogsAnalytics::GetSessionID() { return FsparklogsModule::GetAnalyticsProvider()->GetSessionID(); }
 FSparkLogsAnalyticsSessionDescriptor UsparklogsAnalytics::GetSessionDescriptor() { return FsparklogsModule::GetAnalyticsProvider()->GetSessionDescriptor(); }
+void UsparklogsAnalytics::SetUserTags(const TArray<FString>& UserTags) { FsparklogsModule::GetAnalyticsProvider()->SetUserTags(UserTags); }
 void UsparklogsAnalytics::SetBuildInfo(const FString& InBuildInfo) { FsparklogsModule::GetAnalyticsProvider()->SetBuildInfo(InBuildInfo); }
 void UsparklogsAnalytics::SetCommonAttribute(const FString& Field, const FString& Value) { FsparklogsModule::GetAnalyticsProvider()->SetMetaAttribute(Field, TSharedPtr<FJsonValue>(new FJsonValueString(Value))); }
 void UsparklogsAnalytics::SetCommonAttributeJSON(const FString& Field, const TSharedPtr<FJsonValue> Value) { FsparklogsModule::GetAnalyticsProvider()->SetMetaAttribute(Field, Value); }
@@ -4388,17 +4389,17 @@ void FsparklogsAnalyticsProvider::SetSessionStarted(FDateTime DT)
 	SessionStarted = DT;
 }
 
-TArray<FString> FsparklogsAnalyticsProvider::GetUserLabels()
+TArray<FString> FsparklogsAnalyticsProvider::GetUserTags()
 {
 	FScopeLock ReadLock(&DataCriticalSection);
-	return UserLabels;
+	return UserTags;
 }
 
-void FsparklogsAnalyticsProvider::SetUserLabels(const TArray<FString>& Labels)
+void FsparklogsAnalyticsProvider::SetUserTags(const TArray<FString>& Tags)
 {
 	FScopeLock WriteLock(&DataCriticalSection);
-	UserLabels = Labels;
-	UserLabels.StableSort();
+	UserTags = Tags;
+	UserTags.StableSort();
 }
 
 void FsparklogsAnalyticsProvider::FinalizeAnalyticsEvent(const TCHAR* EventType, const FSparkLogsAnalyticsSessionDescriptor* OverrideSession, TSharedPtr<FJsonObject>& Object)
@@ -4419,8 +4420,8 @@ void FsparklogsAnalyticsProvider::InternalFinalizeAnalyticsEvent(const TCHAR* Ev
 		Object->SetStringField(StandardFieldEventType, EventType);
 	}
 
-	TArray<FString> UserLabelsArray = GetUserLabels();
-	FString UserLabels = FlattenEventIDs(UserLabelsArray);
+	TArray<FString> UserTagsArray = GetUserTags();
+	FString FlattenedUserTags = FlattenEventIDs(UserTagsArray);
 
 	FString GameID = Settings->AnalyticsGameID;
 	FString UserID = Settings->GetEffectiveAnalyticsUserID();
@@ -4456,10 +4457,10 @@ void FsparklogsAnalyticsProvider::InternalFinalizeAnalyticsEvent(const TCHAR* Ev
 	}
 	Object->SetStringField(StandardFieldSessionType, GetITLLaunchConfiguration(false));
 	Object->SetStringField(StandardFieldGameId, GameID);
-	if (!UserLabels.IsEmpty())
+	if (!FlattenedUserTags.IsEmpty())
 	{
-		Object->SetStringField(StandardFieldUserLabels, UserLabels);
-		Object->SetField(StandardFieldUserLabelsArray, ConvertNonEmptyStringArrayToJSON(UserLabelsArray));
+		Object->SetStringField(StandardFieldUserTags, FlattenedUserTags);
+		Object->SetField(StandardFieldUserTagsArray, ConvertNonEmptyStringArrayToJSON(UserTagsArray));
 	}
 	Object->SetStringField(StandardFieldUserId, UserID);
 	Object->SetStringField(StandardFieldPlayerId, PlayerID);
@@ -4758,9 +4759,9 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 	{
 		Settings->SetUserID(*options.OverrideAnalyticsUserID);
 	}
-	if (options.UserLabels.Num() > 0)
+	if (options.UserTags.Num() > 0)
 	{
-		GetAnalyticsProvider()->SetUserLabels(options.UserLabels);
+		GetAnalyticsProvider()->SetUserTags(options.UserTags);
 	}
 
 	FString EffectiveTargetCurrency = Settings->AnalyticsTargetCurrency;
