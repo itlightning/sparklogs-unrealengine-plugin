@@ -148,6 +148,7 @@ public:
 	static constexpr const TCHAR* AnalyticsLastSessionID = TEXT("AnalyticsLastSessionID");
 	static constexpr const TCHAR* AnalyticsLastSessionStarted = TEXT("AnalyticsLastSessionStarted");
 	static constexpr const TCHAR* AnalyticsLastWrittenKey = TEXT("AnalyticsLastWritten");
+	static constexpr const TCHAR* AnalyticsFirstPurchasedKey = TEXT("AnalyticsFirstPurchased");
 
 	/** The game ID to use for analytics. If set, will also be added to log events. */
 	FString AnalyticsGameID;
@@ -235,6 +236,12 @@ public:
 	/** Thread-safe. Returns the transaction number since the app was first installed. Optionally increment the transaction number. */
 	int GetTransactionNumber(bool Increment);
 
+	/** Thread-safe. Returns the UTC timestamp when the first purchase was made. */
+	FDateTime GetAnalyticsFirstPurchased();
+
+	/** Thread-safe. Sets the timestamp when the first purchase was made. */
+	void SetAnalyticsFirstPurchased(FDateTime T);
+
 	/** Thread-safe. Returns the attempt number for the given event ID (case insensitive) since the app was first installed.
 	  * Optionally increment the attempt number and/or optionally delete it (will still return last (possibly incremented) value).
 	  */
@@ -263,6 +270,7 @@ protected:
 	FDateTime CachedAnalyticsInstallTime;
 	int CachedAnalyticsSessionNumber;
 	int CachedAnalyticsTransactionNumber;
+	FDateTime CachedAnalyticsFirstPurchased;
 	TMap<FString, int> CachedAnalyticsAttemptNumber;
 	FDateTime CachedAnalyticsLastEvent;
 
@@ -1488,6 +1496,7 @@ public:
 	static constexpr const TCHAR* PurchaseFieldCurrency = TEXT("currency");
 	static constexpr const TCHAR* PurchaseFieldAmount = TEXT("amount");
 	static constexpr const TCHAR* PurchaseFieldTransactionNumber = TEXT("transaction_num");
+	static constexpr const TCHAR* PurchaseFieldFirstPurchased = TEXT("first_purchased");
 	static constexpr const TCHAR* PurchaseFieldReason = TEXT("reason");
 
 	static constexpr const TCHAR* ResourceFieldEventId = TEXT("event_id");

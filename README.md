@@ -17,9 +17,9 @@ SparkLogs has no cardinality limits and has no limits on the size and number of 
 
  * **Logs**: Ingest and aggregate log data from backend game servers as well as editor environments or dev builds. (Collecting log data from client builds is possible but not recommended, use analytics to understand behavior of your players in production builds.)
 
- * **Analytics**: Collect analytic events of various kinds, including session start and end, design, progression, real money purchases, resource grants and sinks, and error or other textual events. A textual reason and custom JSON fields can optionally be associated with each analytics event.
+ * **Analytics**: Collect analytic events of various kinds, including session start and end, design, progression, real money purchases, ads, resource grants and sinks, and error or other textual events. A textual reason and custom JSON fields can optionally be associated with each analytics event.
    * If the feature is enabled for your SparkLogs workspace, daily snapshots of game engine analytics events will automatically be computed, so you can analyze
-     daily active users (DAU), average session statistics, progression funnels, and other key game metrics.
+     daily active users (DAU), average session and ad statistics, progression funnels, and other key game metrics.
 
 ## Plugin Features
 

@@ -543,6 +543,7 @@ FsparklogsSettings::FsparklogsSettings()
 	, CachedAnalyticsInstallTime(ITLEmptyDateTime)
 	, CachedAnalyticsSessionNumber(0)
 	, CachedAnalyticsTransactionNumber(0)
+	, CachedAnalyticsFirstPurchased(ITLEmptyDateTime)
 	, CachedAnalyticsLastEvent(ITLEmptyDateTime)
 {
 }
@@ -726,6 +727,29 @@ int FsparklogsSettings::GetTransactionNumber(bool Increment)
 		GConfig->Flush(false, GGameUserSettingsIni);
 	}
 	return CachedAnalyticsTransactionNumber;
+}
+
+FDateTime FsparklogsSettings::GetAnalyticsFirstPurchased()
+{
+	FScopeLock WriteLock1(&CachedCriticalSection);
+	if (CachedAnalyticsFirstPurchased != ITLEmptyDateTime)
+	{
+		return CachedAnalyticsFirstPurchased;
+	}
+	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsFirstPurchasedKey, GGameUserSettingsIni);
+	TimeStr.TrimStartAndEndInline();
+	CachedAnalyticsFirstPurchased = ITLParseDateTime(TimeStr);
+	return CachedAnalyticsFirstPurchased;
+}
+
+void FsparklogsSettings::SetAnalyticsFirstPurchased(FDateTime T)
+{
+	FScopeLock WriteLock(&CachedCriticalSection);
+	int64 Ts = T.GetTicks();
+	FString TimeStr = FString::Printf(TEXT("%lld"), Ts);
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsFirstPurchasedKey, *TimeStr, GGameUserSettingsIni);
+	GConfig->Flush(false, GGameUserSettingsIni);
+	CachedAnalyticsFirstPurchased = T;
 }
 
 int FsparklogsSettings::GetAttemptNumber(const FString& EventID, bool Increment, bool DeleteAfter)
@@ -3388,6 +3412,16 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventPurchase(const TCHAR* Item
 	if (TransactionNumber > 0)
 	{
 		Data->SetNumberField(PurchaseFieldTransactionNumber, (double)TransactionNumber);
+	}
+	FDateTime FirstPurchased = Settings->GetAnalyticsFirstPurchased();
+	if (FirstPurchased == ITLEmptyDateTime)
+	{
+		FirstPurchased = FDateTime::UtcNow();
+		Settings->SetAnalyticsFirstPurchased(FirstPurchased);
+	}
+	if (FirstPurchased != ITLEmptyDateTime)
+	{
+		Data->SetStringField(PurchaseFieldFirstPurchased, ITLGetUTCDateTimeAsRFC3339(FirstPurchased));
 	}
 	if (Reason != nullptr && *Reason != 0)
 	{
