@@ -72,6 +72,12 @@ SPARKLOGS_API FString ITLCalcUniqueFieldName(const TSharedPtr<FJsonObject> Objec
 /** Returns a sanitized version of the given string that is safe to use as an INI key name */
 SPARKLOGS_API FString ITLSanitizeINIKeyName(const FString & In);
 
+/** Tries really hard to delete the given file, or if that fails to rename it. Returns true on success or false otherwise. */
+SPARKLOGS_API bool ITLPurgeFile(const FString & Path);
+
+/** Do a simple log file rotation if the current file is greater than the given size. Returns true if rotated. */
+SPARKLOGS_API bool ITLLogFileSimpleRotateIfTooLarge(FOutputDeviceFile* OutputDevice, const FString & Path, int64 MinSizeToRotate);
+
 /** The type of data compression to use. */
 enum class SPARKLOGS_API ITLCompressionMode
 {
