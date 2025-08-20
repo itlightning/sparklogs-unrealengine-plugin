@@ -283,6 +283,44 @@ FString ITLSanitizeINIKeyName(const FString& In)
 	return SanitizedName;
 }
 
+bool ITLPurgeFile(const FString& Path)
+{
+	constexpr int RetryCount = 10;
+	for (int i = 0; i < RetryCount; i++)
+	{
+		if (i > 0)
+		{
+			FPlatformProcess::Sleep(0.02f);
+		}
+		if (IFileManager::Get().Delete(*Path, false, false, true))
+		{
+			return true;
+		}
+	}
+	// Try to move the file to get it out of the way as a last resort (may still fail)
+	return IFileManager::Get().Move(*(Path + TEXT(".deleted")), *Path, true, false, false, true);
+}
+
+bool ITLLogFileSimpleRotateIfTooLarge(FOutputDeviceFile* OutputDevice, const FString& Path, int64 MinSizeToRotate)
+{
+	int64 CurrentSize = IFileManager::Get().FileSize(*Path);
+	if (CurrentSize > MinSizeToRotate)
+	{
+		OutputDevice->TearDown();
+		FString RotatedFilename = Path + TEXT(".old.log");
+		bool Success = true;
+		if (!IFileManager::Get().Move(*RotatedFilename, *Path, true, false, false, true))
+		{
+			// Try to delete if we cannot move
+			Success = IFileManager::Get().Delete(*Path, false, false, true);
+		}
+		OutputDevice->SetFilename(*Path);
+		OutputDevice->Log(SparkLogsCategoryName, ELogVerbosity::Log, TEXT("Rotated logfile."));
+		return Success;
+	}
+	return false;
+}
+
 const TCHAR* INISectionForEditor = TEXT("Editor");
 const TCHAR* INISectionForCommandlet = TEXT("Commandlet");
 const TCHAR* INISectionForServer = TEXT("Server");
@@ -3703,8 +3741,8 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventProgression(EsparklogsAnal
 		Data->SetObjectField(StandardFieldCustom, CustomAttrs);
 	}
 	FinalizeAnalyticsEvent(EventTypeProgression, OverrideSession, Data);
-	FString ValueDesc = Value == nullptr ? FString(TEXT("null")) : FString::Printf(TEXT("%f"), *Value);
-	FString DefaultMessage = FString::Printf(TEXT("%s: %s: event_id=`%s` value=%s reason=`%s`"), MessageHeader, EventTypeProgression, *EventId, *ValueDesc, Reason);
+	FString ValueDesc = Value == nullptr ? FString() : FString::Printf(TEXT(" value=%f"), *Value);
+	FString DefaultMessage = FString::Printf(TEXT("%s: %s: event_id=`%s`%s reason=`%s`"), MessageHeader, EventTypeProgression, *EventId, *ValueDesc, Reason);
 	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage, false);
 }
 
@@ -3790,8 +3828,8 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventDesign(const TArray<FStrin
 		Data->SetObjectField(StandardFieldCustom, CustomAttrs);
 	}
 	FinalizeAnalyticsEvent(EventTypeDesign, OverrideSession, Data);
-	FString ValueDesc = Value == nullptr ? TEXT("null") : FString::Printf(TEXT("%f"), *Value);
-	FString DefaultMessage = FString::Printf(TEXT("%s: %s: event_id=`%s` value=%s reason=`%s`"), MessageHeader, EventTypeDesign, *EventId, *ValueDesc, Reason);
+	FString ValueDesc = Value == nullptr ? FString() : FString::Printf(TEXT(" value=%f"), *Value);
+	FString DefaultMessage = FString::Printf(TEXT("%s: %s: event_id=`%s`%s reason=`%s`"), MessageHeader, EventTypeDesign, *EventId, *ValueDesc, Reason);
 	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *CalculateFinalMessage(DefaultMessage, IncludeDefaultMessage, ExtraMessage), nullptr, IncludeDefaultMessage, false);
 }
 
@@ -3940,9 +3978,10 @@ bool FsparklogsAnalyticsProvider::StartSession(const TCHAR* Reason, const TArray
 		Data->SetStringField(SessionStartFieldReason, Reason);
 	}
 	InternalFinalizeAnalyticsEvent(EventTypeSessionStart, nullptr, Data);
+	FString SessionID = CurrentSessionID;
 	WriteLock.Unlock();
-	Settings->MarkStartOfAnalyticsSession(CurrentSessionID, SessionStarted);
-	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *FString::Printf(TEXT("%s: %s: started new session"), MessageHeader, EventTypeSessionStart), nullptr, false, true);
+	Settings->MarkStartOfAnalyticsSession(SessionID, SessionStarted);
+	return FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *FString::Printf(TEXT("%s: %s: started new session. session_id=`%s`"), MessageHeader, EventTypeSessionStart, *SessionID), nullptr, false, true);
 }
 
 void FsparklogsAnalyticsProvider::EndSession()
@@ -3966,6 +4005,7 @@ void FsparklogsAnalyticsProvider::DoEndSession(const TCHAR* Reason, FDateTime Se
 	{
 		return;
 	}
+	FString SessionID = CurrentSessionID;
 
 	TSharedPtr<FJsonObject> Data(new FJsonObject());
 	Data->SetStringField(SessionEndFieldSessionEnded, ITLGetUTCDateTimeAsRFC3339(SessionEnded));
@@ -3979,6 +4019,10 @@ void FsparklogsAnalyticsProvider::DoEndSession(const TCHAR* Reason, FDateTime Se
 	{
 		Data->SetStringField(SessionEndFieldReason, Reason);
 	}
+	else
+	{
+		Reason = TEXT("");
+	}
 	InternalFinalizeAnalyticsEvent(EventTypeSessionEnd, nullptr, Data);
 
 	// Now reset the session data, release write lock, and send the data
@@ -3986,7 +4030,7 @@ void FsparklogsAnalyticsProvider::DoEndSession(const TCHAR* Reason, FDateTime Se
 	SessionStarted = ITLEmptyDateTime;
 	SessionNumber = 0;
 	WriteLock.Unlock();
-	FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *FString::Printf(TEXT("%s: %s: finished session normally"), MessageHeader, EventTypeSessionEnd), nullptr, false, true);
+	FsparklogsModule::GetModule().AddRawAnalyticsEvent(Data, *FString::Printf(TEXT("%s: %s: session ended. session_id=`%s` reason=`%s`"), MessageHeader, EventTypeSessionEnd, *SessionID, Reason), nullptr, false, true);
 	// The app might end or go inactive soon, try to get the data to the cloud asap...
 	FsparklogsModule::GetModule().Flush();
 	Settings->MarkEndOfAnalyticsSession();
@@ -4873,7 +4917,9 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 	if (EngineActive)
 	{
 		// Log all plugin messages to the ITL operations log
-		GLog->AddOutputDevice(GetITLInternalOpsLog().LogDevice.Get());
+		FOutputDeviceFile* OpsLogDevice = GetITLInternalOpsLog().LogDevice.Get();
+		ITLLogFileSimpleRotateIfTooLarge(OpsLogDevice, OpsLogDevice->GetFilename(), (int64)(1024 * 1024) * 5);
+		GLog->AddOutputDevice(OpsLogDevice);
 		if (EffectiveCollectLogs)
 		{
 			// Log all engine messages to an internal log just for this plugin, which we will then read from the file as we push log data to the cloud
@@ -4915,6 +4961,14 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 		CloudPayloadProcessor = TSharedPtr<FsparklogsWriteHTTPPayloadProcessor, ESPMode::ThreadSafe>(new FsparklogsWriteHTTPPayloadProcessor(EffectiveHttpEndpointURI, AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests, EffectiveTargetCurrency));
 		CloudStreamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, options.OverrideComputerName, GameInstanceID, &options.AdditionalAttributes));
 		CloudStreamer->SetWeakThisPtr(CloudStreamer);
+
+		int64 StartingProgressMarker = 0;
+		CloudStreamer->ReadProgressMarker(StartingProgressMarker);
+		if (StartingProgressMarker > 0)
+		{
+			UE_LOG(LogPluginSparkLogs, Log, TEXT("Resuming ingestion from progress marker %ld"), StartingProgressMarker);
+		}
+
 		FCoreDelegates::OnExit.AddRaw(this, &FsparklogsModule::OnEngineExit);
 		GetITLInternalGameLog(CloudStreamer).LogDevice->SetCloudStreamer(CloudStreamer);
 
@@ -4945,10 +4999,11 @@ void FsparklogsModule::StopShippingEngine()
 			{
 				// Set the retry interval to something short so we don't delay shutting down the game...
 				Settings->RetryIntervalSecs = 0.2;
-				// When the engine is shutting down, wait no more than 6 seconds to flush the final log request
-				CloudPayloadProcessor->SetTimeoutSecs(FMath::Min(Settings->RequestTimeoutSecs, 6.0));
+				// When the engine is shutting down, wait no more than 15 seconds to flush the final log request
+				CloudPayloadProcessor->SetTimeoutSecs(FMath::Min(Settings->RequestTimeoutSecs, 15.0));
 			}
-			FOutputDevice* LogDevice = GetITLInternalGameLog(nullptr).LogDevice.Get();
+			FsparklogsOutputDeviceFile* LogDevice = GetITLInternalGameLog(nullptr).LogDevice.Get();
+			FString LogDeviceFilename = LogDevice->GetFilename();
 			LogDevice->Flush();
 			bool LastFlushProcessedEverything = false;
 			if (CloudStreamer->FlushAndWait(2, true, true, true, FsparklogsSettings::WaitForFlushToCloudOnShutdown, LastFlushProcessedEverything))
@@ -4960,9 +5015,16 @@ void FsparklogsModule::StopShippingEngine()
 				LogDevice->TearDown();
 				if (LastFlushProcessedEverything)
 				{
-					UE_LOG(LogPluginSparkLogs, Log, TEXT("All logs fully shipped. Removing progress marker and local logfile %s"), *LogFilePath);
-					IFileManager::Get().Delete(*LogFilePath, false, false, false);
-					CloudStreamer->DeleteProgressMarker();
+					bool Purged = ITLPurgeFile(LogDeviceFilename);
+					if (Purged && !IFileManager::Get().FileExists(*LogDeviceFilename))
+					{
+						CloudStreamer->DeleteProgressMarker();
+						UE_LOG(LogPluginSparkLogs, Log, TEXT("All logs fully shipped. Removed progress marker and local logfile %s"), *LogFilePath);
+					}
+					else
+					{
+						UE_LOG(LogPluginSparkLogs, Log, TEXT("All logs fully shipped. However, failed to remove local logfile %s so keeping progress marker."), *LogFilePath);
+					}
 				}
 			}
 			else
