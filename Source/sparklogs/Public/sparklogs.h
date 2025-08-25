@@ -21,6 +21,7 @@
 
 DECLARE_LOG_CATEGORY_EXTERN(LogPluginSparkLogs, Log, All);
 
+// WARNING: do not enable internal plug debug logging if you have the plugin configured to send data for the Editor in DefaultEngine.ini. (Only use for debugging automation tests.)
 #define ITL_INTERNAL_DEBUG_LOG_DATA 0
 #define ITL_INTERNAL_DEBUG_LOGGING 0
 #if ITL_INTERNAL_DEBUG_LOGGING == 1
@@ -712,6 +713,8 @@ protected:
 	FThreadSafeCounter StopRequestCounter;
 	/** Non-zero indicates a request to flush to cloud */
 	FThreadSafeCounter FlushRequestCounter;
+	/** Non-zero indicates to immediately clear the minimum retry counter */
+	FThreadSafeCounter FlushClearMinNextPlatformTime;
 	/** The number of times we've finished a flush to cloud (success or fail) */
 	FThreadSafeCounter FlushOpCounter;
 	/** The number of times we've successfully finished a flush to cloud */
@@ -742,11 +745,11 @@ protected:
 	/** The amount of bytes queued up since last flush. */
 	std::atomic<int64> BytesQueuedSinceLastFlush;
 
-	virtual void ComputeCommonEventJSON(bool IncludeCommonMetadata, const FString& GameInstanceID, const TMap<FString, FString>* AdditionalAttributes);
+	virtual void ComputeCommonEventJSON(bool IncludeCommonMetadata, const FString& GameInstanceID, int InstanceIndex, const TMap<FString, FString>* AdditionalAttributes);
 
 public:
 
-	FsparklogsReadAndStreamToCloud(const FString& SourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor, ESPMode::ThreadSafe> InPayloadProcessor, int InMaxLineLength, const FString& InOverrideComputerName, const FString& GameInstanceID, const TMap<FString, FString>* AdditionalAttributes);
+	FsparklogsReadAndStreamToCloud(int InstanceIndex, const FString& SourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor, ESPMode::ThreadSafe> InPayloadProcessor, int InMaxLineLength, const FString& InOverrideComputerName, const FString& GameInstanceID, const TMap<FString, FString>* AdditionalAttributes);
 	~FsparklogsReadAndStreamToCloud();
 
 	// After constructing this object you must give it a weak pointer to itself before running it. Needed to pass to payload processor.
@@ -791,6 +794,27 @@ protected:
 	virtual bool WorkerInternalDoFlush(int64& OutNewShippedLogOffset, bool& OutFlushProcessedEverything);
 	/** [WORKER] Attempts to flush any newly available logs to the cloud. Response for updating flush op counters, LastFlushProcessedEverything, and MinNextFlushPlatformTime state. Returns false on failure. Only call from worker thread. */
 	virtual bool WorkerDoFlush();
+};
+
+/**
+ * Acquires an exclusive file lock on a filename derived from the given path. It attempts to acquire a lock based on an
+ * index from 1..MaxAttempts and it attempts to acquire the lowest lock possible. Can be used to guarantee that we are the only process
+ * on the system that is using a particular "lock index" for a given base lock filename.
+ */
+class SPARKLOGS_API FsparklogsIndexedLockFile
+{
+public:
+	FsparklogsIndexedLockFile(int MaxAttempts, const FString& BaseFilePath);
+	~FsparklogsIndexedLockFile();
+
+	bool IsLocked() { return LockFileArchive.IsValid() && AcquiredLockIndex > 0; }
+	int GetLockIndex() { return LockFileArchive.IsValid() ? AcquiredLockIndex : 0; }
+	FString GetAttemptedLockFile() { return AttemptedLockFile; }
+
+protected:
+	TUniquePtr<FArchive> LockFileArchive;
+	int AcquiredLockIndex;
+	FString AttemptedLockFile;
 };
 
 /**
@@ -1468,7 +1492,7 @@ public:
 	static constexpr const TCHAR* StandardFieldSessionNumber = TEXT("session_num");
 	static constexpr const TCHAR* StandardFieldSessionStarted = TEXT("session_started");
 	static constexpr const TCHAR* StandardFieldSessionType = TEXT("session_type");
-	static constexpr const TCHAR* StandardFieldGameId = TEXT("game_id");
+	static constexpr const TCHAR* StandardFieldAppId = TEXT("app_id");
 	static constexpr const TCHAR* StandardFieldUserTags = TEXT("user_tags");
 	static constexpr const TCHAR* StandardFieldUserTagsArray = TEXT("user_tags_array");
 	static constexpr const TCHAR* StandardFieldUserId = TEXT("user_id");
