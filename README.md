@@ -6,7 +6,7 @@ data to any HTTPS endpoint that can receive JSON data, including the [SparkLogs 
 Join the [discord](https://discord.gg/Yu8F8w8tDw) to ask questions, provide feedback, or collaborate on enhancements.
 
 [Free accounts](https://sparklogs.com/docs/getting-started/create-account#pricing) are available with SparkLogs to ingest up to 25 GB/month.
-That's enough free quota for over 1 million analytics sessions of data every month (assuming each session records 32 events and each event is about 0.75 KiB).
+That's enough free quota for over 1 million analytics sessions of data every month (assuming each session records 16 events and each event is about 1.5 KiB).
 
 The SparkLogs Cloud provides a turn-key solution that scales effortlessly with your game to 100s of millions of active users,
 [auto extracts](https://sparklogs.com/docs/ingest/autoextract/overview) structured fields from your unstructured logs,
@@ -46,12 +46,15 @@ SparkLogs has no cardinality limits and has no limits on the size and number of 
   events, and then when the game engine is restarted, it will resend any queued data. It will also
   detect any previously open game engine analytics session that was not closed properly (e.g., due
   to a crash) and will automatically close that session with a session end time of the last known
-  analytics event for that session.
+  analytics event for that session. Works with concurrent game engine sessions.
 
 * **Security**: Data is transmitted over HTTPS and requests are authenticated.
 
 * **Flexibility**: The plugin supports desktops and mobile platforms. The plugin can be configured
   to send data to the SparkLogs Cloud or any HTTPS endpoint of your choice.
+
+* **Developer-Friendly**: Compatible with various developer modes, including play-in-editor sessions
+  and concurrent client/server processes running on the same system.
 
 * **Gradual Roll Out**: For games with large user bases, you may want to gradually roll out use
   of the plugin. To do this, you can configure the plugin to only activate a certain percentage of the

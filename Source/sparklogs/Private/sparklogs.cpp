@@ -372,20 +372,63 @@ template <typename T> T GetValueForLaunchConfiguration(T ServerValue, T EditorVa
 	}
 }
 
-FString GetITLLogFileName(const TCHAR* LogTypeName)
+FString GetITLLogFileName(const TCHAR* LogTypeName, int InstanceIndex, bool IncludeExt)
 {
 	const TCHAR* LaunchConfiguration = GetITLLaunchConfiguration(false);
-	FString Name = FString(TEXT("sparklogs-"), FCString::Strlen(LaunchConfiguration) + FCString::Strlen(LogTypeName) + FCString::Strlen(TEXT("-.log")));
-	Name.Append(LaunchConfiguration).Append(TEXT("-")).Append(LogTypeName).Append(TEXT(".log"));
+	FString Name = FString(TEXT("sparklogs-"), FCString::Strlen(LaunchConfiguration) + FCString::Strlen(LogTypeName) + (InstanceIndex > 1 ? 6 : 0) + FCString::Strlen(TEXT("-.log")));
+	Name.Append(LaunchConfiguration).Append(TEXT("-")).Append(LogTypeName);
+	if (InstanceIndex > 1)
+	{
+		Name.Append(TEXT("-"));
+		Name.AppendInt(InstanceIndex);
+	}
+	if (IncludeExt)
+	{
+		Name.Append(TEXT(".log"));
+	}
 	return Name;
 }
 
-FString GetITLPluginStateFilename()
+FString GetITLPluginStateFilename(int InstanceIndex)
 {
 	const TCHAR* LaunchConfiguration = GetITLLaunchConfiguration(false);
-	FString Name = FString(TEXT("sparklogs-"), FCString::Strlen(LaunchConfiguration) + FCString::Strlen(TEXT("-state.ini")));
-	Name.Append(LaunchConfiguration).Append(TEXT("-state.ini"));
+	FString Name = FString(TEXT("sparklogs-"), FCString::Strlen(LaunchConfiguration) + (InstanceIndex > 1 ? 6 : 0) + FCString::Strlen(TEXT("-state.ini")));
+	Name.Append(LaunchConfiguration);
+	Name.Append(TEXT("-state"));
+	if (InstanceIndex > 1)
+	{
+		Name.Append(TEXT("-"));
+		Name.AppendInt(InstanceIndex);
+	}
+	Name.Append(TEXT(".ini"));
 	return Name;
+}
+
+class FITLSparkLogsPluginIndexedLockInitializer
+{
+public:
+	TUniquePtr<FsparklogsIndexedLockFile> IndexedLockFile;
+	bool Init()
+	{
+		if (!IndexedLockFile)
+		{
+			FString ParentDir = FPaths::GetPath(FPaths::ConvertRelativePathToFull(FGenericPlatformOutputDevices::GetAbsoluteLogFilename()));
+			FString Path = FPaths::Combine(ParentDir, GetITLLogFileName(TEXT("ops"), 0, false));
+			IndexedLockFile = MakeUnique<FsparklogsIndexedLockFile>(50, Path);
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
+};
+
+FITLSparkLogsPluginIndexedLockInitializer& GetITLPluginIndexedLock()
+{
+	static FITLSparkLogsPluginIndexedLockInitializer Singleton;
+	Singleton.Init();
+	return Singleton;
 }
 
 class FITLLogOutputDeviceFileInitializer
@@ -433,7 +476,7 @@ public:
 FITLSparkLogsLogOutputDeviceFileInitializer& GetITLInternalGameLog(TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> CloudStreamer)
 {
 	static FITLSparkLogsLogOutputDeviceFileInitializer Singleton;
-	FString LogFileName = GetITLLogFileName(TEXT("run"));
+	FString LogFileName = GetITLLogFileName(TEXT("run"), GetITLPluginIndexedLock().IndexedLockFile->GetLockIndex(), true);
 	Singleton.InitLogDevice(*LogFileName, CloudStreamer);
 	return Singleton;
 }
@@ -441,7 +484,7 @@ FITLSparkLogsLogOutputDeviceFileInitializer& GetITLInternalGameLog(TSharedPtr<Fs
 FITLLogOutputDeviceFileInitializer& GetITLInternalOpsLog()
 {
 	static FITLLogOutputDeviceFileInitializer Singleton;
-	FString LogFileName = GetITLLogFileName(TEXT("ops"));
+	FString LogFileName = GetITLLogFileName(TEXT("ops"), GetITLPluginIndexedLock().IndexedLockFile->GetLockIndex(), true);
 	if (Singleton.InitLogDevice(*LogFileName))
 	{
 		// The ops log should only contain logs about this plugin itself
@@ -1435,7 +1478,7 @@ void FsparklogsStressGenerator::Stop()
 
 // =============== FsparklogsReadAndStreamToCloud ===============================================================================
 
-void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMetadata, const FString& GameInstanceID, const TMap<FString, FString>* AdditionalAttributes)
+void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMetadata, const FString& GameInstanceID, int InstanceIndex, const TMap<FString, FString>* AdditionalAttributes)
 {
 	FString CommonEventJSON;
 
@@ -1466,6 +1509,10 @@ void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMe
 			CommonEventJSON.Append(TEXT(", "));
 		}
 		CommonEventJSON.Appendf(TEXT("\"game_instance_id\": %s"), *EscapeJsonString(GameInstanceID));
+		if (InstanceIndex > 1)
+		{
+			CommonEventJSON.Appendf(TEXT(", \"game_instance_index\": %d"), InstanceIndex);
+		}
 	}
 
 	// If game_id is set we should always include it regardless, it's required for good analytics data.
@@ -1504,7 +1551,7 @@ void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMe
 	}
 }
 
-FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const FString& InSourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor, ESPMode::ThreadSafe> InPayloadProcessor, int InMaxLineLength, const FString& InOverrideComputerName, const FString& GameInstanceID, const TMap<FString, FString>* AdditionalAttributes)
+FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(int InstanceIndex, const FString& InSourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor, ESPMode::ThreadSafe> InPayloadProcessor, int InMaxLineLength, const FString& InOverrideComputerName, const FString& GameInstanceID, const TMap<FString, FString>* AdditionalAttributes)
 	: Settings(InSettings)
 	, PayloadProcessor(InPayloadProcessor)
 	, SourceLogFile(InSourceLogFile)
@@ -1518,14 +1565,14 @@ FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const FString& In
 	, LastFlushPlatformTime(0)
 	, BytesQueuedSinceLastFlush(0)
 {
-	if (FPlatformProperties::RequiresCookedData())
+	if (InstanceIndex <= 1 && FPlatformProperties::RequiresCookedData())
 	{
 		ProgressMarkerPath = GGameUserSettingsIni;
-		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Constructor|Cooked data is required, using game user settings INI for progress marker..."));
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Constructor|Cooked data is required and this is the primary instance, using game user settings INI for progress marker..."));
 	}
 	else
 	{
-		ProgressMarkerPath = FPaths::Combine(FPaths::GetPath(InSourceLogFile), GetITLPluginStateFilename());
+		ProgressMarkerPath = FPaths::Combine(FPaths::GetPath(InSourceLogFile), GetITLPluginStateFilename(InstanceIndex));
 #if ENGINE_MAJOR_VERSION >= 5
 		ProgressMarkerPath = FConfigCacheIni::NormalizeConfigIniPath(ProgressMarkerPath);
 #else
@@ -1539,7 +1586,7 @@ FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(const FString& In
 			FFileHelper::SaveStringToFile(TEXT(""), *ProgressMarkerPath);
 		}
 	}
-	ComputeCommonEventJSON(Settings->IncludeCommonMetadata, GameInstanceID, AdditionalAttributes);
+	ComputeCommonEventJSON(Settings->IncludeCommonMetadata, GameInstanceID, InstanceIndex, AdditionalAttributes);
 
 	WorkerBuffer.AddUninitialized(Settings->BytesPerRequest);
 	int BufferSize = Settings->BytesPerRequest + 4096 + (Settings->BytesPerRequest / 10);
@@ -1573,7 +1620,12 @@ uint32 FsparklogsReadAndStreamToCloud::Run()
 	// A pending flush will be processed before stopping
 	while (StopRequestCounter.GetValue() == 0 || FlushRequestCounter.GetValue() > 0)
 	{
-		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Run|In loop|WorkerLastFlushFailed=%d|FlushRequestCounter=%d"), WorkerLastFlushFailed ? 1 : 0, (int)FlushRequestCounter.GetValue());
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Run|In loop|WorkerLastFlushFailed=%d|FlushRequestCounter=%d|FlushClearMinNextPlatformTime=%d"), WorkerLastFlushFailed ? 1 : 0, (int)FlushRequestCounter.GetValue(), (int)FlushClearMinNextPlatformTime.GetValue());
+		if (FlushClearMinNextPlatformTime.GetValue() > 0)
+		{
+			WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds();
+			FlushClearMinNextPlatformTime.Set(0);
+		}
 		// Only allow manual flushes if we are not in a retry delay because the last operation failed.
 		if (WorkerLastFlushFailed == false && FlushRequestCounter.GetValue() > 0)
 		{
@@ -1633,6 +1685,8 @@ bool FsparklogsReadAndStreamToCloud::AccrueWrittenBytes(int N)
 
 bool FsparklogsReadAndStreamToCloud::RequestFlush()
 {
+	// Clear any pending retry timer so we retry immediately
+	FlushClearMinNextPlatformTime.Increment();
 	// If we've already requested a stop, a flush is impossible
 	if (StopRequestCounter.GetValue() > 0)
 	{
@@ -1659,6 +1713,8 @@ bool FsparklogsReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer, b
 	if (ClearRetryTimer)
 	{
 		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|Clearing retry timer..."));
+		// Clear any pending retry timer so we retry immediately
+		FlushClearMinNextPlatformTime.Increment();
 		WorkerLastFlushFailed.AtomicSet(false);
 	}
 
@@ -1699,7 +1755,7 @@ bool FsparklogsReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer, b
 				// NOTE: the game does not normally progress the frame count during shutdown, follow the same logic here
 				// GFrameCounter++;
 			}
-			FPlatformProcess::SleepNoStats(OnMainGameThread ? 0.01f : 0.05f);
+			FPlatformProcess::SleepNoStats(0.005f);
 			LastTime = Now;
 		}
 		WasSuccessful = FlushSuccessOpCounter.GetValue() != StartFlushSuccessOpCounter;
@@ -1721,7 +1777,7 @@ bool FsparklogsReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer, b
 				ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|Timed out waiting for thread to stop"));
 				return false;
 			}
-			FPlatformProcess::SleepNoStats(0.01f);
+			FPlatformProcess::SleepNoStats(0.005f);
 		}
 	}
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|END|WasSuccessful=%d"), WasSuccessful ? 1 : 0);
@@ -1735,18 +1791,14 @@ bool FsparklogsReadAndStreamToCloud::ReadProgressMarker(int64& OutMarker)
 	double OutDouble = 0.0;
 	bool WasDisabled = GConfig->AreFileOperationsDisabled();
 	GConfig->EnableFileOperations();
-	bool Result = GConfig->GetDouble(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, OutDouble, ProgressMarkerPath);
+	FString OutStringValue;
+	bool Result = GConfig->GetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, OutStringValue, ProgressMarkerPath);
 	if (WasDisabled)
 	{
 		GConfig->DisableFileOperations();
 	}
-	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|ReadProgressMarker|inifile='%s'|Result=%s|Marker=%f"), *ProgressMarkerPath, Result ? TEXT("success") : TEXT("failure"), OutDouble);
-	if (!Result)
-	{
-		OutDouble = 0.0;
-	}
-	// Precise to 52+ bits
-	OutMarker = (int64)(OutDouble);
+	OutMarker = FCString::Atoi64(*OutStringValue);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|ReadProgressMarker|inifile='%s'|Result=%s|MarkerString=%s|Marker=%ld"), *ProgressMarkerPath, Result ? TEXT("success") : TEXT("failure"), *OutStringValue, OutMarker);
 	return true;
 }
 
@@ -1757,7 +1809,7 @@ bool FsparklogsReadAndStreamToCloud::WriteProgressMarker(int64 InMarker)
 	// Precise to 52+ bits
 	bool WasDisabled = GConfig->AreFileOperationsDisabled();
 	GConfig->EnableFileOperations();
-	GConfig->SetDouble(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, (double)(InMarker), ProgressMarkerPath);
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, *FString::Printf(TEXT("%ld"), InMarker), ProgressMarkerPath);
 	GConfig->Flush(false, ProgressMarkerPath);
 	if (WasDisabled)
 	{
@@ -1771,7 +1823,10 @@ void FsparklogsReadAndStreamToCloud::DeleteProgressMarker()
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|DeleteProgressMarker|inifile='%s'"), *ProgressMarkerPath);
 	bool WasDisabled = GConfig->AreFileOperationsDisabled();
 	GConfig->EnableFileOperations();
-	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, ProgressMarkerPath);
+	if (!GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, ProgressMarkerPath))
+	{
+		GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, TEXT("0"), ProgressMarkerPath);
+	}
 	GConfig->Flush(false, ProgressMarkerPath);
 	if (WasDisabled)
 	{
@@ -1855,21 +1910,36 @@ bool FsparklogsReadAndStreamToCloud::WorkerReadNextPayload(int& OutNumToRead, in
 	// Re-open the file. UE doesn't contain cross-platform class that can stay open and refresh the filesize OR to read up to N (but maybe less than N bytes).
 	// The only solution and stay within UE class library is to just re-open the file every flush request. This is actually quite fast on modern platforms.
 	TUniquePtr<IFileHandle> WorkerReader;
-	WorkerReader.Reset(FPlatformFileManager::Get().GetPlatformFile().OpenRead(*SourceLogFile, true));
-	if (WorkerReader == nullptr)
+	// Try twice because there can be race conditions with the file not existing and trying to open it...
+	constexpr int MaxRetries = 2;
+	for (int i = 1; true; i++)
 	{
-		if (!FPaths::FileExists(SourceLogFile))
+		WorkerReader.Reset(FPlatformFileManager::Get().GetPlatformFile().OpenRead(*SourceLogFile, true));
+		if (WorkerReader != nullptr)
 		{
-			OutEffectiveShippedLogOffset = 0;
-			OutNumToRead = 0;
-			OutRemainingBytes = 0;
-			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerReadNextPayload|Logfile does not yet exist, nothing to read|logfile='%s'"), *SourceLogFile);
-			return true;
+			break;
 		}
 		else
 		{
-			UE_LOG(LogPluginSparkLogs, Warning, TEXT("STREAMER: Failed to open logfile='%s'"), *SourceLogFile);
-			return false;
+			int ErrorCode = FPlatformMisc::GetLastError();
+			if (!FPaths::FileExists(SourceLogFile))
+			{
+				OutEffectiveShippedLogOffset = 0;
+				OutNumToRead = 0;
+				OutRemainingBytes = 0;
+				ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerReadNextPayload|Logfile does not yet exist, nothing to read|logfile='%s'"), *SourceLogFile);
+				return true;
+			}
+			else
+			{
+				if (i >= MaxRetries)
+				{
+					TCHAR ErrBuffer[2048] = { 0, 0 };
+					UE_LOG(LogPluginSparkLogs, Warning, TEXT("STREAMER: Failed to open logfile='%s' err=%d msg=%s"), *SourceLogFile, ErrorCode, FPlatformMisc::GetSystemErrorMessage(ErrBuffer, sizeof(ErrBuffer)-2, ErrorCode));
+					return false;
+				}
+				FPlatformProcess::Sleep(0.01f);
+			}
 		}
 	}
 	int64 FileSize = WorkerReader->Size();
@@ -2155,6 +2225,51 @@ double FsparklogsReadAndStreamToCloud::WorkerGetRetrySecs()
 	}
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerGetRetrySecs=%.3lf"), RetrySecs);
 	return RetrySecs;
+}
+
+// =============== FsparklogsIndexedLockFile ===============================================================================
+
+FsparklogsIndexedLockFile::FsparklogsIndexedLockFile(int MaxAttempts, const FString& BaseFilePath)
+	: AcquiredLockIndex(0)
+{
+	for (int Index = 1; Index < MaxAttempts; Index++)
+	{
+		FString Filename(BaseFilePath);
+		if (Index > 1)
+		{
+			Filename.AppendChar(TEXT('.'));
+			Filename.AppendInt(Index);
+		}
+		Filename.Append(TEXT(".lock"));
+		AttemptedLockFile = Filename;
+		uint32 Flags = FILEWRITE_Silent | FILEWRITE_Append;
+		FArchive* Ar = IFileManager::Get().CreateFileWriter(*Filename, Flags);
+		if (Ar != nullptr)
+		{
+			LockFileArchive = TUniquePtr<FArchive>(Ar);
+			AcquiredLockIndex = Index;
+			break;
+		}
+	}
+	if (!AcquiredLockIndex)
+	{
+		LockFileArchive.Reset(nullptr);
+		// Leave AttemptedLockFile so we know the last attempted lockfile
+	}
+}
+
+FsparklogsIndexedLockFile::~FsparklogsIndexedLockFile()
+{
+	if (LockFileArchive.IsValid())
+	{
+		LockFileArchive->Close();
+		if (!AttemptedLockFile.IsEmpty())
+		{
+			// If this races because another process already acquired the lock, the delete will fail, which is fine.
+			IFileManager::Get().Delete(*AttemptedLockFile, false, false, true);
+		}
+		LockFileArchive.Reset(nullptr);
+	}
 }
 
 // =============== FsparklogsOutputDeviceFile ===============================================================================
@@ -4534,7 +4649,7 @@ void FsparklogsAnalyticsProvider::InternalFinalizeAnalyticsEvent(const TCHAR* Ev
 		Object->SetStringField(StandardFieldSessionStarted, ITLGetUTCDateTimeAsRFC3339(EffectiveSessionStarted));
 	}
 	Object->SetStringField(StandardFieldSessionType, GetITLLaunchConfiguration(false));
-	Object->SetStringField(StandardFieldGameId, GameID);
+	Object->SetStringField(StandardFieldAppId, GameID);
 	if (!FlattenedUserTags.IsEmpty())
 	{
 		Object->SetStringField(StandardFieldUserTags, FlattenedUserTags);
@@ -4687,6 +4802,7 @@ FsparklogsModule::FsparklogsModule()
 	, Settings(new FsparklogsSettings())
 {
 	GameInstanceID = ITLGenerateRandomAlphaNumID(24);
+	GetITLPluginIndexedLock();
 }
 
 void FsparklogsModule::StartupModule()
@@ -4695,7 +4811,7 @@ void FsparklogsModule::StartupModule()
 	FCoreDelegates::ApplicationWillEnterBackgroundDelegate.AddRaw(this, &FsparklogsModule::OnAppEnterBackground);
 	FCoreDelegates::ApplicationHasEnteredForegroundDelegate.AddRaw(this, &FsparklogsModule::OnAppEnterForeground);
 
-	UE_LOG(LogPluginSparkLogs, Display, TEXT("SparkLogsPlugin is starting up! Build_Version=%s SettingsConfiguration=%s"), *ITLGetPluginVersion(), GetITLLaunchConfiguration(true));
+	UE_LOG(LogPluginSparkLogs, Display, TEXT("SparkLogsPlugin is starting up! Build_Version=%s SettingsConfiguration=%s InstanceIndex=%d"), *ITLGetPluginVersion(), GetITLLaunchConfiguration(true), GetITLPluginIndexedLock().IndexedLockFile->GetLockIndex());
 
 	// TODO: does it matter if we are loaded later and miss a bunch of log entries during engine initialization?
 	// TODO: Should run plugin earlier and check command line to determine if this is running in an editor with
@@ -4755,6 +4871,7 @@ void FsparklogsModule::ShutdownModule()
 	}
 	// Just in case it was not called earlier...
 	StopShippingEngine();
+	GetITLPluginIndexedLock().IndexedLockFile.Reset(nullptr);
 }
 
 TSharedPtr<IAnalyticsProvider> FsparklogsModule::CreateAnalyticsProvider(const FAnalyticsProviderConfigurationDelegate& GetConfigValue) const
@@ -4825,6 +4942,14 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 	{
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Event shipping engine is already active. Ignoring call to StartShippingEngine."));
 		return true;
+	}
+
+	// If we can't get an exclusive lock, it's not safe to continue.
+	int InstanceIndex = GetITLPluginIndexedLock().IndexedLockFile->GetLockIndex();
+	if (InstanceIndex <= 0)
+	{
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("Cannot obtain exclusive lockfile. Last tried on file %s"), *(GetITLPluginIndexedLock().IndexedLockFile->GetAttemptedLockFile()));
+		return false;
 	}
 
 	// Always make sure that we're using current settings
@@ -4959,7 +5084,7 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 			AuthorizationHeader = EffectiveHttpAuthorizationHeaderValue;
 		}
 		CloudPayloadProcessor = TSharedPtr<FsparklogsWriteHTTPPayloadProcessor, ESPMode::ThreadSafe>(new FsparklogsWriteHTTPPayloadProcessor(EffectiveHttpEndpointURI, AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests, EffectiveTargetCurrency));
-		CloudStreamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, options.OverrideComputerName, GameInstanceID, &options.AdditionalAttributes));
+		CloudStreamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(InstanceIndex, SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, options.OverrideComputerName, GameInstanceID, &options.AdditionalAttributes));
 		CloudStreamer->SetWeakThisPtr(CloudStreamer);
 
 		int64 StartingProgressMarker = 0;
@@ -4984,7 +5109,7 @@ void FsparklogsModule::StopShippingEngine()
 {
 	if (EngineActive || CloudStreamer.IsValid())
 	{
-		UE_LOG(LogPluginSparkLogs, Log, TEXT("Shutting down and flushing logs to cloud..."));
+		UE_LOG(LogPluginSparkLogs, Log, TEXT("Shutting down and flushing data to cloud..."));
 		// If an analytics session is active then end it
 		GetAnalyticsProvider()->EndSession(TEXT("automatically ended at app exit"));
 		
@@ -5009,7 +5134,7 @@ void FsparklogsModule::StopShippingEngine()
 			if (CloudStreamer->FlushAndWait(2, true, true, true, FsparklogsSettings::WaitForFlushToCloudOnShutdown, LastFlushProcessedEverything))
 			{
 				FString LogFilePath = GetITLInternalGameLog(nullptr).LogFilePath;
-				UE_LOG(LogPluginSparkLogs, Log, TEXT("Flushed logs successfully. LastFlushedEverything=%d"), (int)LastFlushProcessedEverything);
+				UE_LOG(LogPluginSparkLogs, Log, TEXT("Flushed data successfully. LastFlushedEverything=%d"), (int)LastFlushProcessedEverything);
 				// Purge this plugin's logfile and delete the progress marker (fully flushed shutdown should start with an empty log next game session).
 				GLog->RemoveOutputDevice(LogDevice);
 				LogDevice->TearDown();
@@ -5019,11 +5144,11 @@ void FsparklogsModule::StopShippingEngine()
 					if (Purged && !IFileManager::Get().FileExists(*LogDeviceFilename))
 					{
 						CloudStreamer->DeleteProgressMarker();
-						UE_LOG(LogPluginSparkLogs, Log, TEXT("All logs fully shipped. Removed progress marker and local logfile %s"), *LogFilePath);
+						UE_LOG(LogPluginSparkLogs, Log, TEXT("All data fully shipped. Removed progress marker and local logfile %s"), *LogFilePath);
 					}
 					else
 					{
-						UE_LOG(LogPluginSparkLogs, Log, TEXT("All logs fully shipped. However, failed to remove local logfile %s so keeping progress marker."), *LogFilePath);
+						UE_LOG(LogPluginSparkLogs, Log, TEXT("All data fully shipped. However, failed to remove local logfile %s so keeping progress marker."), *LogFilePath);
 					}
 				}
 			}
