@@ -1545,14 +1545,15 @@ void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMe
 		}
 	}
 
-	// If game_id is set we should always include it regardless, it's required for good analytics data.
+	// If game ID is set we should always include it regardless, it's required for good analytics data.
 	if (!Settings->AnalyticsGameID.IsEmpty())
 	{
 		if (!CommonEventJSON.IsEmpty())
 		{
 			CommonEventJSON.Append(TEXT(", "));
 		}
-		CommonEventJSON.Appendf(TEXT("\"game_id\": %s"), *EscapeJsonString(Settings->AnalyticsGameID));
+		// The standardized field name is "app_id" (more generic as analytics can be used for more than games)
+		CommonEventJSON.Appendf(TEXT("\"app_id\": %s"), *EscapeJsonString(Settings->AnalyticsGameID));
 	}
 
 	if (nullptr != AdditionalAttributes && AdditionalAttributes->Num() > 0)
