@@ -1050,7 +1050,7 @@ void FsparklogsSettings::LoadSettings()
 	}
 	if (!GConfig->GetDouble(*Section, *(SettingPrefix + TEXT("ProcessingIntervalSecs")), ProcessingIntervalSecs, GEngineIni))
 	{
-		ProcessingIntervalSecs = GetValueForLaunchConfiguration<double>(DefaultServerProcessingIntervalSecs, DefaultEditorProcessingIntervalSecs, DefaultClientProcessingIntervalSecs, 2);
+		ProcessingIntervalSecs = GetValueForLaunchConfiguration<double>(DefaultServerProcessingIntervalSecs, DefaultEditorProcessingIntervalSecs, FPlatformProperties::RequiresCookedData() ? DefaultClientProcessingIntervalSecs : DefaultEditorProcessingIntervalSecs, 2);
 	}
 	if (!GConfig->GetDouble(*Section, *(SettingPrefix + TEXT("RetryIntervalSecs")), RetryIntervalSecs, GEngineIni))
 	{
@@ -1142,7 +1142,7 @@ void FsparklogsSettings::EnforceConstraints()
 	{
 		BytesPerRequest = MaxBytesPerRequest;
 	}
-	double MinProcessingIntervalSecs = GetValueForLaunchConfiguration<double>(MinServerProcessingIntervalSecs, MinEditorProcessingIntervalSecs, MinClientProcessingIntervalSecs, 60.0 * 5);
+	double MinProcessingIntervalSecs = GetValueForLaunchConfiguration<double>(MinServerProcessingIntervalSecs, MinEditorProcessingIntervalSecs, FPlatformProperties::RequiresCookedData() ? MinClientProcessingIntervalSecs : MinEditorProcessingIntervalSecs, 60.0 * 5);
 	if (ProcessingIntervalSecs < MinProcessingIntervalSecs)
 	{
 		ProcessingIntervalSecs = MinProcessingIntervalSecs;
