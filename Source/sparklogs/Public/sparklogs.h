@@ -1881,7 +1881,7 @@ protected:
 	/** Called by the engine after it has fully initialized. */
 	void OnPostEngineInit();
 	/** Called by the engine as part of its exit process. */
-	void OnEngineExit();
+	void OnEnginePreExit();
 	/** Called by the engine when the app is about to enter the background on mobile. */
 	void OnAppEnterBackground();
 	/** Called by the engine when the app has entered the foreground on mobile. */

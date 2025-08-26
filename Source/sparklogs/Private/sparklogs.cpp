@@ -4874,7 +4874,7 @@ void FsparklogsModule::ShutdownModule()
 	FCoreDelegates::ApplicationWillEnterBackgroundDelegate.RemoveAll(this);
 	FCoreDelegates::ApplicationHasEnteredForegroundDelegate.RemoveAll(this);
 	FCoreDelegates::OnPostEngineInit.RemoveAll(this);
-	FCoreDelegates::OnExit.RemoveAll(this);
+	FCoreDelegates::OnEnginePreExit.RemoveAll(this);
 	if (UObjectInitialized())
 	{
 		UnregisterSettings();
@@ -5104,7 +5104,7 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 			UE_LOG(LogPluginSparkLogs, Log, TEXT("Resuming ingestion from progress marker %ld"), StartingProgressMarker);
 		}
 
-		FCoreDelegates::OnExit.AddRaw(this, &FsparklogsModule::OnEngineExit);
+		FCoreDelegates::OnEnginePreExit.AddRaw(this, &FsparklogsModule::OnEnginePreExit);
 		GetITLInternalGameLog(CloudStreamer).LogDevice->SetCloudStreamer(CloudStreamer);
 
 		if (Settings->StressTestGenerateIntervalSecs > 0)
@@ -5223,9 +5223,9 @@ void FsparklogsModule::OnPostEngineInit()
 	}
 }
 
-void FsparklogsModule::OnEngineExit()
+void FsparklogsModule::OnEnginePreExit()
 {
-	UE_LOG(LogPluginSparkLogs, Log, TEXT("OnEngineExit. Will shutdown the log shipping engine..."));
+	UE_LOG(LogPluginSparkLogs, Log, TEXT("OnEnginePreExit. Will shutdown the log shipping engine..."));
 	StopShippingEngine();
 }
 
