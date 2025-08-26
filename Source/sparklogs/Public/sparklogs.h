@@ -214,7 +214,7 @@ public:
 	/** The number of log entries to generate every generation interval. */
 	int StressTestNumEntriesPerTick;
 
-	FsparklogsSettings();
+	FsparklogsSettings(int InInstanceIndex);
 
 	/** Loads the settings from the game engine INI section appropriate for this launch configuration (editor, client, server, etc). */
 	void LoadSettings();
@@ -271,6 +271,8 @@ public:
 	void GetLastAnalyticsSessionStartInfo(FString& OutSessionID, FDateTime& OutSessionStarted);
 
 protected:
+	int InstanceIndex;
+	FString InstanceSettingsIni;
 	FCriticalSection CachedCriticalSection;
 	FString CachedAnalyticsUserID;
 	FString CachedAnalyticsPlayerID;

@@ -41,7 +41,6 @@ public:
         {
             Created = IFileManager::Get().MakeDirectory(*DirectoryPath);
         }
-        ClearUserProgressMarker();
     }
     ~FITLTestTempDirectory()
     {
@@ -49,21 +48,8 @@ public:
         {
             IFileManager::Get().DeleteDirectory(*DirectoryPath, false, true);
         }
-        ClearUserProgressMarker();
     }
     FString GetTempDir() { return DirectoryPath; }
-    void ClearUserProgressMarker()
-    {
-        // Manually clear out any progress marker value if we were testing this in the game user config dir
-        bool WasDisabled = GConfig->AreFileOperationsDisabled();
-        GConfig->EnableFileOperations();
-        GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, FsparklogsReadAndStreamToCloud::ProgressMarkerValue, GGameUserSettingsIni);
-        GConfig->Flush(false, GGameUserSettingsIni);
-        if (WasDisabled)
-        {
-            GConfig->DisableFileOperations();
-        }
-    }
 
 private:
     bool Created;
@@ -162,7 +148,7 @@ bool FsparklogsPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("Hello world!!"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -200,7 +186,7 @@ bool FsparklogsPluginUnitTestSkipEmptyPayloads::RunTest(const FString& Parameter
 
     TSharedRef<IFileHandle> LogWriter(FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*TestLogFile, true, true));
     
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -257,7 +243,7 @@ bool FsparklogsPluginUnitTestMultipleEvents::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nSecond line is longer\r\n3\r\n   fourth line    \t\r\n"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -290,7 +276,7 @@ bool FsparklogsPluginUnitTestNewlines::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("\t\n\n\r\n\nlinux\nskip\rslash\rR\n \r\n \n"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -323,7 +309,7 @@ bool FsparklogsPluginUnitTestControlChars::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("line 1\t\b\f\r\nline 2 \"hello\"\r\nline 3 \\world\\\r\n"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -357,7 +343,7 @@ bool FsparklogsPluginUnitTestUnicode::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, *FString::Format(TEXT("{0}\r\n"), { TestPayload1 }));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -392,7 +378,7 @@ bool FsparklogsPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("1234567812345678\r\n1234"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -437,7 +423,7 @@ bool FsparklogsPluginUnitTestMaxLineSizeUnicode::RunTest(const FString& Paramete
     ITLWriteStringToFile(LogWriter, TEXT("1234ππ5678π34\r\n1π4"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -479,7 +465,7 @@ bool FsparklogsPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nLine 2\r\n1234"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -534,7 +520,7 @@ bool FsparklogsPluginUnitTestHandleLogRotation::RunTest(const FString& Parameter
     ITLWriteStringToFile(LogWriter, TEXT("123456789012345678901234567890\r\n"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -586,7 +572,7 @@ bool FsparklogsPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nLine 2\r\n1234"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     // Setup so that we process success requests very quickly, but delay a long time after a failure
@@ -648,7 +634,7 @@ bool FsparklogsPluginUnitTestRetrySamePayloadSize::RunTest(const FString& Parame
     ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nLine 2\r\n1234"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     // Setup so that we process success requests and retry requests very quickly.
@@ -726,7 +712,7 @@ bool FsparklogsPluginUnitTestClearRetryTimer::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nLine 2\r\n1234"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     // Setup so that we process success requests very quickly, but delay a long time after a failure
@@ -787,7 +773,7 @@ bool FsparklogsPluginUnitTestGameInstanceID::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, *FString::Format(TEXT("{0}\r\n"), { TestPayload1 }));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->AddRandomGameInstanceID = true;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
@@ -822,7 +808,7 @@ bool FsparklogsPluginUnitTestAdditionalAttributes::RunTest(const FString& Parame
     ITLWriteStringToFile(LogWriter, *FString::Format(TEXT("{0}\r\n"), { TestPayload1 }));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -855,7 +841,7 @@ bool FsparklogsPluginIntegrationTestInfoMessage::RunTest(const FString& Paramete
 
     TArray<FString> ExpectedPayloads;
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -892,7 +878,7 @@ bool FsparklogsPluginIntegrationTestInfoMessageNoTags::RunTest(const FString& Pa
 
     TArray<FString> ExpectedPayloads;
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -930,7 +916,7 @@ bool FsparklogsPluginIntegrationTestMultiline::RunTest(const FString& Parameters
 
     TArray<FString> ExpectedPayloads;
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -967,7 +953,7 @@ bool FsparklogsPluginIntegrationTestAddRawEvent::RunTest(const FString& Paramete
 
     TArray<FString> ExpectedPayloads;
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -1020,7 +1006,7 @@ bool FsparklogsPluginIntegrationTestAutoFlushLog::RunTest(const FString& Paramet
 
     TArray<FString> ExpectedPayloads;
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     constexpr double MinIntervalBetweenFlushes = 0.25;
@@ -1081,7 +1067,7 @@ bool FsparklogsPluginIntegrationTestAutoFlushRawEvent::RunTest(const FString& Pa
 
     TArray<FString> ExpectedPayloads;
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     constexpr double MinIntervalBetweenFlushes = 0.25;
