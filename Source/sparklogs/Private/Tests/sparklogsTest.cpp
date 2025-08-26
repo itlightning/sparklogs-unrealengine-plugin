@@ -34,7 +34,7 @@ private:
 class FITLTestTempDirectory
 {
 public:
-    FITLTestTempDirectory(const FString& InDirectoryPath) : DirectoryPath(InDirectoryPath)
+    FITLTestTempDirectory(const FString& InDirectoryPath, int InInstanceIndex) : DirectoryPath(InDirectoryPath), InstanceIndex(InInstanceIndex)
     {
         Created = false;
         if (!IFileManager::Get().DirectoryExists(*DirectoryPath))
@@ -54,20 +54,18 @@ public:
     FString GetTempDir() { return DirectoryPath; }
     void ClearUserProgressMarker()
     {
-        // Manually clear out any progress marker value if we were testing this in the game user config dir
-        bool WasDisabled = GConfig->AreFileOperationsDisabled();
-        GConfig->EnableFileOperations();
-        GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, FsparklogsReadAndStreamToCloud::ProgressMarkerValue, GGameUserSettingsIni);
-        GConfig->Flush(false, GGameUserSettingsIni);
-        if (WasDisabled)
+        // Manually clear out the temporary state file for this test run
+        FString StateIni = ITLGetIndexedStateFileINI(InstanceIndex);
+        if (StateIni != GGameUserSettingsIni)
         {
-            GConfig->DisableFileOperations();
+            IFileManager::Get().Delete(*StateIni, false, false, true);
         }
     }
 
 private:
     bool Created;
     FString DirectoryPath;
+    int InstanceIndex;
 };
 
 static FString ITLGetTestDir()
@@ -150,8 +148,8 @@ void FsparklogsPluginUnitTestSkipByteMarker::GetTests(TArray<FString>& OutBeauti
 }
 bool FsparklogsPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
     
     TArray<FString> ExpectedPayloads;
@@ -162,7 +160,7 @@ bool FsparklogsPluginUnitTestSkipByteMarker::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("Hello world!!"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -192,15 +190,15 @@ void FsparklogsPluginUnitTestSkipEmptyPayloads::GetTests(TArray<FString>& OutBea
 }
 bool FsparklogsPluginUnitTestSkipEmptyPayloads::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
 
     TSharedRef<IFileHandle> LogWriter(FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*TestLogFile, true, true));
     
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -247,8 +245,8 @@ void FsparklogsPluginUnitTestMultipleEvents::GetTests(TArray<FString>& OutBeauti
 }
 bool FsparklogsPluginUnitTestMultipleEvents::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
@@ -257,7 +255,7 @@ bool FsparklogsPluginUnitTestMultipleEvents::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nSecond line is longer\r\n3\r\n   fourth line    \t\r\n"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -280,8 +278,8 @@ void FsparklogsPluginUnitTestNewlines::GetTests(TArray<FString>& OutBeautifiedNa
 }
 bool FsparklogsPluginUnitTestNewlines::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
@@ -290,7 +288,7 @@ bool FsparklogsPluginUnitTestNewlines::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("\t\n\n\r\n\nlinux\nskip\rslash\rR\n \r\n \n"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -313,8 +311,8 @@ void FsparklogsPluginUnitTestControlChars::GetTests(TArray<FString>& OutBeautifi
 }
 bool FsparklogsPluginUnitTestControlChars::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
@@ -323,7 +321,7 @@ bool FsparklogsPluginUnitTestControlChars::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("line 1\t\b\f\r\nline 2 \"hello\"\r\nline 3 \\world\\\r\n"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -346,8 +344,8 @@ void FsparklogsPluginUnitTestUnicode::GetTests(TArray<FString>& OutBeautifiedNam
 }
 bool FsparklogsPluginUnitTestUnicode::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
@@ -357,7 +355,7 @@ bool FsparklogsPluginUnitTestUnicode::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, *FString::Format(TEXT("{0}\r\n"), { TestPayload1 }));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -380,8 +378,8 @@ void FsparklogsPluginUnitTestMaxLineSize::GetTests(TArray<FString>& OutBeautifie
 }
 bool FsparklogsPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
@@ -392,7 +390,7 @@ bool FsparklogsPluginUnitTestMaxLineSize::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("1234567812345678\r\n1234"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -423,8 +421,8 @@ void FsparklogsPluginUnitTestMaxLineSizeUnicode::GetTests(TArray<FString>& OutBe
 }
 bool FsparklogsPluginUnitTestMaxLineSizeUnicode::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
@@ -437,7 +435,7 @@ bool FsparklogsPluginUnitTestMaxLineSizeUnicode::RunTest(const FString& Paramete
     ITLWriteStringToFile(LogWriter, TEXT("1234ππ5678π34\r\n1π4"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -469,8 +467,8 @@ void FsparklogsPluginUnitTestStopAndResume::GetTests(TArray<FString>& OutBeautif
 }
 bool FsparklogsPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
@@ -479,7 +477,7 @@ bool FsparklogsPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nLine 2\r\n1234"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -524,8 +522,8 @@ void FsparklogsPluginUnitTestHandleLogRotation::GetTests(TArray<FString>& OutBea
 }
 bool FsparklogsPluginUnitTestHandleLogRotation::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
@@ -534,7 +532,7 @@ bool FsparklogsPluginUnitTestHandleLogRotation::RunTest(const FString& Parameter
     ITLWriteStringToFile(LogWriter, TEXT("123456789012345678901234567890\r\n"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -576,8 +574,8 @@ void FsparklogsPluginUnitTestRetryDelay::GetTests(TArray<FString>& OutBeautified
 }
 bool FsparklogsPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
@@ -586,7 +584,7 @@ bool FsparklogsPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nLine 2\r\n1234"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     // Setup so that we process success requests very quickly, but delay a long time after a failure
@@ -638,8 +636,8 @@ void FsparklogsPluginUnitTestRetrySamePayloadSize::GetTests(TArray<FString>& Out
 }
 bool FsparklogsPluginUnitTestRetrySamePayloadSize::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
@@ -648,7 +646,7 @@ bool FsparklogsPluginUnitTestRetrySamePayloadSize::RunTest(const FString& Parame
     ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nLine 2\r\n1234"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     // Setup so that we process success requests and retry requests very quickly.
@@ -716,8 +714,8 @@ void FsparklogsPluginUnitTestClearRetryTimer::GetTests(TArray<FString>& OutBeaut
 }
 bool FsparklogsPluginUnitTestClearRetryTimer::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
@@ -726,7 +724,7 @@ bool FsparklogsPluginUnitTestClearRetryTimer::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nLine 2\r\n1234"));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     // Setup so that we process success requests very quickly, but delay a long time after a failure
@@ -776,8 +774,8 @@ void FsparklogsPluginUnitTestGameInstanceID::GetTests(TArray<FString>& OutBeauti
 }
 bool FsparklogsPluginUnitTestGameInstanceID::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
@@ -787,7 +785,7 @@ bool FsparklogsPluginUnitTestGameInstanceID::RunTest(const FString& Parameters)
     ITLWriteStringToFile(LogWriter, *FString::Format(TEXT("{0}\r\n"), { TestPayload1 }));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->AddRandomGameInstanceID = true;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
@@ -811,8 +809,8 @@ void FsparklogsPluginUnitTestAdditionalAttributes::GetTests(TArray<FString>& Out
 }
 bool FsparklogsPluginUnitTestAdditionalAttributes::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
@@ -822,7 +820,7 @@ bool FsparklogsPluginUnitTestAdditionalAttributes::RunTest(const FString& Parame
     ITLWriteStringToFile(LogWriter, *FString::Format(TEXT("{0}\r\n"), { TestPayload1 }));
     LogWriter->Flush();
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -849,13 +847,13 @@ void FsparklogsPluginIntegrationTestInfoMessage::GetTests(TArray<FString>& OutBe
 bool FsparklogsPluginIntegrationTestInfoMessage::RunTest(const FString& Parameters)
 {
     FScopedValueSetter<ELogTimes::Type> DoNotPrintTimes(GPrintLogTimes, ELogTimes::None);
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -886,13 +884,13 @@ void FsparklogsPluginIntegrationTestInfoMessageNoTags::GetTests(TArray<FString>&
 }
 bool FsparklogsPluginIntegrationTestInfoMessageNoTags::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -924,13 +922,13 @@ void FsparklogsPluginIntegrationTestMultiline::GetTests(TArray<FString>& OutBeau
 bool FsparklogsPluginIntegrationTestMultiline::RunTest(const FString& Parameters)
 {
     FScopedValueSetter<ELogTimes::Type> DoNotPrintTimes(GPrintLogTimes, ELogTimes::None);
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -961,13 +959,13 @@ void FsparklogsPluginIntegrationTestAddRawEvent::GetTests(TArray<FString>& OutBe
 }
 bool FsparklogsPluginIntegrationTestAddRawEvent::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
@@ -1014,13 +1012,13 @@ void FsparklogsPluginIntegrationTestAutoFlushLog::GetTests(TArray<FString>& OutB
 bool FsparklogsPluginIntegrationTestAutoFlushLog::RunTest(const FString& Parameters)
 {
     FScopedValueSetter<ELogTimes::Type> DoNotPrintTimes(GPrintLogTimes, ELogTimes::None);
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     constexpr double MinIntervalBetweenFlushes = 0.25;
@@ -1075,13 +1073,13 @@ void FsparklogsPluginIntegrationTestAutoFlushRawEvent::GetTests(TArray<FString>&
 }
 bool FsparklogsPluginIntegrationTestAutoFlushRawEvent::RunTest(const FString& Parameters)
 {
-    FITLTestTempDirectory TempDir(ITLGetTestDir());
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
     FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
 
     TArray<FString> ExpectedPayloads;
 
-    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings());
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     constexpr double MinIntervalBetweenFlushes = 0.25;

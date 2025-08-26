@@ -99,6 +99,9 @@ SPARKLOGS_API bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InDat
 SPARKLOGS_API FString ITLGenerateNewRandomID();
 SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length);
 
+/** Returns path to the INI file that is safe to store instance-specific data in. */
+SPARKLOGS_API FString ITLGetIndexedStateFileINI(int InstanceIndex);
+
 /**
  * Manages plugin settings.
  */
@@ -138,8 +141,8 @@ public:
 	static constexpr double MinEditorProcessingIntervalSecs = 0.5;
 	static constexpr double DefaultEditorProcessingIntervalSecs = 2.0;
 	// There could be millions of clients, so give more time for data to queue up before flushing...
-	static constexpr double MinClientProcessingIntervalSecs = 60.0 * 10;
-	static constexpr double DefaultClientProcessingIntervalSecs = 60.0 * 15;
+	static constexpr double MinClientProcessingIntervalSecs = 60.0 * 1;
+	static constexpr double DefaultClientProcessingIntervalSecs = 60.0 * 5;
 
 	static constexpr bool DefaultServerCollectAnalytics = true;
 	static constexpr bool DefaultServerCollectLogs = true;
@@ -214,7 +217,7 @@ public:
 	/** The number of log entries to generate every generation interval. */
 	int StressTestNumEntriesPerTick;
 
-	FsparklogsSettings();
+	FsparklogsSettings(int InInstanceIndex);
 
 	/** Loads the settings from the game engine INI section appropriate for this launch configuration (editor, client, server, etc). */
 	void LoadSettings();
@@ -271,6 +274,8 @@ public:
 	void GetLastAnalyticsSessionStartInfo(FString& OutSessionID, FDateTime& OutSessionStarted);
 
 protected:
+	int InstanceIndex;
+	FString InstanceSettingsIni;
 	FCriticalSection CachedCriticalSection;
 	FString CachedAnalyticsUserID;
 	FString CachedAnalyticsPlayerID;
@@ -1879,7 +1884,7 @@ protected:
 	/** Called by the engine after it has fully initialized. */
 	void OnPostEngineInit();
 	/** Called by the engine as part of its exit process. */
-	void OnEngineExit();
+	void OnEnginePreExit();
 	/** Called by the engine when the app is about to enter the background on mobile. */
 	void OnAppEnterBackground();
 	/** Called by the engine when the app has entered the foreground on mobile. */

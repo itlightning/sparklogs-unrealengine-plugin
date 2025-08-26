@@ -598,9 +598,36 @@ SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length)
 	return Result;
 }
 
+FString ITLGetIndexedStateFileINI(int InstanceIndex)
+{
+	if (InstanceIndex <= 1 && FPlatformProperties::RequiresCookedData())
+	{
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("ITLGetIndexedStateFileINI|Cooked data is required and this is the primary instance, using game user settings INI for state file..."));
+		return GGameUserSettingsIni;
+	}
+	else
+	{
+		FString ParentDir = FPaths::GetPath(FPaths::ConvertRelativePathToFull(FGenericPlatformOutputDevices::GetAbsoluteLogFilename()));
+		FString Path = FPaths::Combine(ParentDir, GetITLPluginStateFilename(InstanceIndex));
+#if ENGINE_MAJOR_VERSION >= 5
+		Path = FConfigCacheIni::NormalizeConfigIniPath(Path);
+#else
+		FPaths::RemoveDuplicateSlashes(Path);
+		Path = FPaths::CreateStandardFilename(Path);
+#endif
+		// In UE5 the INI file must exist before attempting to use it in INI functions
+		if (!IFileManager::Get().FileExists(*Path))
+		{
+			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("ITLGetIndexedStateFileINI|Creating empty INI for state file|Path=%s"), *Path);
+			FFileHelper::SaveStringToFile(TEXT(""), *Path);
+		}
+		return Path;
+	}
+}
+
 // =============== FsparklogsSettings ===============================================================================
 
-FsparklogsSettings::FsparklogsSettings()
+FsparklogsSettings::FsparklogsSettings(int InInstanceIndex)
 	: AnalyticsUserIDType(ITLAnalyticsUserIDType::DeviceID)
 	, AnalyticsTargetCurrency(DefaultAnalyticsTargetCurrency)
 	, AnalyticsMobileAutoSessionStart(DefaultAnalyticsMobileAutoSessionStart)
@@ -621,12 +648,14 @@ FsparklogsSettings::FsparklogsSettings()
 	, AddRandomGameInstanceID(DefaultAddRandomGameInstanceID)
 	, StressTestGenerateIntervalSecs(0.0)
 	, StressTestNumEntriesPerTick(0)
+	, InstanceIndex(InInstanceIndex)
 	, CachedAnalyticsInstallTime(ITLEmptyDateTime)
 	, CachedAnalyticsSessionNumber(0)
 	, CachedAnalyticsTransactionNumber(0)
 	, CachedAnalyticsFirstPurchased(ITLEmptyDateTime)
 	, CachedAnalyticsLastEvent(ITLEmptyDateTime)
 {
+	InstanceSettingsIni = ITLGetIndexedStateFileINI(InstanceIndex);
 }
 
 FString FsparklogsSettings::GetEffectiveHttpEndpointURI(const FString& OverrideHTTPEndpointURI)
@@ -681,13 +710,13 @@ FString FsparklogsSettings::GetEffectiveAnalyticsUserID()
 	if (!IsValidDeviceID(NewID))
 	{
 		constexpr const TCHAR* UserIDKey = TEXT("AnalyticsUserID");
-		NewID = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, UserIDKey, GGameUserSettingsIni);
+		NewID = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, UserIDKey, InstanceSettingsIni);
 		NewID.TrimStartAndEndInline();
 		if (NewID.IsEmpty())
 		{
 			NewID = ITLGenerateNewRandomID();
-			GConfig->SetString(ITL_CONFIG_SECTION_NAME, UserIDKey, *NewID, GGameUserSettingsIni);
-			GConfig->Flush(false, GGameUserSettingsIni);
+			GConfig->SetString(ITL_CONFIG_SECTION_NAME, UserIDKey, *NewID, InstanceSettingsIni);
+			GConfig->Flush(false, InstanceSettingsIni);
 		}
 	}
 	
@@ -733,7 +762,7 @@ FDateTime FsparklogsSettings::GetEffectiveAnalyticsInstallTime()
 		return CachedAnalyticsInstallTime;
 	}
 	constexpr const TCHAR* InstallTimeKey = TEXT("AnalyticsInstallTime");
-	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, InstallTimeKey, GGameUserSettingsIni);
+	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, InstallTimeKey, InstanceSettingsIni);
 	TimeStr.TrimStartAndEndInline();
 	FDateTime InstallTime = ITLParseDateTime(TimeStr);
 	if (InstallTime == ITLEmptyDateTime)
@@ -741,8 +770,8 @@ FDateTime FsparklogsSettings::GetEffectiveAnalyticsInstallTime()
 		InstallTime = FDateTime::UtcNow();
 		int64 Ts = InstallTime.GetTicks();
 		TimeStr = FString::Printf(TEXT("%lld"), Ts);
-		GConfig->SetString(ITL_CONFIG_SECTION_NAME, InstallTimeKey, *TimeStr, GGameUserSettingsIni);
-		GConfig->Flush(false, GGameUserSettingsIni);
+		GConfig->SetString(ITL_CONFIG_SECTION_NAME, InstallTimeKey, *TimeStr, InstanceSettingsIni);
+		GConfig->Flush(false, InstanceSettingsIni);
 	}
 	
 	CachedAnalyticsInstallTime = InstallTime;
@@ -763,7 +792,7 @@ int FsparklogsSettings::GetSessionNumber(bool Increment)
 	FScopeLock WriteLock(&CachedCriticalSection);
 	if (CachedAnalyticsSessionNumber <= 0)
 	{
-		if (!GConfig->GetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsSessionNumber, GGameUserSettingsIni) || CachedAnalyticsSessionNumber <= 0)
+		if (!GConfig->GetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsSessionNumber, InstanceSettingsIni) || CachedAnalyticsSessionNumber <= 0)
 		{
 			CachedAnalyticsSessionNumber = 1;
 			Changed = true;
@@ -777,8 +806,8 @@ int FsparklogsSettings::GetSessionNumber(bool Increment)
 	}
 	if (Changed)
 	{
-		GConfig->SetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsSessionNumber, GGameUserSettingsIni);
-		GConfig->Flush(false, GGameUserSettingsIni);
+		GConfig->SetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsSessionNumber, InstanceSettingsIni);
+		GConfig->Flush(false, InstanceSettingsIni);
 	}
 	return CachedAnalyticsSessionNumber;
 }
@@ -790,7 +819,7 @@ int FsparklogsSettings::GetTransactionNumber(bool Increment)
 	FScopeLock WriteLock(&CachedCriticalSection);
 	if (CachedAnalyticsTransactionNumber <= 0)
 	{
-		if (!GConfig->GetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsTransactionNumber, GGameUserSettingsIni) || CachedAnalyticsTransactionNumber <= 0)
+		if (!GConfig->GetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsTransactionNumber, InstanceSettingsIni) || CachedAnalyticsTransactionNumber <= 0)
 		{
 			CachedAnalyticsTransactionNumber = 1;
 			Changed = true;
@@ -804,8 +833,8 @@ int FsparklogsSettings::GetTransactionNumber(bool Increment)
 	}
 	if (Changed)
 	{
-		GConfig->SetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsTransactionNumber, GGameUserSettingsIni);
-		GConfig->Flush(false, GGameUserSettingsIni);
+		GConfig->SetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsTransactionNumber, InstanceSettingsIni);
+		GConfig->Flush(false, InstanceSettingsIni);
 	}
 	return CachedAnalyticsTransactionNumber;
 }
@@ -817,7 +846,7 @@ FDateTime FsparklogsSettings::GetAnalyticsFirstPurchased()
 	{
 		return CachedAnalyticsFirstPurchased;
 	}
-	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsFirstPurchasedKey, GGameUserSettingsIni);
+	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsFirstPurchasedKey, InstanceSettingsIni);
 	TimeStr.TrimStartAndEndInline();
 	CachedAnalyticsFirstPurchased = ITLParseDateTime(TimeStr);
 	return CachedAnalyticsFirstPurchased;
@@ -828,8 +857,8 @@ void FsparklogsSettings::SetAnalyticsFirstPurchased(FDateTime T)
 	FScopeLock WriteLock(&CachedCriticalSection);
 	int64 Ts = T.GetTicks();
 	FString TimeStr = FString::Printf(TEXT("%lld"), Ts);
-	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsFirstPurchasedKey, *TimeStr, GGameUserSettingsIni);
-	GConfig->Flush(false, GGameUserSettingsIni);
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsFirstPurchasedKey, *TimeStr, InstanceSettingsIni);
+	GConfig->Flush(false, InstanceSettingsIni);
 	CachedAnalyticsFirstPurchased = T;
 }
 
@@ -843,7 +872,7 @@ int FsparklogsSettings::GetAttemptNumber(const FString& EventID, bool Increment,
 	int* CachedValuePtr = CachedAnalyticsAttemptNumber.Find(MapKey);
 	if (CachedValuePtr == nullptr)
 	{
-		if (!GConfig->GetInt(ITL_CONFIG_SECTION_NAME, *Key, CachedValue, GGameUserSettingsIni) || CachedValue <= 0)
+		if (!GConfig->GetInt(ITL_CONFIG_SECTION_NAME, *Key, CachedValue, InstanceSettingsIni) || CachedValue <= 0)
 		{
 			CachedValue = 0;
 			Changed = true;
@@ -862,14 +891,14 @@ int FsparklogsSettings::GetAttemptNumber(const FString& EventID, bool Increment,
 	if (DeleteAfter)
 	{
 		CachedAnalyticsAttemptNumber.Remove(MapKey);
-		GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, *Key, GGameUserSettingsIni);
-		GConfig->Flush(false, GGameUserSettingsIni);
+		GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, *Key, InstanceSettingsIni);
+		GConfig->Flush(false, InstanceSettingsIni);
 	}
 	else if (Changed)
 	{
 		CachedAnalyticsAttemptNumber.Emplace(MapKey, CachedValue);
-		GConfig->SetInt(ITL_CONFIG_SECTION_NAME, *Key, CachedValue, GGameUserSettingsIni);
-		GConfig->Flush(false, GGameUserSettingsIni);
+		GConfig->SetInt(ITL_CONFIG_SECTION_NAME, *Key, CachedValue, InstanceSettingsIni);
+		GConfig->Flush(false, InstanceSettingsIni);
 	}
 	return CachedValue;
 }
@@ -880,7 +909,7 @@ FDateTime FsparklogsSettings::GetEffectiveLastWrittenAnalyticsEvent()
 	{
 		return CachedAnalyticsLastEvent;
 	}
-	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, GGameUserSettingsIni);
+	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, InstanceSettingsIni);
 	TimeStr.TrimStartAndEndInline();
 	FDateTime LastEvent = ITLParseDateTime(TimeStr);
 	CachedAnalyticsLastEvent = LastEvent;
@@ -903,35 +932,35 @@ void FsparklogsSettings::MarkLastWrittenAnalyticsEvent()
 	CachedAnalyticsLastEvent = Now;
 	int64 Ts = Now.GetTicks();
 	FString TimeStr = FString::Printf(TEXT("%lld"), Ts);
-	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, *TimeStr, GGameUserSettingsIni);
-	GConfig->Flush(false, GGameUserSettingsIni);
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, *TimeStr, InstanceSettingsIni);
+	GConfig->Flush(false, InstanceSettingsIni);
 }
 
 void FsparklogsSettings::MarkEndOfAnalyticsSession()
 {
 	CachedAnalyticsLastEvent = ITLEmptyDateTime;
-	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, GGameUserSettingsIni);
-	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, GGameUserSettingsIni);
-	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, GGameUserSettingsIni);
-	GConfig->Flush(false, GGameUserSettingsIni);
+	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, InstanceSettingsIni);
+	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, InstanceSettingsIni);
+	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, InstanceSettingsIni);
+	GConfig->Flush(false, InstanceSettingsIni);
 }
 
 void FsparklogsSettings::MarkStartOfAnalyticsSession(const FString& SessionID, FDateTime SessionStarted)
 {
-	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, *SessionID, GGameUserSettingsIni);
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, *SessionID, InstanceSettingsIni);
 	FString SessionStartedStr = FString::Printf(TEXT("%lld"), (int64)SessionStarted.GetTicks());
-	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, *SessionStartedStr, GGameUserSettingsIni);
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, *SessionStartedStr, InstanceSettingsIni);
 	FDateTime Now = FDateTime::UtcNow();
 	FString NowStr = FString::Printf(TEXT("%lld"), (int64)Now.GetTicks());
 	CachedAnalyticsLastEvent = Now;
-	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, *NowStr, GGameUserSettingsIni);
-	GConfig->Flush(false, GGameUserSettingsIni);
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, *NowStr, InstanceSettingsIni);
+	GConfig->Flush(false, InstanceSettingsIni);
 }
 
 void FsparklogsSettings::GetLastAnalyticsSessionStartInfo(FString& OutSessionID, FDateTime& OutSessionStarted)
 {
-	OutSessionID = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, GGameUserSettingsIni);
-	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, GGameUserSettingsIni);
+	OutSessionID = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, InstanceSettingsIni);
+	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, InstanceSettingsIni);
 	TimeStr.TrimStartAndEndInline();
 	OutSessionStarted = ITLParseDateTime(TimeStr);
 }
@@ -1020,7 +1049,7 @@ void FsparklogsSettings::LoadSettings()
 	}
 	if (!GConfig->GetDouble(*Section, *(SettingPrefix + TEXT("ProcessingIntervalSecs")), ProcessingIntervalSecs, GEngineIni))
 	{
-		ProcessingIntervalSecs = GetValueForLaunchConfiguration<double>(DefaultServerProcessingIntervalSecs, DefaultEditorProcessingIntervalSecs, DefaultClientProcessingIntervalSecs, 2);
+		ProcessingIntervalSecs = GetValueForLaunchConfiguration<double>(DefaultServerProcessingIntervalSecs, DefaultEditorProcessingIntervalSecs, FPlatformProperties::RequiresCookedData() ? DefaultClientProcessingIntervalSecs : DefaultEditorProcessingIntervalSecs, 2);
 	}
 	if (!GConfig->GetDouble(*Section, *(SettingPrefix + TEXT("RetryIntervalSecs")), RetryIntervalSecs, GEngineIni))
 	{
@@ -1112,7 +1141,7 @@ void FsparklogsSettings::EnforceConstraints()
 	{
 		BytesPerRequest = MaxBytesPerRequest;
 	}
-	double MinProcessingIntervalSecs = GetValueForLaunchConfiguration<double>(MinServerProcessingIntervalSecs, MinEditorProcessingIntervalSecs, MinClientProcessingIntervalSecs, 60.0 * 5);
+	double MinProcessingIntervalSecs = GetValueForLaunchConfiguration<double>(MinServerProcessingIntervalSecs, MinEditorProcessingIntervalSecs, FPlatformProperties::RequiresCookedData() ? MinClientProcessingIntervalSecs : MinEditorProcessingIntervalSecs, 60.0 * 5);
 	if (ProcessingIntervalSecs < MinProcessingIntervalSecs)
 	{
 		ProcessingIntervalSecs = MinProcessingIntervalSecs;
@@ -1515,14 +1544,15 @@ void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMe
 		}
 	}
 
-	// If game_id is set we should always include it regardless, it's required for good analytics data.
+	// If game ID is set we should always include it regardless, it's required for good analytics data.
 	if (!Settings->AnalyticsGameID.IsEmpty())
 	{
 		if (!CommonEventJSON.IsEmpty())
 		{
 			CommonEventJSON.Append(TEXT(", "));
 		}
-		CommonEventJSON.Appendf(TEXT("\"game_id\": %s"), *EscapeJsonString(Settings->AnalyticsGameID));
+		// The standardized field name is "app_id" (more generic as analytics can be used for more than games)
+		CommonEventJSON.Appendf(TEXT("\"app_id\": %s"), *EscapeJsonString(Settings->AnalyticsGameID));
 	}
 
 	if (nullptr != AdditionalAttributes && AdditionalAttributes->Num() > 0)
@@ -1565,27 +1595,7 @@ FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(int InstanceIndex
 	, LastFlushPlatformTime(0)
 	, BytesQueuedSinceLastFlush(0)
 {
-	if (InstanceIndex <= 1 && FPlatformProperties::RequiresCookedData())
-	{
-		ProgressMarkerPath = GGameUserSettingsIni;
-		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Constructor|Cooked data is required and this is the primary instance, using game user settings INI for progress marker..."));
-	}
-	else
-	{
-		ProgressMarkerPath = FPaths::Combine(FPaths::GetPath(InSourceLogFile), GetITLPluginStateFilename(InstanceIndex));
-#if ENGINE_MAJOR_VERSION >= 5
-		ProgressMarkerPath = FConfigCacheIni::NormalizeConfigIniPath(ProgressMarkerPath);
-#else
-		FPaths::RemoveDuplicateSlashes(ProgressMarkerPath);
-		ProgressMarkerPath = FPaths::CreateStandardFilename(ProgressMarkerPath);
-#endif
-		// In UE5 the INI file must exist before attempting to use it in INI functions
-		if (!IFileManager::Get().FileExists(*ProgressMarkerPath))
-		{
-			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Constructor|Creating empty INI for progress marker state|ProgressMarkerPath=%s"), *ProgressMarkerPath);
-			FFileHelper::SaveStringToFile(TEXT(""), *ProgressMarkerPath);
-		}
-	}
+	ProgressMarkerPath = ITLGetIndexedStateFileINI(InstanceIndex);
 	ComputeCommonEventJSON(Settings->IncludeCommonMetadata, GameInstanceID, InstanceIndex, AdditionalAttributes);
 
 	WorkerBuffer.AddUninitialized(Settings->BytesPerRequest);
@@ -4799,10 +4809,9 @@ TSharedPtr<FsparklogsAnalyticsProvider> FsparklogsModule::AnalyticsProvider;
 
 FsparklogsModule::FsparklogsModule()
 	: EngineActive(false)
-	, Settings(new FsparklogsSettings())
+	, Settings(new FsparklogsSettings(GetITLPluginIndexedLock().IndexedLockFile->GetLockIndex()))
 {
 	GameInstanceID = ITLGenerateRandomAlphaNumID(24);
-	GetITLPluginIndexedLock();
 }
 
 void FsparklogsModule::StartupModule()
@@ -4864,7 +4873,7 @@ void FsparklogsModule::ShutdownModule()
 	FCoreDelegates::ApplicationWillEnterBackgroundDelegate.RemoveAll(this);
 	FCoreDelegates::ApplicationHasEnteredForegroundDelegate.RemoveAll(this);
 	FCoreDelegates::OnPostEngineInit.RemoveAll(this);
-	FCoreDelegates::OnExit.RemoveAll(this);
+	FCoreDelegates::OnEnginePreExit.RemoveAll(this);
 	if (UObjectInitialized())
 	{
 		UnregisterSettings();
@@ -5094,7 +5103,7 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 			UE_LOG(LogPluginSparkLogs, Log, TEXT("Resuming ingestion from progress marker %ld"), StartingProgressMarker);
 		}
 
-		FCoreDelegates::OnExit.AddRaw(this, &FsparklogsModule::OnEngineExit);
+		FCoreDelegates::OnEnginePreExit.AddRaw(this, &FsparklogsModule::OnEnginePreExit);
 		GetITLInternalGameLog(CloudStreamer).LogDevice->SetCloudStreamer(CloudStreamer);
 
 		if (Settings->StressTestGenerateIntervalSecs > 0)
@@ -5213,9 +5222,9 @@ void FsparklogsModule::OnPostEngineInit()
 	}
 }
 
-void FsparklogsModule::OnEngineExit()
+void FsparklogsModule::OnEnginePreExit()
 {
-	UE_LOG(LogPluginSparkLogs, Log, TEXT("OnEngineExit. Will shutdown the log shipping engine..."));
+	UE_LOG(LogPluginSparkLogs, Log, TEXT("OnEnginePreExit. Will shutdown the log shipping engine..."));
 	StopShippingEngine();
 }
 
