@@ -598,7 +598,6 @@ SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length)
 	return Result;
 }
 
-/** Returns path to the INI file that is safe to store instance-specific data in. */
 FString ITLGetIndexedStateFileINI(int InstanceIndex)
 {
 	if (InstanceIndex <= 1 && FPlatformProperties::RequiresCookedData())

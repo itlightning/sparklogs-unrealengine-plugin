@@ -99,6 +99,9 @@ SPARKLOGS_API bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InDat
 SPARKLOGS_API FString ITLGenerateNewRandomID();
 SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length);
 
+/** Returns path to the INI file that is safe to store instance-specific data in. */
+SPARKLOGS_API FString ITLGetIndexedStateFileINI(int InstanceIndex);
+
 /**
  * Manages plugin settings.
  */
