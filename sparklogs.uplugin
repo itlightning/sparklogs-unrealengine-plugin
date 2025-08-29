@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
 	"Version": 1,
-	"VersionName": "1.0.7",
+	"VersionName": "1.0.8",
 	"FriendlyName": "SparkLogs",
 	"Description": "Ship game engine logs and analytics to SparkLogs, a cost effective, petabyte-scale cloud logging service that's actually a joy to use. Can also be used to ship logs and analytics to any HTTP(S) endpoint that accepts JSON.",
 	"Category": "Analytics",
