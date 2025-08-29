@@ -130,7 +130,7 @@ public:
 	static constexpr double MinRetryIntervalSecs = 15.0;
 	// This should not be longer than 5 minutes, because the ingest dedup cache expires a few minutes later
 	static constexpr double MaxRetryIntervalSecs = 5 * 60;
-	static constexpr double WaitForFlushToCloudOnShutdown = 15.0;
+	static constexpr double WaitForFlushToCloudOnShutdown = 16.0;
 	static constexpr bool DefaultIncludeCommonMetadata = true;
 	static constexpr bool DefaultDebugLogRequests = false;
 	static constexpr bool DefaultAutoStart = true;
@@ -141,8 +141,8 @@ public:
 	static constexpr double MinEditorProcessingIntervalSecs = 0.5;
 	static constexpr double DefaultEditorProcessingIntervalSecs = 2.0;
 	// There could be millions of clients, so give more time for data to queue up before flushing...
-	static constexpr double MinClientProcessingIntervalSecs = 60.0 * 1;
-	static constexpr double DefaultClientProcessingIntervalSecs = 60.0 * 5;
+	static constexpr double MinClientProcessingIntervalSecs = 15.0;
+	static constexpr double DefaultClientProcessingIntervalSecs = 30.0;
 
 	static constexpr bool DefaultServerCollectAnalytics = true;
 	static constexpr bool DefaultServerCollectLogs = true;

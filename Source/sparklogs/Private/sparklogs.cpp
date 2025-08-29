@@ -1634,6 +1634,7 @@ uint32 FsparklogsReadAndStreamToCloud::Run()
 		if (FlushClearMinNextPlatformTime.GetValue() > 0)
 		{
 			WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds();
+			WorkerNumConsecutiveFlushFailures = 0;
 			FlushClearMinNextPlatformTime.Set(0);
 		}
 		// Only allow manual flushes if we are not in a retry delay because the last operation failed.
@@ -1643,7 +1644,7 @@ uint32 FsparklogsReadAndStreamToCloud::Run()
 			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Run|Manual flush requested|FlushRequestCounter=%d"), (int)NewValue);
 			WorkerDoFlush();
 		}
-		else if (FPlatformTime::Seconds() > WorkerMinNextFlushPlatformTime)
+		else if (FPlatformTime::Seconds() >= WorkerMinNextFlushPlatformTime)
 		{
 			// If we are waiting on a manual flush, and the retry timer finally expired, it's OK to mark this attempt as processing it.
 			if (FlushRequestCounter.GetValue() > 0)
@@ -5132,9 +5133,9 @@ void FsparklogsModule::StopShippingEngine()
 			if (CloudPayloadProcessor.IsValid())
 			{
 				// Set the retry interval to something short so we don't delay shutting down the game...
-				Settings->RetryIntervalSecs = 0.2;
-				// When the engine is shutting down, wait no more than 15 seconds to flush the final log request
-				CloudPayloadProcessor->SetTimeoutSecs(FMath::Min(Settings->RequestTimeoutSecs, 15.0));
+				Settings->RetryIntervalSecs = 0.5;
+				// When the engine is shutting down, wait no more than 11 seconds to flush the final log request
+				CloudPayloadProcessor->SetTimeoutSecs(FMath::Min(Settings->RequestTimeoutSecs, 11.0));
 			}
 			FsparklogsOutputDeviceFile* LogDevice = GetITLInternalGameLog(nullptr).LogDevice.Get();
 			FString LogDeviceFilename = LogDevice->GetFilename();
