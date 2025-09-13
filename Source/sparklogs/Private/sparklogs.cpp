@@ -942,7 +942,7 @@ void FsparklogsSettings::MarkLastWrittenAnalyticsEvent()
 	if (KnownLastEvent != ITLEmptyDateTime)
 	{
 		FTimespan Interval = Now - KnownLastEvent;
-		if (FMath::Abs(Interval.GetTotalSeconds()) < 15.0)
+		if (FMath::Abs(Interval.GetTotalSeconds()) < 5.0)
 		{
 			// Only update this timestamp every few seconds for efficiency
 			return;
@@ -1716,6 +1716,7 @@ bool FsparklogsReadAndStreamToCloud::AccrueWrittenBytes(int N)
 bool FsparklogsReadAndStreamToCloud::RequestFlush()
 {
 	// Clear any pending retry timer so we retry immediately
+	WorkerLastFlushFailed.AtomicSet(false);
 	FlushClearMinNextPlatformTime.Increment();
 	// If we've already requested a stop, a flush is impossible
 	if (StopRequestCounter.GetValue() > 0)
@@ -1744,8 +1745,8 @@ bool FsparklogsReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer, b
 	{
 		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|Clearing retry timer..."));
 		// Clear any pending retry timer so we retry immediately
-		FlushClearMinNextPlatformTime.Increment();
 		WorkerLastFlushFailed.AtomicSet(false);
+		FlushClearMinNextPlatformTime.Increment();
 	}
 
 	for (int i = 0; i < N; i++)
