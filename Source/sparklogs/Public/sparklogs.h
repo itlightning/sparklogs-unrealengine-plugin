@@ -149,8 +149,8 @@ public:
 	static constexpr double MinEditorProcessingIntervalSecs = 0.5;
 	static constexpr double DefaultEditorProcessingIntervalSecs = 2.0;
 	// There could be millions of clients, so give more time for data to queue up before flushing...
-	static constexpr double MinClientProcessingIntervalSecs = 3.0;
-	static constexpr double DefaultClientProcessingIntervalSecs = 6.0;
+	static constexpr double MinClientProcessingIntervalSecs = 6.0;
+	static constexpr double DefaultClientProcessingIntervalSecs = 12.0;
 
 	static constexpr bool DefaultServerCollectAnalytics = true;
 	static constexpr bool DefaultServerCollectLogs = true;
