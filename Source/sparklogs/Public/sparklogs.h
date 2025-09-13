@@ -141,8 +141,8 @@ public:
 	static constexpr double MinEditorProcessingIntervalSecs = 0.5;
 	static constexpr double DefaultEditorProcessingIntervalSecs = 2.0;
 	// There could be millions of clients, so give more time for data to queue up before flushing...
-	static constexpr double MinClientProcessingIntervalSecs = 15.0;
-	static constexpr double DefaultClientProcessingIntervalSecs = 30.0;
+	static constexpr double MinClientProcessingIntervalSecs = 3.0;
+	static constexpr double DefaultClientProcessingIntervalSecs = 6.0;
 
 	static constexpr bool DefaultServerCollectAnalytics = true;
 	static constexpr bool DefaultServerCollectLogs = true;
@@ -580,7 +580,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Bytes Per Request")
 	int32 ClientBytesPerRequest = FsparklogsSettings::DefaultBytesPerRequest;
 
-	// Target seconds between attempts to read and process a chunk. For efficiency, data from game clients is only flushed every few minutes or at key points like end of session.
+	// Target seconds between attempts to read and process a chunk.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Processing Interval in Seconds")
 	float ClientProcessingIntervalSecs = FsparklogsSettings::DefaultClientProcessingIntervalSecs;
 
