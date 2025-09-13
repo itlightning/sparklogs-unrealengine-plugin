@@ -208,6 +208,24 @@ bool ITLIsMobilePlatform()
 #endif
 }
 
+bool ITLIsConsolePlatform()
+{
+#if PLATFORM_XBOXONE || PLATFORM_PS4 || PLATFORM_LUMIN || PLATFORM_SWITCH || PLATFORM_HOLOLENS
+	return true;
+#else
+	return false;
+#endif
+}
+
+bool ITLIsManagedFileWrapperPlatform()
+{
+#if PLATFORM_USE_PLATFORM_FILE_MANAGED_STORAGE_WRAPPER
+	return true;
+#else
+	return false;
+#endif
+}
+
 FString ITLParseHttpResponseCookies(FHttpResponsePtr Response)
 {
 	FString AllCookies;
@@ -600,9 +618,9 @@ SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length)
 
 FString ITLGetIndexedStateFileINI(int InstanceIndex)
 {
-	if (InstanceIndex <= 1 && FPlatformProperties::RequiresCookedData())
+	if (InstanceIndex <= 1 && FPlatformProperties::RequiresCookedData() && (ITLIsMobilePlatform() || ITLIsConsolePlatform() || ITLIsManagedFileWrapperPlatform()))
 	{
-		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("ITLGetIndexedStateFileINI|Cooked data is required and this is the primary instance, using game user settings INI for state file..."));
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("ITLGetIndexedStateFileINI|Cooked data is required and this is the primary instance on mobile/console, using game user settings INI for state file..."));
 		return GGameUserSettingsIni;
 	}
 	else

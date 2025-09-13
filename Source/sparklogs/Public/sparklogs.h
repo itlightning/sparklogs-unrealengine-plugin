@@ -62,6 +62,12 @@ SPARKLOGS_API FDateTime ITLParseDateTime(const FString & TimeStr);
 /** Returns true if we're on a mobile platform. */
 SPARKLOGS_API bool ITLIsMobilePlatform();
 
+/** Returns true if we're on a console platform. */
+SPARKLOGS_API bool ITLIsConsolePlatform();
+
+/** Returns true if this platform is using a managed file wrapper. */
+SPARKLOGS_API bool ITLIsManagedFileWrapperPlatform();
+
 /** Parses all cookies in Set-Cookie headers in the given HTTP response and returns the combined value that would be used for the
   * Cookie header on a new HTTP request. It strips all optional fields from cookies and just adds the name=value for each cookie. */
 SPARKLOGS_API FString ITLParseHttpResponseCookies(FHttpResponsePtr Response);
