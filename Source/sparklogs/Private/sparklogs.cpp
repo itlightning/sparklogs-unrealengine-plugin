@@ -1327,7 +1327,7 @@ bool FsparklogsWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayl
 					// Mark that we've successfully processed the request...
 					RequestSucceeded.AtomicSet(true);
 				}
-				else if (EHttpResponseCodes::TooManyRequests == ResponseCode || ResponseCode >= EHttpResponseCodes::ServerError)
+				else if (EHttpResponseCodes::TooManyRequests == ResponseCode || EHttpResponseCodes::RequestTimeout == ResponseCode || ResponseCode >= EHttpResponseCodes::ServerError)
 				{
 					UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Retryable HTTP response: status=%d, msg=%s"), (int)ResponseCode, *ResponseBody.TrimStartAndEnd());
 					// Clear any session affinity cookies in case that is part of the issue...
@@ -1335,7 +1335,7 @@ bool FsparklogsWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayl
 					RequestSucceeded.AtomicSet(false);
 					RetryableFailure.AtomicSet(true);
 				}
-				else if (EHttpResponseCodes::BadRequest == ResponseCode)
+				else if (EHttpResponseCodes::BadRequest == ResponseCode || EHttpResponseCodes::RequestTooLarge == ResponseCode)
 				{
 					// Something about this input was unable to be processed -- drop this input and pretend success so we can continue, but warn about it
 					UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: HTTP response indicates input cannot be processed. Will skip this payload! status=%d, msg=%s"), (int)ResponseCode, *ResponseBody.TrimStartAndEnd());
