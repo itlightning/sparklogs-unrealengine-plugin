@@ -643,6 +643,31 @@ FString ITLGetIndexedStateFileINI(int InstanceIndex)
 	}
 }
 
+class FITLSparkLogsPluginCriticalSectionInitializer
+{
+public:
+	TUniquePtr<FCriticalSection> CS;
+	bool Init()
+	{
+		if (!CS)
+		{
+			CS = MakeUnique<FCriticalSection>();
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
+};
+
+FITLSparkLogsPluginCriticalSectionInitializer& GetITLPluginConfigCriticalSection()
+{
+	static FITLSparkLogsPluginCriticalSectionInitializer Singleton;
+	Singleton.Init();
+	return Singleton;
+}
+
 // =============== FsparklogsSettings ===============================================================================
 
 FsparklogsSettings::FsparklogsSettings(int InInstanceIndex)
@@ -717,7 +742,9 @@ FString FsparklogsSettings::GetEffectiveAnalyticsUserID()
 	}
 
 	// If we have previously calculated an ID (whether custom or auto-generated), reuse that same user ID from the previous game engine instance.
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 	FString NewID = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, UserIDKey, InstanceSettingsIni);
+	ConfigLock1.Unlock();
 	NewID.TrimStartAndEndInline();
 	if (!IsValidDeviceID(NewID))
 	{
@@ -733,8 +760,15 @@ FString FsparklogsSettings::GetEffectiveAnalyticsUserID()
 	if (!IsValidDeviceID(NewID))
 	{
 		NewID = ITLGenerateNewRandomID();
+		FScopeLock ConfigLock2(GetITLPluginConfigCriticalSection().CS.Get());
+		bool WasDisabled = GConfig->AreFileOperationsDisabled();
+		GConfig->EnableFileOperations();
 		GConfig->SetString(ITL_CONFIG_SECTION_NAME, UserIDKey, *NewID, InstanceSettingsIni);
 		GConfig->Flush(false, InstanceSettingsIni);
+		if (WasDisabled)
+		{
+			GConfig->DisableFileOperations();
+		}
 	}
 	
 	CachedAnalyticsUserID = NewID;
@@ -779,7 +813,9 @@ FDateTime FsparklogsSettings::GetEffectiveAnalyticsInstallTime()
 		return CachedAnalyticsInstallTime;
 	}
 	constexpr const TCHAR* InstallTimeKey = TEXT("AnalyticsInstallTime");
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get()); 
 	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, InstallTimeKey, InstanceSettingsIni);
+	ConfigLock1.Unlock();
 	TimeStr.TrimStartAndEndInline();
 	FDateTime InstallTime = ITLParseDateTime(TimeStr);
 	if (InstallTime == ITLEmptyDateTime)
@@ -787,8 +823,15 @@ FDateTime FsparklogsSettings::GetEffectiveAnalyticsInstallTime()
 		InstallTime = FDateTime::UtcNow();
 		int64 Ts = InstallTime.GetTicks();
 		TimeStr = FString::Printf(TEXT("%lld"), Ts);
+		FScopeLock ConfigLock2(GetITLPluginConfigCriticalSection().CS.Get()); 
+		bool WasDisabled = GConfig->AreFileOperationsDisabled();
+		GConfig->EnableFileOperations();
 		GConfig->SetString(ITL_CONFIG_SECTION_NAME, InstallTimeKey, *TimeStr, InstanceSettingsIni);
 		GConfig->Flush(false, InstanceSettingsIni);
+		if (WasDisabled)
+		{
+			GConfig->DisableFileOperations();
+		}
 	}
 	
 	CachedAnalyticsInstallTime = InstallTime;
@@ -800,8 +843,15 @@ void FsparklogsSettings::SetUserID(const TCHAR* UserID)
 	FScopeLock WriteLock(&CachedCriticalSection);
 	CachedAnalyticsUserID = UserID;
 	CachedAnalyticsPlayerID.Reset();
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
+	bool WasDisabled = GConfig->AreFileOperationsDisabled();
+	GConfig->EnableFileOperations();
 	GConfig->SetString(ITL_CONFIG_SECTION_NAME, UserIDKey, *CachedAnalyticsUserID, InstanceSettingsIni);
 	GConfig->Flush(false, InstanceSettingsIni);
+	if (WasDisabled)
+	{
+		GConfig->DisableFileOperations();
+	}
 }
 
 int FsparklogsSettings::GetSessionNumber(bool Increment)
@@ -811,6 +861,7 @@ int FsparklogsSettings::GetSessionNumber(bool Increment)
 	FScopeLock WriteLock(&CachedCriticalSection);
 	if (CachedAnalyticsSessionNumber <= 0)
 	{
+		FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 		if (!GConfig->GetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsSessionNumber, InstanceSettingsIni) || CachedAnalyticsSessionNumber <= 0)
 		{
 			CachedAnalyticsSessionNumber = 1;
@@ -825,8 +876,15 @@ int FsparklogsSettings::GetSessionNumber(bool Increment)
 	}
 	if (Changed)
 	{
+		FScopeLock ConfigLock2(GetITLPluginConfigCriticalSection().CS.Get());
+		bool WasDisabled = GConfig->AreFileOperationsDisabled();
+		GConfig->EnableFileOperations();
 		GConfig->SetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsSessionNumber, InstanceSettingsIni);
 		GConfig->Flush(false, InstanceSettingsIni);
+		if (WasDisabled)
+		{
+			GConfig->DisableFileOperations();
+		}
 	}
 	return CachedAnalyticsSessionNumber;
 }
@@ -838,6 +896,7 @@ int FsparklogsSettings::GetTransactionNumber(bool Increment)
 	FScopeLock WriteLock(&CachedCriticalSection);
 	if (CachedAnalyticsTransactionNumber <= 0)
 	{
+		FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 		if (!GConfig->GetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsTransactionNumber, InstanceSettingsIni) || CachedAnalyticsTransactionNumber <= 0)
 		{
 			CachedAnalyticsTransactionNumber = 1;
@@ -852,8 +911,15 @@ int FsparklogsSettings::GetTransactionNumber(bool Increment)
 	}
 	if (Changed)
 	{
+		FScopeLock ConfigLock2(GetITLPluginConfigCriticalSection().CS.Get());
+		bool WasDisabled = GConfig->AreFileOperationsDisabled();
+		GConfig->EnableFileOperations();
 		GConfig->SetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsTransactionNumber, InstanceSettingsIni);
 		GConfig->Flush(false, InstanceSettingsIni);
+		if (WasDisabled)
+		{
+			GConfig->DisableFileOperations();
+		}
 	}
 	return CachedAnalyticsTransactionNumber;
 }
@@ -865,7 +931,9 @@ FDateTime FsparklogsSettings::GetAnalyticsFirstPurchased()
 	{
 		return CachedAnalyticsFirstPurchased;
 	}
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsFirstPurchasedKey, InstanceSettingsIni);
+	ConfigLock1.Unlock();
 	TimeStr.TrimStartAndEndInline();
 	CachedAnalyticsFirstPurchased = ITLParseDateTime(TimeStr);
 	return CachedAnalyticsFirstPurchased;
@@ -876,8 +944,15 @@ void FsparklogsSettings::SetAnalyticsFirstPurchased(FDateTime T)
 	FScopeLock WriteLock(&CachedCriticalSection);
 	int64 Ts = T.GetTicks();
 	FString TimeStr = FString::Printf(TEXT("%lld"), Ts);
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
+	bool WasDisabled = GConfig->AreFileOperationsDisabled();
+	GConfig->EnableFileOperations();
 	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsFirstPurchasedKey, *TimeStr, InstanceSettingsIni);
 	GConfig->Flush(false, InstanceSettingsIni);
+	if (WasDisabled)
+	{
+		GConfig->DisableFileOperations();
+	}
 	CachedAnalyticsFirstPurchased = T;
 }
 
@@ -891,6 +966,7 @@ int FsparklogsSettings::GetAttemptNumber(const FString& EventID, bool Increment,
 	int* CachedValuePtr = CachedAnalyticsAttemptNumber.Find(MapKey);
 	if (CachedValuePtr == nullptr)
 	{
+		FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 		if (!GConfig->GetInt(ITL_CONFIG_SECTION_NAME, *Key, CachedValue, InstanceSettingsIni) || CachedValue <= 0)
 		{
 			CachedValue = 0;
@@ -907,6 +983,9 @@ int FsparklogsSettings::GetAttemptNumber(const FString& EventID, bool Increment,
 		CachedValue++;
 		Changed = true;
 	}
+	FScopeLock ConfigLock2(GetITLPluginConfigCriticalSection().CS.Get());
+	bool WasDisabled = GConfig->AreFileOperationsDisabled();
+	GConfig->EnableFileOperations();
 	if (DeleteAfter)
 	{
 		CachedAnalyticsAttemptNumber.Remove(MapKey);
@@ -919,16 +998,23 @@ int FsparklogsSettings::GetAttemptNumber(const FString& EventID, bool Increment,
 		GConfig->SetInt(ITL_CONFIG_SECTION_NAME, *Key, CachedValue, InstanceSettingsIni);
 		GConfig->Flush(false, InstanceSettingsIni);
 	}
+	if (WasDisabled)
+	{
+		GConfig->DisableFileOperations();
+	}
 	return CachedValue;
 }
 
 FDateTime FsparklogsSettings::GetEffectiveLastWrittenAnalyticsEvent()
 {
+	FScopeLock WriteLock(&CachedCriticalSection);
 	if (CachedAnalyticsLastEvent != ITLEmptyDateTime)
 	{
 		return CachedAnalyticsLastEvent;
 	}
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, InstanceSettingsIni);
+	ConfigLock1.Unlock();
 	TimeStr.TrimStartAndEndInline();
 	FDateTime LastEvent = ITLParseDateTime(TimeStr);
 	CachedAnalyticsLastEvent = LastEvent;
@@ -937,6 +1023,7 @@ FDateTime FsparklogsSettings::GetEffectiveLastWrittenAnalyticsEvent()
 
 void FsparklogsSettings::MarkLastWrittenAnalyticsEvent()
 {
+	FScopeLock WriteLock(&CachedCriticalSection);
 	FDateTime Now = FDateTime::UtcNow();
 	FDateTime KnownLastEvent = CachedAnalyticsLastEvent;
 	if (KnownLastEvent != ITLEmptyDateTime)
@@ -951,35 +1038,62 @@ void FsparklogsSettings::MarkLastWrittenAnalyticsEvent()
 	CachedAnalyticsLastEvent = Now;
 	int64 Ts = Now.GetTicks();
 	FString TimeStr = FString::Printf(TEXT("%lld"), Ts);
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
+	bool WasDisabled = GConfig->AreFileOperationsDisabled();
+	GConfig->EnableFileOperations();
 	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, *TimeStr, InstanceSettingsIni);
 	GConfig->Flush(false, InstanceSettingsIni);
+	if (WasDisabled)
+	{
+		GConfig->DisableFileOperations();
+	}
 }
 
 void FsparklogsSettings::MarkEndOfAnalyticsSession()
 {
+	FScopeLock WriteLock(&CachedCriticalSection);
 	CachedAnalyticsLastEvent = ITLEmptyDateTime;
+
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
+	bool WasDisabled = GConfig->AreFileOperationsDisabled();
+	GConfig->EnableFileOperations();
 	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, InstanceSettingsIni);
 	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, InstanceSettingsIni);
 	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, InstanceSettingsIni);
 	GConfig->Flush(false, InstanceSettingsIni);
+	if (WasDisabled)
+	{
+		GConfig->DisableFileOperations();
+	}
 }
 
 void FsparklogsSettings::MarkStartOfAnalyticsSession(const FString& SessionID, FDateTime SessionStarted)
 {
-	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, *SessionID, InstanceSettingsIni);
+	FScopeLock WriteLock(&CachedCriticalSection);
 	FString SessionStartedStr = FString::Printf(TEXT("%lld"), (int64)SessionStarted.GetTicks());
-	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, *SessionStartedStr, InstanceSettingsIni);
 	FDateTime Now = FDateTime::UtcNow();
 	FString NowStr = FString::Printf(TEXT("%lld"), (int64)Now.GetTicks());
 	CachedAnalyticsLastEvent = Now;
+
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
+	bool WasDisabled = GConfig->AreFileOperationsDisabled();
+	GConfig->EnableFileOperations();
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, *SessionID, InstanceSettingsIni);
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, *SessionStartedStr, InstanceSettingsIni);
 	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, *NowStr, InstanceSettingsIni);
 	GConfig->Flush(false, InstanceSettingsIni);
+	if (WasDisabled)
+	{
+		GConfig->DisableFileOperations();
+	}
 }
 
 void FsparklogsSettings::GetLastAnalyticsSessionStartInfo(FString& OutSessionID, FDateTime& OutSessionStarted)
 {
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 	OutSessionID = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, InstanceSettingsIni);
 	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, InstanceSettingsIni);
+	ConfigLock1.Unlock();
 	TimeStr.TrimStartAndEndInline();
 	OutSessionStarted = ITLParseDateTime(TimeStr);
 }
@@ -988,6 +1102,8 @@ void FsparklogsSettings::LoadSettings()
 {
 	FString Section = ITL_CONFIG_SECTION_NAME;
 	FString SettingPrefix = GetITLINISettingPrefix();
+	
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 	
 	// Settings that are common across any launch configuration
 
@@ -1131,12 +1247,19 @@ void FsparklogsSettings::LoadSettings()
 		StressTestNumEntriesPerTick = 0;
 	}
 
+	ConfigLock1.Unlock();
+
 	EnforceConstraints();
 
 	// Clear out the previously cached values
 	FScopeLock WriteLock(&CachedCriticalSection);
 	CachedAnalyticsUserID.Reset();
 	CachedAnalyticsPlayerID.Reset();
+	CachedAnalyticsInstallTime = ITLEmptyDateTime;
+	CachedAnalyticsSessionNumber = 0;
+	CachedAnalyticsTransactionNumber = 0;
+	CachedAnalyticsFirstPurchased = ITLEmptyDateTime;
+	CachedAnalyticsLastEvent = ITLEmptyDateTime;
 }
 
 void FsparklogsSettings::EnforceConstraints()
@@ -1820,6 +1943,7 @@ bool FsparklogsReadAndStreamToCloud::ReadProgressMarker(int64& OutMarker)
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|ReadProgressMarker|inifile='%s'|BEGIN"), *ProgressMarkerPath);
 	OutMarker = 0;
 	double OutDouble = 0.0;
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 	bool WasDisabled = GConfig->AreFileOperationsDisabled();
 	GConfig->EnableFileOperations();
 	FString OutStringValue;
@@ -1828,6 +1952,7 @@ bool FsparklogsReadAndStreamToCloud::ReadProgressMarker(int64& OutMarker)
 	{
 		GConfig->DisableFileOperations();
 	}
+	ConfigLock1.Unlock();
 	OutMarker = FCString::Atoi64(*OutStringValue);
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|ReadProgressMarker|inifile='%s'|Result=%s|MarkerString=%s|Marker=%ld"), *ProgressMarkerPath, Result ? TEXT("success") : TEXT("failure"), *OutStringValue, OutMarker);
 	return true;
@@ -1838,6 +1963,7 @@ bool FsparklogsReadAndStreamToCloud::WriteProgressMarker(int64 InMarker)
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WriteProgressMarker|inifile='%s'|Marker=%lld"), *ProgressMarkerPath, InMarker);
 	// TODO: should we use the sqlite plugin instead, maybe it's not as much overhead as writing INI file each time?
 	// Precise to 52+ bits
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 	bool WasDisabled = GConfig->AreFileOperationsDisabled();
 	GConfig->EnableFileOperations();
 	GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, *FString::Printf(TEXT("%ld"), InMarker), ProgressMarkerPath);
@@ -1852,6 +1978,7 @@ bool FsparklogsReadAndStreamToCloud::WriteProgressMarker(int64 InMarker)
 void FsparklogsReadAndStreamToCloud::DeleteProgressMarker()
 {
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|DeleteProgressMarker|inifile='%s'"), *ProgressMarkerPath);
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 	bool WasDisabled = GConfig->AreFileOperationsDisabled();
 	GConfig->EnableFileOperations();
 	if (!GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, ProgressMarkerPath))
