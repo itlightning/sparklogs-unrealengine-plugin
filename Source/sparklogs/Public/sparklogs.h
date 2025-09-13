@@ -108,6 +108,8 @@ SPARKLOGS_API FString ITLGetIndexedStateFileINI(int InstanceIndex);
 class SPARKLOGS_API FsparklogsSettings
 {
 public:
+	static constexpr const TCHAR* UserIDKey = TEXT("AnalyticsUserID");
+
 	static constexpr const TCHAR* AnalyticsUserIDTypeDeviceID = TEXT("device_id");
 	static constexpr const TCHAR* AnalyticsUserIDTypeGenerated = TEXT("generated");
 	static constexpr const TCHAR* DefaultAnalyticsUserIDType = AnalyticsUserIDTypeDeviceID;
@@ -1074,6 +1076,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
 	static void EndSessionWithReason(const FString& Reason);
 
+	/** Gets the current user ID */
+	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
+	static FString GetUserID();
+
+	/** Sets a custom user ID */
+	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
+	static void SetUserID(const FString& UserID);
+
 	/** Gets the ID of the current session, or returns an empty string if none is active. */
 	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
 	static FString GetSessionID();
@@ -1668,7 +1678,7 @@ public:
 	// Prepares for an analytics event to be generated. Ensures a session is started. Returns false if we should not proceed.
 	virtual bool AutoStartSessionBeforeEvent();
 	// Automatically cleanup any active session, except for server launch configurations where we only send session data if they explicitly use StartSession and EndSession.
-	virtual void AutoCleanupSession();
+	virtual void AutoCleanupSession(const FString &Reason);
 	// Checks if there is a session that was active in a previous instance of the game that wasn't ended properly. If so, mark that session as ended with the appropriate duration.
 	virtual void CheckForStaleSessionAtStartup();
 

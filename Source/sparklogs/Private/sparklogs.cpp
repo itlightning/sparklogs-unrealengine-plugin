@@ -697,27 +697,26 @@ FString FsparklogsSettings::GetEffectiveAnalyticsUserID()
 	{
 		return CachedAnalyticsUserID;
 	}
-	
-	FString NewID;
-	switch (AnalyticsUserIDType)
-	{
-	case ITLAnalyticsUserIDType::DeviceID:
-		NewID = FPlatformMisc::GetDeviceId().ToLower();
-		break;
-	}
-	
-	// If another method hasn't given us a valid ID yet, then see if we have already saved a previously generated one, and if not, generate and save a new one.
+
+	// If we have previously calculated an ID (whether custom or auto-generated), reuse that same user ID from the previous game engine instance.
+	FString NewID = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, UserIDKey, InstanceSettingsIni);
+	NewID.TrimStartAndEndInline();
 	if (!IsValidDeviceID(NewID))
 	{
-		constexpr const TCHAR* UserIDKey = TEXT("AnalyticsUserID");
-		NewID = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, UserIDKey, InstanceSettingsIni);
-		NewID.TrimStartAndEndInline();
-		if (NewID.IsEmpty())
+		switch (AnalyticsUserIDType)
 		{
-			NewID = ITLGenerateNewRandomID();
-			GConfig->SetString(ITL_CONFIG_SECTION_NAME, UserIDKey, *NewID, InstanceSettingsIni);
-			GConfig->Flush(false, InstanceSettingsIni);
+		case ITLAnalyticsUserIDType::DeviceID:
+			NewID = FPlatformMisc::GetDeviceId().ToLower();
+			break;
 		}
+	}
+	
+	// If another method hasn't given us a valid ID yet then generate and save a new one.
+	if (!IsValidDeviceID(NewID))
+	{
+		NewID = ITLGenerateNewRandomID();
+		GConfig->SetString(ITL_CONFIG_SECTION_NAME, UserIDKey, *NewID, InstanceSettingsIni);
+		GConfig->Flush(false, InstanceSettingsIni);
 	}
 	
 	CachedAnalyticsUserID = NewID;
@@ -783,6 +782,8 @@ void FsparklogsSettings::SetUserID(const TCHAR* UserID)
 	FScopeLock WriteLock(&CachedCriticalSection);
 	CachedAnalyticsUserID = UserID;
 	CachedAnalyticsPlayerID.Reset();
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, UserIDKey, *CachedAnalyticsUserID, InstanceSettingsIni);
+	GConfig->Flush(false, InstanceSettingsIni);
 }
 
 int FsparklogsSettings::GetSessionNumber(bool Increment)
@@ -2628,6 +2629,8 @@ bool UsparklogsAnalytics::StartSession() { return FsparklogsModule::GetAnalytics
 bool UsparklogsAnalytics::StartSessionWithReason(const FString& Reason) { return FsparklogsModule::GetAnalyticsProvider()->StartSession(*Reason, TArray<FAnalyticsEventAttribute>()); }
 void UsparklogsAnalytics::EndSession() { FsparklogsModule::GetAnalyticsProvider()->EndSession(); }
 void UsparklogsAnalytics::EndSessionWithReason(const FString& Reason) { FsparklogsModule::GetAnalyticsProvider()->EndSession(*Reason); }
+FString UsparklogsAnalytics::GetUserID() { return FsparklogsModule::GetAnalyticsProvider()->GetUserID(); }
+void UsparklogsAnalytics::SetUserID(const FString& UserID) { return FsparklogsModule::GetAnalyticsProvider()->SetUserID(UserID); }
 FString UsparklogsAnalytics::GetSessionID() { return FsparklogsModule::GetAnalyticsProvider()->GetSessionID(); }
 FSparkLogsAnalyticsSessionDescriptor UsparklogsAnalytics::GetSessionDescriptor() { return FsparklogsModule::GetAnalyticsProvider()->GetSessionDescriptor(); }
 void UsparklogsAnalytics::SetUserTags(const TArray<FString>& UserTags) { FsparklogsModule::GetAnalyticsProvider()->SetUserTags(UserTags); }
@@ -4189,7 +4192,7 @@ bool FsparklogsAnalyticsProvider::SetSessionID(const FString& InSessionID)
 		// no-op
 		return true;
 	}
-	AutoCleanupSession();
+	AutoCleanupSession(TEXT("session ID is explicitly changing"));
 	FScopeLock WriteLock(&DataCriticalSection);
 	CurrentSessionID = InSessionID;
 	return true;
@@ -4212,7 +4215,7 @@ void FsparklogsAnalyticsProvider::SetUserID(const FString& InUserID)
 		// no-op
 		return;
 	}
-	AutoCleanupSession();
+	AutoCleanupSession(TEXT("user ID is explicitly changing"));
 	return Settings->SetUserID(*InUserID);
 }
 
@@ -4516,13 +4519,13 @@ bool FsparklogsAnalyticsProvider::AutoStartSessionBeforeEvent()
 	return StartSession(TEXT("auto started when first analytics event queued"), TArray<FAnalyticsEventAttribute>());
 }
 
-void FsparklogsAnalyticsProvider::AutoCleanupSession()
+void FsparklogsAnalyticsProvider::AutoCleanupSession(const FString& Reason)
 {
 	if (IsRunningDedicatedServer())
 	{
 		return;
 	}
-	EndSession();
+	EndSession(*Reason);
 }
 
 void FsparklogsAnalyticsProvider::CheckForStaleSessionAtStartup()
