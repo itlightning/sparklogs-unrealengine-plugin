@@ -494,8 +494,11 @@ bool FsparklogsPluginUnitTestStopAndResume::RunTest(const FString& Parameters)
     TestFalse(TEXT("FlushAndWait[1-FINAL] should NOT capture everything"), FlushedEverything);
 
     int64 ProgressMarker = 0;
-    Streamer->ReadProgressMarker(ProgressMarker);
+    int ProgressLastReadLen = 0;
+    TArray<uint8> ProgressState;
+    Streamer->ReadProgressMarker(ProgressMarker, ProgressLastReadLen, ProgressState);
     TestEqual(TEXT("FlushAndWait[1-FINAL] progress marker should match"), ProgressMarker, (int64)16);
+    TestEqual(TEXT("FlushAndWait[1-FINAL] progress last read len should match"), ProgressLastReadLen, (int)0);
     Streamer.Reset();
     
     // When we resume, it should remember that we already processed the first two lines and not generate a new payload
@@ -548,8 +551,11 @@ bool FsparklogsPluginUnitTestHandleLogRotation::RunTest(const FString& Parameter
     TestTrue(TEXT("FlushAndWait[1] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestTrue(TEXT("FlushAndWait[1] should capture everything"), FlushedEverything);
     int64 ProgressMarker = 0;
-    Streamer->ReadProgressMarker(ProgressMarker);
+    int ProgressLastReadLen = 0;
+    TArray<uint8> ProgressState;
+    Streamer->ReadProgressMarker(ProgressMarker, ProgressLastReadLen, ProgressState);
     TestEqual(TEXT("FlushAndWait[1] progress marker should match"), ProgressMarker, (int64)32);
+    TestEqual(TEXT("FlushAndWait[1] progress last read len should match"), ProgressLastReadLen, (int)0);
 
     // Simulate the log file being rotated and add a new log line to it
     LogWriter->Seek(0);
@@ -564,8 +570,9 @@ bool FsparklogsPluginUnitTestHandleLogRotation::RunTest(const FString& Parameter
     TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(3, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
-    Streamer->ReadProgressMarker(ProgressMarker);
+    Streamer->ReadProgressMarker(ProgressMarker, ProgressLastReadLen, ProgressState);
     TestEqual(TEXT("FlushAndWait[FINAL] progress marker should match"), ProgressMarker, (int64)8);
+    TestEqual(TEXT("FlushAndWait[FINAL] progress last read len should match"), ProgressLastReadLen, (int)0);
     
     Streamer.Reset();
     return true;
@@ -607,27 +614,54 @@ bool FsparklogsPluginUnitTestRetryDelay::RunTest(const FString& Parameters)
 
     // Setup more data to log, but simulate failure of the payload processor
     PayloadProcessor->FailProcessing = true;
-    ITLWriteStringToFile(LogWriter, TEXT("Line 3\r\nLine 4"));
+    ITLWriteStringToFile(LogWriter, TEXT("Line 3\r\nLine"));
     LogWriter->Flush();
     TestFalse(TEXT("FlushAndWait[2] should fail because of failure to process"), Streamer->FlushAndWait(1, false, false, false, TestProcessingIntervalSecs * 5, FlushedEverything));
     TestFalse(TEXT("FlushAndWait[2] should NOT capture everything"), FlushedEverything);
+
+    // Make sure that the progress last read length remembers the size of the failed payload
+    int64 ProgressMarker = 0;
+    int ProgressLastReadLen = 0;
+    TArray<uint8> ProgressState;
+    Streamer->ReadProgressMarker(ProgressMarker, ProgressLastReadLen, ProgressState);
+    TestEqual(TEXT("FlushAndWait[2] progress marker should match"), ProgressMarker, (int64)16);
+    TestEqual(TEXT("FlushAndWait[2] progress marker last read len should match"), ProgressLastReadLen, (int)16);
+
+    // Make sure all manual flush requests have been processed
+    FPlatformProcess::SleepNoStats(TestProcessingIntervalSecs * 5);
+
+    // Write a little more data, but make sure that we don't read more than we did last time...
+    PayloadProcessor->FailProcessing = true;
+    ITLWriteStringToFile(LogWriter, TEXT(" 4"));
+    LogWriter->Flush();
+    TestFalse(TEXT("FlushAndWait[3] should fail because of failure to process"), Streamer->FlushAndWait(1, false, false, false, TestProcessingIntervalSecs * 5, FlushedEverything));
+    TestFalse(TEXT("FlushAndWait[3] should NOT capture everything"), FlushedEverything);
+
+    // even though we wrote more data to the file, the amount we are now reading should be the same as the first try!!
+    Streamer->ReadProgressMarker(ProgressMarker, ProgressLastReadLen, ProgressState);
+    TestEqual(TEXT("FlushAndWait[3] progress marker should match"), ProgressMarker, (int64)16);
+    TestEqual(TEXT("FlushAndWait[3] progress marker last read len should match"), ProgressLastReadLen, (int)16);
 
     // Make sure all manual flush requests have been processed
     FPlatformProcess::SleepNoStats(TestProcessingIntervalSecs * 5);
 
     // Even though processing the payload will no longer fail, we have to wait longer before a retry is allowed
     PayloadProcessor->FailProcessing = false;
-    TestFalse(TEXT("FlushAndWait[3] should fail because of timeout waiting for processing to happen again"), Streamer->FlushAndWait(1, false, false, false, TestProcessingIntervalSecs * 5, FlushedEverything));
-    TestFalse(TEXT("FlushAndWait[3] should NOT capture everything"), FlushedEverything);
+    TestFalse(TEXT("FlushAndWait[4] should fail because of timeout waiting for processing to happen again"), Streamer->FlushAndWait(1, false, false, false, TestProcessingIntervalSecs * 5, FlushedEverything));
+    TestFalse(TEXT("FlushAndWait[4] should NOT capture everything"), FlushedEverything);
     // Waiting longer than the retry interval should succeed
     ExpectedPayloads.Add(TEXT("[{\"message\":\"1234Line 3\"}]"));
-    TestTrue(TEXT("FlushAndWait[4] should succeed because wait period is longer than retry interval"), Streamer->FlushAndWait(1, false, false, false, TestRetryIntervalSecs * 1.2, FlushedEverything));
-    TestTrue(TEXT("FlushAndWait[4] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
-    TestFalse(TEXT("FlushAndWait[4] should NOT capture everything"), FlushedEverything);
+    TestTrue(TEXT("FlushAndWait[5] should succeed because wait period is longer than retry interval"), Streamer->FlushAndWait(1, false, false, false, TestRetryIntervalSecs * 1.2, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[5] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
+    TestFalse(TEXT("FlushAndWait[5] should NOT capture everything"), FlushedEverything);
 
     TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
     TestFalse(TEXT("FlushAndWait[FINAL] should NOT capture everything"), FlushedEverything);
+
+    Streamer->ReadProgressMarker(ProgressMarker, ProgressLastReadLen, ProgressState);
+    TestEqual(TEXT("FlushAndWait[FINAL] progress marker should match"), ProgressMarker, (int64)28);
+    TestEqual(TEXT("FlushAndWait[FINAL] progress marker last read len should match"), ProgressLastReadLen, (int)0);
 
     Streamer.Reset();
     return true;
@@ -843,6 +877,91 @@ bool FsparklogsPluginUnitTestAdditionalAttributes::RunTest(const FString& Parame
     return true;
 }
 
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestDedupAfterCrash, "sparklogs.UnitTests.DedupAfterCrash", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestDedupAfterCrash::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+{
+    SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
+}
+bool FsparklogsPluginUnitTestDedupAfterCrash::RunTest(const FString& Parameters)
+{
+    int TestInstanceIndex = FMath::RandRange(1000, 10000);
+    FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
+    FString TestLogFile = FPaths::Combine(TempDir.GetTempDir(), *FString::Printf(TEXT("test-sparklogs-%d.log"), TestInstanceIndex));
+
+    TArray<FString> ExpectedPayloads;
+
+    TSharedRef<IFileHandle> LogWriter(FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*TestLogFile, true, true));
+    ITLWriteStringToFile(LogWriter, TEXT("Line 1\r\nLine 2\r\n1234"));
+    LogWriter->Flush();
+
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
+    // Setup so that we process success requests and retry requests very quickly.
+    constexpr double TestProcessingIntervalSecs = 0.1;
+    constexpr double TestRetryIntervalSecs = 0.1;
+    Settings->ProcessingIntervalSecs = TestProcessingIntervalSecs;
+    Settings->RetryIntervalSecs = TestRetryIntervalSecs;
+    Settings->IncludeCommonMetadata = false;
+    Settings->AddRandomGameInstanceID = true;
+    Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
+    // Force payload processing to fail
+    PayloadProcessor->FailProcessing = true;
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(TestInstanceIndex, *TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), TEXT("abcd_1234_EFGH"), nullptr));
+    Streamer->SetWeakThisPtr(Streamer);
+    bool FlushedEverything = false;
+    TestFalse(TEXT("FlushAndWait[1-FINAL] should not succeed because of forced failure to process"), Streamer->FlushAndWait(2, true, true, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[1-FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
+    TestFalse(TEXT("FlushAndWait[1-FINAL] should NOT capture everything"), FlushedEverything);
+    
+    TArray<uint8> ExpectedProgressState;
+    Streamer->GetCommonEventJSON(ExpectedProgressState);
+
+    int64 ProgressMarker = 0;
+    int ProgressLastReadLen = 0;
+    TArray<uint8> ProgressState;
+    Streamer->ReadProgressMarker(ProgressMarker, ProgressLastReadLen, ProgressState);
+    TestEqual(TEXT("FlushAndWait[1-FINAL] progress marker should match"), ProgressMarker, (int64)0);
+    TestEqual(TEXT("FlushAndWait[1-FINAL] progress last read len should match"), ProgressLastReadLen, (int)20);
+    TestEqual(TEXT("FlushAndWait[1-FINAL] progress state should match"), ProgressState, ExpectedProgressState);
+    Streamer.Reset();
+
+    // When we resume, it should remember that we have not yet processed the first two lines and generate a payload with the first two lines.
+    // Also, even though we use a different game instance ID in this new streamer, it should still use the old progress state for this first processed payload!!
+    PayloadProcessor->FailProcessing = false;
+    TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor2(new FsparklogsStoreInMemPayloadProcessor());
+    TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer2 = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(TestInstanceIndex, *TestLogFile, Settings, PayloadProcessor2, 16 * 1024, FString(), TEXT("zzzz_yyyy_9876"), nullptr));
+    Streamer2->SetWeakThisPtr(Streamer2);
+    TArray<FString> ExpectedPayloads2;
+    ExpectedPayloads2.Add(FString::Format(TEXT("[{\"game_instance_id\": \"abcd_1234_EFGH\", \"game_instance_index\": {0},\"message\":\"{1}\"},{\"game_instance_id\": \"abcd_1234_EFGH\", \"game_instance_index\": {0},\"message\":\"{2}\"}]"), { TestInstanceIndex, TEXT("Line 1"), TEXT("Line 2") }));
+    TestTrue(TEXT("FlushAndWait[2-1] should succeed"), Streamer2->FlushAndWait(2, true, false, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[2-1] payloads should match"), ITLComparePayloads(this, PayloadProcessor2->Payloads, ExpectedPayloads2));
+    TestFalse(TEXT("FlushAndWait[2-1] should NOT capture everything"), FlushedEverything);
+
+    TArray<uint8> ExpectedProgressState2;
+    Streamer2->GetCommonEventJSON(ExpectedProgressState2);
+    Streamer2->ReadProgressMarker(ProgressMarker, ProgressLastReadLen, ProgressState);
+    TestEqual(TEXT("FlushAndWait[2-1] progress marker should match"), ProgressMarker, (int64)16);
+    TestEqual(TEXT("FlushAndWait[2-1] progress last read len should match"), ProgressLastReadLen, (int)0);
+    TestEqual(TEXT("FlushAndWait[2-1] progress state should match"), ProgressState, ExpectedProgressState2);
+
+    // finish the partial line and make sure it gets captured and nothing else
+    // also, make sure that this now uses the NEW progress state in the generated payload
+    ITLWriteStringToFile(LogWriter, TEXT("Line 3\r\nLine 4\r\nlast line\r\n"));
+    LogWriter->Flush();
+    ExpectedPayloads2.Add(FString::Format(TEXT("[{\"game_instance_id\": \"zzzz_yyyy_9876\", \"game_instance_index\": {0},\"message\":\"{1}\"},{\"game_instance_id\": \"zzzz_yyyy_9876\", \"game_instance_index\": {0},\"message\":\"{2}\"},{\"game_instance_id\": \"zzzz_yyyy_9876\", \"game_instance_index\": {0},\"message\":\"{3}\"}]"), { TestInstanceIndex, TEXT("1234Line 3"), TEXT("Line 4"), TEXT("last line")}));
+    TestTrue(TEXT("FlushAndWait[2-FINAL] should succeed"), Streamer2->FlushAndWait(2, true, true, false, 10.0, FlushedEverything));
+    TestTrue(TEXT("FlushAndWait[2-FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor2->Payloads, ExpectedPayloads2));
+    TestTrue(TEXT("FlushAndWait[2-FINAL] should capture everything"), FlushedEverything);
+
+    Streamer2->ReadProgressMarker(ProgressMarker, ProgressLastReadLen, ProgressState);
+    TestEqual(TEXT("FlushAndWait[2-FINAL] progress marker should match"), ProgressMarker, (int64)47);
+    TestEqual(TEXT("FlushAndWait[2-FINAL] progress last read len should match"), ProgressLastReadLen, (int)0);
+    TestEqual(TEXT("FlushAndWait[2-FINAL] progress state should match"), ProgressState, ExpectedProgressState2);
+
+    Streamer2.Reset();
+    return true;
+}
+
 IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginIntegrationTestInfoMessage, "sparklogs.IntegrationTests.InfoMessage", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
 void FsparklogsPluginIntegrationTestInfoMessage::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
@@ -1025,31 +1144,38 @@ bool FsparklogsPluginIntegrationTestAutoFlushLog::RunTest(const FString& Paramet
     TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
-    constexpr double MinIntervalBetweenFlushes = 0.25;
+    constexpr double MinIntervalBetweenFlushes = 1.00;
     Settings->MinIntervalBetweenFlushes = MinIntervalBetweenFlushes;
-    Settings->UnflushedBytesToAutoFlush = 128;
+    // This needs to be short so that initial events will pass this threshold, but still not pass the min interval between flushes
+    Settings->UnflushedBytesToAutoFlush = 16;
     // Make sure that without auto-flush we would not trigger a periodic processing of the log.
     Settings->ProcessingIntervalSecs = 1000.0;
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
     TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(TestInstanceIndex, *TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
 
+    // Let the streamer do its initial flush when it loads
+    FPlatformProcess::SleepNoStats(0.1);
+
     FsparklogsOutputDeviceFile OutputDevice(*TestLogFile, Streamer);
     // Add a short message that will not trigger the auto flush...
     OutputDevice.Serialize(TEXT("hello world"), ELogVerbosity::Log, NAME_None);
+    OutputDevice.Flush();
 
     // Make sure that we have not processed any payloads yet
-    FPlatformProcess::SleepNoStats(MinIntervalBetweenFlushes / 10.0);
+    FPlatformProcess::SleepNoStats(MinIntervalBetweenFlushes / 20.0);
     TestTrue(TEXT("FlushAndWait[BEFORE_AUTO_FLUSH] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
 
     // Log something that is long enough to trigger auto-flush, but it will not trigger because it's not enough time yet...
     OutputDevice.Serialize(TEXT("123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789"), ELogVerbosity::Log, NAME_None);
-    FPlatformProcess::SleepNoStats(MinIntervalBetweenFlushes / 10.0);
+    OutputDevice.Flush();
+    FPlatformProcess::SleepNoStats(MinIntervalBetweenFlushes / 20.0);
     TestTrue(TEXT("FlushAndWait[BEFORE_AUTO_FLUSH_TOO_SOON] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
 
     // Now wait for the minimum interval and trigger a short message that should now trigger auto-flush
-    FPlatformProcess::SleepNoStats(MinIntervalBetweenFlushes);
+    FPlatformProcess::SleepNoStats(MinIntervalBetweenFlushes * 1.05);
     OutputDevice.Serialize(TEXT("fin"), ELogVerbosity::Log, NAME_None);
+    OutputDevice.Flush();
 
     FString Payload = TEXT("[");
     Payload += TEXT("{\"severity\": \"Info\",\"message\":\"hello world\"}");
@@ -1086,31 +1212,38 @@ bool FsparklogsPluginIntegrationTestAutoFlushRawEvent::RunTest(const FString& Pa
     TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
-    constexpr double MinIntervalBetweenFlushes = 0.25;
+    constexpr double MinIntervalBetweenFlushes = 1.00;
     Settings->MinIntervalBetweenFlushes = MinIntervalBetweenFlushes;
-    Settings->UnflushedBytesToAutoFlush = 128;
+    // This needs to be short so that initial events will pass this threshold, but still not pass the min interval between flushes
+    Settings->UnflushedBytesToAutoFlush = 16;
     // Make sure that without auto-flush we would not trigger a periodic processing of the log.
     Settings->ProcessingIntervalSecs = 1000.0;
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
     TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(TestInstanceIndex, *TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), FString(), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
 
+    // Let the streamer do its initial flush when it loads
+    FPlatformProcess::SleepNoStats(0.1);
+
     FsparklogsOutputDeviceFile OutputDevice(*TestLogFile, Streamer);
     // Add a short message that will not trigger the auto flush...
     OutputDevice.AddRawEvent(TEXT(""), TEXT("hello world"));
+    OutputDevice.Flush();
 
     // Make sure that we have not processed any payloads yet
-    FPlatformProcess::SleepNoStats(MinIntervalBetweenFlushes / 10.0);
+    FPlatformProcess::SleepNoStats(MinIntervalBetweenFlushes / 20.0);
     TestTrue(TEXT("FlushAndWait[BEFORE_AUTO_FLUSH] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
 
     // Log something that is long enough to trigger auto-flush, but it will not trigger because it's not enough time yet...
     OutputDevice.AddRawEvent(TEXT(""), TEXT("123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789"));
-    FPlatformProcess::SleepNoStats(MinIntervalBetweenFlushes / 10.0);
+    OutputDevice.Flush();
+    FPlatformProcess::SleepNoStats(MinIntervalBetweenFlushes / 20.0);
     TestTrue(TEXT("FlushAndWait[BEFORE_AUTO_FLUSH_TOO_SOON] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
 
     // Now wait for the minimum interval and trigger a short message that should now trigger auto-flush
-    FPlatformProcess::SleepNoStats(MinIntervalBetweenFlushes);
+    FPlatformProcess::SleepNoStats(MinIntervalBetweenFlushes * 1.05);
     OutputDevice.AddRawEvent(TEXT(""), TEXT("fin"));
+    OutputDevice.Flush();
 
     FString Payload = TEXT("[");
     Payload += TEXT("{\"message\":\"hello world\"}");

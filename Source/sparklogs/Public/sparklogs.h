@@ -100,7 +100,9 @@ enum class SPARKLOGS_API ITLAnalyticsUserIDType
 	Generated = 1
 };
 
+/** Compress data with the given compression mode. */
 SPARKLOGS_API bool ITLCompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, TArray<uint8>& OutData);
+/** Decompress data with the given compression mode. */
 SPARKLOGS_API bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, int InOriginalDataLen, TArray<uint8>& OutData);
 SPARKLOGS_API FString ITLGenerateNewRandomID();
 SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length);
@@ -707,6 +709,8 @@ class SPARKLOGS_API FsparklogsReadAndStreamToCloud : public FRunnable
 {
 public:
 	static constexpr const TCHAR* ProgressMarkerValue = TEXT("ShippedLogOffset");
+	static constexpr const TCHAR* ProgressMarkerStateValue = TEXT("ShippedLogState");
+	static constexpr const TCHAR* ProgressMarkerLastReadLenValue = TEXT("ShippedLogLastReadLen");
 
 protected:
 	TWeakPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> WeakThisPtr;
@@ -750,6 +754,10 @@ protected:
 	int WorkerNumConsecutiveFlushFailures;
 	/** [WORKER] The payload size of the request the last time we failed to flush. */
 	int WorkerLastFailedFlushPayloadSize;
+	/** [WORKER] Indicates if we need to save the common metadata payload after the next successful request (expensive so only do once after common metadata changes). */
+	bool WorkerSerializeCommonEventJSON;
+	/** [WORKER] Overrides the common event JSON data to use (will be the data from the last session for the first payload if we crashed last time). */
+	TArray<uint8> WorkerOverrideCommonEventJSONData;
 	/** Whether or not the next flush platform time is because of a failure. */
 	FThreadSafeBool WorkerLastFlushFailed;
 
@@ -787,11 +795,14 @@ public:
 	virtual bool FlushAndWait(int N, bool ClearRetryTimer, bool InitiateStop, bool OnMainGameThread, double TimeoutSec, bool& OutLastFlushProcessedEverything);
 
 	/** Read the progress marker. Returns false on failure. */
-	virtual bool ReadProgressMarker(int64& OutMarker);
+	virtual bool ReadProgressMarker(int64& OutMarker, int& OutLastReadLen, TArray<uint8>& OutProgressState);
 	/** Writes the progress marker. Returns false on failure. */
-	virtual bool WriteProgressMarker(int64 InMarker);
+	virtual bool WriteProgressMarker(int64 InMarker, int LastReadLen, const TArray<uint8>* ProgressState);
 	/** Delete the progress marker */
 	virtual void DeleteProgressMarker();
+
+	/** Gets the common event JSON data that has been computed (may be empty) */
+	virtual void GetCommonEventJSON(TArray<uint8>& OutData);
 
 	/** [WORKER] Returns the number of seconds to wait during a flush retry based on the number of consecutive failures. */
 	virtual double WorkerGetRetrySecs();
@@ -807,6 +818,8 @@ protected:
 	virtual bool WorkerInternalDoFlush(int64& OutNewShippedLogOffset, bool& OutFlushProcessedEverything);
 	/** [WORKER] Attempts to flush any newly available logs to the cloud. Response for updating flush op counters, LastFlushProcessedEverything, and MinNextFlushPlatformTime state. Returns false on failure. Only call from worker thread. */
 	virtual bool WorkerDoFlush();
+	/** [WORKER] Returns true if we're allowed to serialize the progress state. */
+	virtual bool WorkerIsAllowedSerializeProgressState();
 };
 
 /**

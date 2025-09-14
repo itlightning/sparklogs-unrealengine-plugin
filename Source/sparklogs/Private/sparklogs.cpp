@@ -9,6 +9,7 @@
 #include "Misc/OutputDeviceFile.h"
 #include "Misc/OutputDeviceHelper.h"
 #include "Misc/SecureHash.h"
+#include "Misc/Base64.h"
 #include "ISettingsModule.h"
 #include "Interfaces/IPluginManager.h"
 #include "HAL/ThreadManager.h"
@@ -1720,6 +1721,7 @@ void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMe
 #endif
 		CommonEventJSONData.AddUninitialized(CommonEventJSONLen);
 		FTCHARToUTF8_Convert::Convert((ANSICHAR*)CommonEventJSONData.GetData(), CommonEventJSONLen, *CommonEventJSON, CommonEventJSON.Len());
+		WorkerSerializeCommonEventJSON = true;
 	}
 }
 
@@ -1734,6 +1736,7 @@ FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(int InstanceIndex
 	, WorkerMinNextFlushPlatformTime(0)
 	, WorkerNumConsecutiveFlushFailures(0)
 	, WorkerLastFailedFlushPayloadSize(0)
+	, WorkerSerializeCommonEventJSON(false)
 	, LastFlushPlatformTime(0)
 	, BytesQueuedSinceLastFlush(0)
 {
@@ -1767,8 +1770,13 @@ bool FsparklogsReadAndStreamToCloud::Init()
 uint32 FsparklogsReadAndStreamToCloud::Run()
 {
 	WorkerFullyCleanedUp.AtomicSet(false);
-	ReadProgressMarker(WorkerShippedLogOffset);
-	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Run|BEGIN|WorkerShippedLogOffset=%d"), (int)WorkerShippedLogOffset);
+	ReadProgressMarker(WorkerShippedLogOffset, WorkerLastFailedFlushPayloadSize, WorkerOverrideCommonEventJSONData);
+	if (WorkerLastFailedFlushPayloadSize <= 0)
+	{
+		// If we are not in the middle of a pending request, then do not re-use the last state either.
+		WorkerOverrideCommonEventJSONData.Reset();
+	}
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Run|BEGIN|WorkerShippedLogOffset=%d|WorkerLastFailedFlushPayloadSize=%d|WorkerOverrideCommonEventJSONDataLen=%d"), (int)WorkerShippedLogOffset, WorkerLastFailedFlushPayloadSize, (int)WorkerOverrideCommonEventJSONData.Num());
 	// A pending flush will be processed before stopping
 	while (StopRequestCounter.GetValue() == 0 || FlushRequestCounter.GetValue() > 0)
 	{
@@ -1938,35 +1946,101 @@ bool FsparklogsReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer, b
 	return WasSuccessful;
 }
 
-bool FsparklogsReadAndStreamToCloud::ReadProgressMarker(int64& OutMarker)
+bool FsparklogsReadAndStreamToCloud::ReadProgressMarker(int64& OutMarker, int& OutLastReadLen, TArray<uint8>& OutProgressState)
 {
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|ReadProgressMarker|inifile='%s'|BEGIN"), *ProgressMarkerPath);
 	OutMarker = 0;
+	OutLastReadLen = 0;
+	OutProgressState.Reset();
 	double OutDouble = 0.0;
 	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
-	bool WasDisabled = GConfig->AreFileOperationsDisabled();
-	GConfig->EnableFileOperations();
-	FString OutStringValue;
+	FString OutStringValue, OutLastReadLenStringValue, OutCompressedStateStringValue;
 	bool Result = GConfig->GetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, OutStringValue, ProgressMarkerPath);
-	if (WasDisabled)
-	{
-		GConfig->DisableFileOperations();
-	}
+	GConfig->GetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerLastReadLenValue, OutLastReadLenStringValue, ProgressMarkerPath);
+	GConfig->GetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerStateValue, OutCompressedStateStringValue, ProgressMarkerPath);
 	ConfigLock1.Unlock();
+
+	OutStringValue.TrimStartAndEndInline();
+	OutLastReadLenStringValue.TrimStartAndEndInline();
+	OutCompressedStateStringValue.TrimStartAndEndInline();
 	OutMarker = FCString::Atoi64(*OutStringValue);
-	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|ReadProgressMarker|inifile='%s'|Result=%s|MarkerString=%s|Marker=%ld"), *ProgressMarkerPath, Result ? TEXT("success") : TEXT("failure"), *OutStringValue, OutMarker);
+	OutLastReadLen = FCString::Atoi(*OutLastReadLenStringValue);
+	FString CompressedStateOriginalLenString, CompressedStateEncodedData;
+	if (OutCompressedStateStringValue.Len() > 0 && OutCompressedStateStringValue.Split(TEXT(":"), &CompressedStateOriginalLenString, &CompressedStateEncodedData))
+	{
+		bool DecodedSuccess = false;
+		int StateOriginalLen = FCString::Atoi(*CompressedStateOriginalLenString);
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|ReadProgressMarker|decoding progress state|original_len=%d|base64_len=%d"), StateOriginalLen, CompressedStateEncodedData.Len());
+		TArray<uint8> CompressedState;
+		uint32 DecodedSize = FBase64::GetDecodedDataSize(CompressedStateEncodedData);
+		if (StateOriginalLen > 0 && StateOriginalLen < (1024 * 1024) && DecodedSize > 0 && DecodedSize < (1024 * 1024))
+		{
+			CompressedState.Reserve(DecodedSize);
+			OutProgressState.Reserve(StateOriginalLen);
+			if (FBase64::Decode(CompressedStateEncodedData, CompressedState))
+			{
+				if (ITLDecompressData(ITLCompressionMode::LZ4, CompressedState.GetData(), CompressedState.Num(), StateOriginalLen, OutProgressState))
+				{
+					ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|ReadProgressMarker|decoded progress state|original_len=%d|decompressed_len=%d"), StateOriginalLen, OutProgressState.Num());
+					DecodedSuccess = true;
+				}
+			}
+		}
+		if (!DecodedSuccess)
+		{
+			// It's OK just to use only the new state.
+			UE_LOG(LogPluginSparkLogs, Warning, TEXT("STREAMER: Failed to decode previous progress state (will ignore)."));
+			OutProgressState.Reset();
+		}
+	}
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|ReadProgressMarker|inifile='%s'|Result=%s|MarkerString=%s|Marker=%ld|LastReadLen=%d|ProgressStateLen=%d"), *ProgressMarkerPath, Result ? TEXT("success") : TEXT("failure"), *OutStringValue, OutMarker, OutLastReadLen, (int)OutProgressState.Num());
 	return true;
 }
 
-bool FsparklogsReadAndStreamToCloud::WriteProgressMarker(int64 InMarker)
+bool FsparklogsReadAndStreamToCloud::WriteProgressMarker(int64 InMarker, int LastReadLen, const TArray<uint8>* ProgressState)
 {
-	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WriteProgressMarker|inifile='%s'|Marker=%lld"), *ProgressMarkerPath, InMarker);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WriteProgressMarker|inifile='%s'|Marker=%lld|LastReadLen=%d"), *ProgressMarkerPath, InMarker, LastReadLen);
 	// TODO: should we use the sqlite plugin instead, maybe it's not as much overhead as writing INI file each time?
 	// Precise to 52+ bits
 	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 	bool WasDisabled = GConfig->AreFileOperationsDisabled();
 	GConfig->EnableFileOperations();
 	GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, *FString::Printf(TEXT("%ld"), InMarker), ProgressMarkerPath);
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerLastReadLenValue, *FString::Printf(TEXT("%ld"), LastReadLen), ProgressMarkerPath);
+	if (ProgressState != nullptr)
+	{
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WriteProgressMarker|starting to save progress state|uncompressed_len=%d"), ProgressState->Num());
+		bool SavedState = false;
+		if (ProgressState->Num() > 0)
+		{
+			// Format is <original_len>:<base_64_encoded_lz4_compressed_state>
+			FString OriginalLenPrefix = FString::Printf(TEXT("%d:"), (int)ProgressState->Num());
+			TArray<uint8> CompressedState;
+			CompressedState.Reserve(ProgressState->Num() + 8);
+			if (ITLCompressData(ITLCompressionMode::LZ4, ProgressState->GetData(), ProgressState->Num(), CompressedState))
+			{
+				ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WriteProgressMarker|saving progress state|compressed_len=%d"), CompressedState.Num());
+				FString Encoded = FBase64::Encode(CompressedState);
+				if (!Encoded.IsEmpty() && Encoded.Len() < (1024 * 64))
+				{
+					FString CombinedState = OriginalLenPrefix + Encoded;
+					ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WriteProgressMarker|saved progress state|value=%s"), *CombinedState);
+					GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerStateValue, *CombinedState, ProgressMarkerPath);
+					SavedState = true;
+				}
+			}
+		}
+		if (!SavedState)
+		{
+			if (ProgressState->Num() > 0)
+			{
+				// Even though we failed to save the state, it's better to clear it out than allow a stale state, so just log a warning.
+				UE_LOG(LogPluginSparkLogs, Warning, TEXT("STREAMER: Failed to save progress state."));
+			}
+			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WriteProgressMarker|clearing progress state from INI file"));
+			GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerStateValue, TEXT(""), ProgressMarkerPath);
+		}
+	}
 	GConfig->Flush(false, ProgressMarkerPath);
 	if (WasDisabled)
 	{
@@ -1985,11 +2059,24 @@ void FsparklogsReadAndStreamToCloud::DeleteProgressMarker()
 	{
 		GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, TEXT("0"), ProgressMarkerPath);
 	}
+	if (!GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, ProgressMarkerStateValue, ProgressMarkerPath))
+	{
+		GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerStateValue, TEXT(""), ProgressMarkerPath);
+	}
+	if (!GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, ProgressMarkerLastReadLenValue, ProgressMarkerPath))
+	{
+		GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerLastReadLenValue, TEXT(""), ProgressMarkerPath);
+	}
 	GConfig->Flush(false, ProgressMarkerPath);
 	if (WasDisabled)
 	{
 		GConfig->DisableFileOperations();
 	}
+}
+
+void FsparklogsReadAndStreamToCloud::GetCommonEventJSON(TArray<uint8>& OutData)
+{
+	OutData = CommonEventJSONData;
 }
 
 bool FindFirstByte(const uint8* Haystack, uint8 Needle, int MaxToSearch, int& OutIndex)
@@ -2108,6 +2195,7 @@ bool FsparklogsReadAndStreamToCloud::WorkerReadNextPayload(int& OutNumToRead, in
 		OutEffectiveShippedLogOffset = 0;
 		// Don't force a retried read to use the same payload size as last time since the whole file has changed.
 		WorkerLastFailedFlushPayloadSize = 0;
+		WorkerOverrideCommonEventJSONData.Reset();
 	}
 	// Start at the last known shipped position, read as many bytes as possible up to the max buffer size, and capture log lines into a JSON payload
 	WorkerReader->Seek(OutEffectiveShippedLogOffset);
@@ -2234,7 +2322,12 @@ bool FsparklogsReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int& 
 			WorkerNextPayload.Append(",");
 		}
 		WorkerNextPayload.Append("{");
-		if (CommonEventJSONData.Num() > 0)
+		if (WorkerOverrideCommonEventJSONData.Num() > 0)
+		{
+			WorkerNextPayload.Append((const ANSICHAR*)(WorkerOverrideCommonEventJSONData.GetData()), WorkerOverrideCommonEventJSONData.Num());
+			WorkerNextPayload.Append(",");
+		}
+		else if (CommonEventJSONData.Num() > 0)
 		{
 			WorkerNextPayload.Append((const ANSICHAR*)(CommonEventJSONData.GetData()), CommonEventJSONData.Num());
 			WorkerNextPayload.Append(",");
@@ -2321,6 +2414,13 @@ bool FsparklogsReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippedL
 			UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER: Failed to compress payload: mode=%d"), (int)Settings->CompressionMode);
 			return false;
 		}
+		// Remember that we have a request being attempted (including the size of the read request). This state will be cleared out after a successful request.
+		// We are allowed to write the progress state here if we do not have an overridden state that we are using and we otherwise need to.
+		bool AllowWriteState = WorkerIsAllowedSerializeProgressState() && WorkerOverrideCommonEventJSONData.Num() <= 0;
+		if (WriteProgressMarker(EffectiveShippedLogOffset, NumToRead, AllowWriteState ? &CommonEventJSONData : nullptr) && AllowWriteState)
+		{
+			WorkerSerializeCommonEventJSON = false;
+		}
 		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerInternalDoFlush|Begin processing payload"));
 		if (!PayloadProcessor->ProcessPayload(WorkerNextEncodedPayload, WorkerNextEncodedPayload.Num(), WorkerNextPayload.Len(), Settings->CompressionMode, WeakThisPtr))
 		{
@@ -2363,7 +2463,9 @@ bool FsparklogsReadAndStreamToCloud::WorkerDoFlush()
 		WorkerNumConsecutiveFlushFailures = 0;
 		WorkerLastFailedFlushPayloadSize = 0;
 		WorkerShippedLogOffset = ShippedNewLogOffset;
-		WriteProgressMarker(ShippedNewLogOffset);
+		WriteProgressMarker(ShippedNewLogOffset, 0, WorkerIsAllowedSerializeProgressState() ? &CommonEventJSONData : nullptr);
+		WorkerSerializeCommonEventJSON = false;
+		WorkerOverrideCommonEventJSONData.Empty();
 		WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds() + Settings->ProcessingIntervalSecs;
 		LastFlushProcessedEverything.AtomicSet(FlushProcessedEverything);
 		FlushSuccessOpCounter.Increment();
@@ -2383,6 +2485,12 @@ double FsparklogsReadAndStreamToCloud::WorkerGetRetrySecs()
 	}
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerGetRetrySecs=%.3lf"), RetrySecs);
 	return RetrySecs;
+}
+
+bool FsparklogsReadAndStreamToCloud::WorkerIsAllowedSerializeProgressState()
+{
+	// NOTE: don't serialize progress state on mobile/console to minimize size of state
+	return WorkerSerializeCommonEventJSON && !ITLIsMobilePlatform() && !ITLIsConsolePlatform();
 }
 
 // =============== FsparklogsIndexedLockFile ===============================================================================
@@ -2596,6 +2704,9 @@ void FsparklogsOutputDeviceFile::InternalAddMessageEvent(FArchive& Output, FStri
 	}
 	FTCHARToUTF8_Convert::Convert(ConvertedEventData.GetData() + ConvertedRawJSONLength + ConvertedEventTagLength + ConvertedMessageLength, ConvertedTerminatorLength, Terminator, TerminatorLength);
 
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("OUTPUTDEVICEFILE|InternalAddMessageEvent|RawJSON=%s|Message=%s|EventTag=%s|ConvertedRawJSONLen=%d|ConvertedMessageLen=%d|ConvertedEventTagLen=%d|ConvertedTerminatorLen=%d|Converted[0,1,2,3,4,5]=%d,%d,%d,%d,%d,%d"),
+		*RawJSON, Message, *EventTag, ConvertedRawJSONLength, ConvertedMessageLength, ConvertedEventTagLength, ConvertedTerminatorLength,
+		(int)ConvertedEventData.GetData()[0], (int)ConvertedEventData.GetData()[1], (int)ConvertedEventData.GetData()[2], (int)ConvertedEventData.GetData()[3], (int)ConvertedEventData.GetData()[4], (int)ConvertedEventData.GetData()[5]);
 	Output.Serialize(ConvertedEventData.GetData(), ConvertedEventData.Num() * sizeof(ANSICHAR));
 }
 
@@ -5247,10 +5358,12 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 		CloudStreamer->SetWeakThisPtr(CloudStreamer);
 
 		int64 StartingProgressMarker = 0;
-		CloudStreamer->ReadProgressMarker(StartingProgressMarker);
+		int StartingLastReadLen = 0;
+		TArray<uint8> IgnoreProgressState;
+		CloudStreamer->ReadProgressMarker(StartingProgressMarker, StartingLastReadLen, IgnoreProgressState);
 		if (StartingProgressMarker > 0)
 		{
-			UE_LOG(LogPluginSparkLogs, Log, TEXT("Resuming ingestion from progress marker %ld"), StartingProgressMarker);
+			UE_LOG(LogPluginSparkLogs, Log, TEXT("Resuming ingestion. progress_marker=%ld last_read_len=%d"), StartingProgressMarker, StartingLastReadLen);
 		}
 
 		FCoreDelegates::OnEnginePreExit.AddRaw(this, &FsparklogsModule::OnEnginePreExit);

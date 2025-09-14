@@ -1,14 +1,14 @@
 # SparkLogs Unreal Engine Plugin
 
 This is an [open source](LICENSE) plugin for [Unreal Engine](https://unrealengine.com/) to efficiently send game engine analytics (client/server) and/or logs (server)
-data to any HTTPS endpoint that can receive JSON data, including the [SparkLogs Cloud](https://sparklogs.com/).
+data to any HTTPS endpoint that can receive JSON data, including the [SparkLogs Cloud](https://sparklogs.com/) or open source forwarding agents like [vector.dev](https://vector.dev/docs/reference/configuration/sources/http_server/).
 
-Join the [discord](https://discord.gg/Yu8F8w8tDw) to ask questions, provide feedback, or collaborate on enhancements.
+Join the [discord community](https://discord.gg/Yu8F8w8tDw) to ask questions, provide feedback, or collaborate on enhancements.
 
 [Free accounts](https://sparklogs.com/docs/getting-started/create-account#pricing) are available with SparkLogs to ingest up to 25 GB/month.
 That's enough free quota for over 1 million analytics sessions of data every month (assuming each session records 16 events and each event is about 1.5 KiB).
 
-The SparkLogs Cloud provides a turn-key solution that scales effortlessly with your game to 100s of millions of active users,
+The SparkLogs Cloud provides a [turn-key analytics pipeline](https://sparklogs.com/docs/game-engine-analytics) that scales effortlessly with your game to 100s of millions of active users,
 [auto extracts](https://sparklogs.com/docs/ingest/autoextract/overview) structured fields from your unstructured logs,
 and also provides daily analytics snapshots, user geolocation (country), currency conversion for analytics purchase events, and other features.
 SparkLogs has no cardinality limits and has no limits on the size and number of custom JSON fields for your logs and analytics events.
@@ -46,7 +46,9 @@ SparkLogs has no cardinality limits and has no limits on the size and number of 
   events, and then when the game engine is restarted, it will resend any queued data. It will also
   detect any previously open game engine analytics session that was not closed properly (e.g., due
   to a crash) and will automatically close that session with a session end time of the last known
-  analytics event for that session. Works with concurrent game engine sessions.
+  analytics event for that session. Works with concurrent game engine sessions. Payloads for retried
+  requests are identical, even across process crashes, allowing SparkLogs to deduplicate identical
+  payloads and avoid recording duplicate data.
 
 * **Security**: Data is transmitted over HTTPS and requests are authenticated.
 
@@ -63,7 +65,8 @@ SparkLogs has no cardinality limits and has no limits on the size and number of 
 
 ## Compatibility
 
-Tested to be compatible with Unreal Engine 4.27 through 5.6 for Windows, Mac, Linux, iOS, and Android.
+Tested to be compatible with Unreal Engine 4.27 through 5.6 for Windows, Mac, and Linux.
+iOS and Android are in a beta state where they are expected to work but are not yet as mature as desktop platforms.
 The plugin is likely compatible with slightly older and newer engine versions but such support is untested.
 
 Pull requests to add support for other platforms are welcome. The plugin currently
@@ -76,7 +79,14 @@ Refer to the [full plugin documentation](https://sparklogs.com/docs/ingest/data-
 for how to install, configure, use, and deploy the plugin. This also includes information on
 game engine analytics features, including session management and supported event types.
 
+## Automated Testing
+
+The plugin has a full suite of unit and automation tests. Run them by opening the session frontend
+in the Unreal Editor, going to the Automation tab, and then selecting and running the `sparklogs` tests.
+
 ## Contributing
 
 All contributions are welcome! Open an issue or pull request, and please join our
 [discord](https://discord.gg/Yu8F8w8tDw) to share your ideas and collaborate.
+Be sure to run the test suite before opening a pull request, and also include a note
+confirming that you're willing to contribute the code under the project's open source license.
