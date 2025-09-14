@@ -58,6 +58,10 @@ public:
         FString StateIni = ITLGetIndexedStateFileINI(InstanceIndex);
         if (StateIni != GGameUserSettingsIni)
         {
+            // We've got to purge the information from the UE INI cache as well or it will still be readable in future tests!!!
+            GConfig->EmptySection(ITL_CONFIG_SECTION_NAME, StateIni);
+            GConfig->Flush(false, StateIni);
+            GConfig->Remove(StateIni);
             IFileManager::Get().Delete(*StateIni, false, false, true);
         }
     }
