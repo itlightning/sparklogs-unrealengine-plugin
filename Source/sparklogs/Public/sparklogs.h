@@ -62,6 +62,12 @@ SPARKLOGS_API FDateTime ITLParseDateTime(const FString & TimeStr);
 /** Returns true if we're on a mobile platform. */
 SPARKLOGS_API bool ITLIsMobilePlatform();
 
+/** Returns true if we're on a console platform. */
+SPARKLOGS_API bool ITLIsConsolePlatform();
+
+/** Returns true if this platform is using a managed file wrapper. */
+SPARKLOGS_API bool ITLIsManagedFileWrapperPlatform();
+
 /** Parses all cookies in Set-Cookie headers in the given HTTP response and returns the combined value that would be used for the
   * Cookie header on a new HTTP request. It strips all optional fields from cookies and just adds the name=value for each cookie. */
 SPARKLOGS_API FString ITLParseHttpResponseCookies(FHttpResponsePtr Response);
@@ -94,7 +100,9 @@ enum class SPARKLOGS_API ITLAnalyticsUserIDType
 	Generated = 1
 };
 
+/** Compress data with the given compression mode. */
 SPARKLOGS_API bool ITLCompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, TArray<uint8>& OutData);
+/** Decompress data with the given compression mode. */
 SPARKLOGS_API bool ITLDecompressData(ITLCompressionMode Mode, const uint8* InData, int InDataLen, int InOriginalDataLen, TArray<uint8>& OutData);
 SPARKLOGS_API FString ITLGenerateNewRandomID();
 SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length);
@@ -108,6 +116,8 @@ SPARKLOGS_API FString ITLGetIndexedStateFileINI(int InstanceIndex);
 class SPARKLOGS_API FsparklogsSettings
 {
 public:
+	static constexpr const TCHAR* UserIDKey = TEXT("AnalyticsUserID");
+
 	static constexpr const TCHAR* AnalyticsUserIDTypeDeviceID = TEXT("device_id");
 	static constexpr const TCHAR* AnalyticsUserIDTypeGenerated = TEXT("generated");
 	static constexpr const TCHAR* DefaultAnalyticsUserIDType = AnalyticsUserIDTypeDeviceID;
@@ -141,8 +151,8 @@ public:
 	static constexpr double MinEditorProcessingIntervalSecs = 0.5;
 	static constexpr double DefaultEditorProcessingIntervalSecs = 2.0;
 	// There could be millions of clients, so give more time for data to queue up before flushing...
-	static constexpr double MinClientProcessingIntervalSecs = 15.0;
-	static constexpr double DefaultClientProcessingIntervalSecs = 30.0;
+	static constexpr double MinClientProcessingIntervalSecs = 6.0;
+	static constexpr double DefaultClientProcessingIntervalSecs = 12.0;
 
 	static constexpr bool DefaultServerCollectAnalytics = true;
 	static constexpr bool DefaultServerCollectLogs = true;
@@ -580,7 +590,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Bytes Per Request")
 	int32 ClientBytesPerRequest = FsparklogsSettings::DefaultBytesPerRequest;
 
-	// Target seconds between attempts to read and process a chunk. For efficiency, data from game clients is only flushed every few minutes or at key points like end of session.
+	// Target seconds between attempts to read and process a chunk.
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Advanced Settings In Client Launch Configuration", DisplayName = "Processing Interval in Seconds")
 	float ClientProcessingIntervalSecs = FsparklogsSettings::DefaultClientProcessingIntervalSecs;
 
@@ -699,6 +709,8 @@ class SPARKLOGS_API FsparklogsReadAndStreamToCloud : public FRunnable
 {
 public:
 	static constexpr const TCHAR* ProgressMarkerValue = TEXT("ShippedLogOffset");
+	static constexpr const TCHAR* ProgressMarkerStateValue = TEXT("ShippedLogState");
+	static constexpr const TCHAR* ProgressMarkerLastReadLenValue = TEXT("ShippedLogLastReadLen");
 
 protected:
 	TWeakPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> WeakThisPtr;
@@ -742,6 +754,10 @@ protected:
 	int WorkerNumConsecutiveFlushFailures;
 	/** [WORKER] The payload size of the request the last time we failed to flush. */
 	int WorkerLastFailedFlushPayloadSize;
+	/** [WORKER] Indicates if we need to save the common metadata payload after the next successful request (expensive so only do once after common metadata changes). */
+	bool WorkerSerializeCommonEventJSON;
+	/** [WORKER] Overrides the common event JSON data to use (will be the data from the last session for the first payload if we crashed last time). */
+	TArray<uint8> WorkerOverrideCommonEventJSONData;
 	/** Whether or not the next flush platform time is because of a failure. */
 	FThreadSafeBool WorkerLastFlushFailed;
 
@@ -779,11 +795,14 @@ public:
 	virtual bool FlushAndWait(int N, bool ClearRetryTimer, bool InitiateStop, bool OnMainGameThread, double TimeoutSec, bool& OutLastFlushProcessedEverything);
 
 	/** Read the progress marker. Returns false on failure. */
-	virtual bool ReadProgressMarker(int64& OutMarker);
+	virtual bool ReadProgressMarker(int64& OutMarker, int& OutLastReadLen, TArray<uint8>& OutProgressState);
 	/** Writes the progress marker. Returns false on failure. */
-	virtual bool WriteProgressMarker(int64 InMarker);
+	virtual bool WriteProgressMarker(int64 InMarker, int LastReadLen, const TArray<uint8>* ProgressState);
 	/** Delete the progress marker */
 	virtual void DeleteProgressMarker();
+
+	/** Gets the common event JSON data that has been computed (may be empty) */
+	virtual void GetCommonEventJSON(TArray<uint8>& OutData);
 
 	/** [WORKER] Returns the number of seconds to wait during a flush retry based on the number of consecutive failures. */
 	virtual double WorkerGetRetrySecs();
@@ -799,6 +818,8 @@ protected:
 	virtual bool WorkerInternalDoFlush(int64& OutNewShippedLogOffset, bool& OutFlushProcessedEverything);
 	/** [WORKER] Attempts to flush any newly available logs to the cloud. Response for updating flush op counters, LastFlushProcessedEverything, and MinNextFlushPlatformTime state. Returns false on failure. Only call from worker thread. */
 	virtual bool WorkerDoFlush();
+	/** [WORKER] Returns true if we're allowed to serialize the progress state. */
+	virtual bool WorkerIsAllowedSerializeProgressState();
 };
 
 /**
@@ -1073,6 +1094,14 @@ public:
 	static void EndSession();
 	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
 	static void EndSessionWithReason(const FString& Reason);
+
+	/** Gets the current user ID */
+	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
+	static FString GetUserID();
+
+	/** Sets a custom user ID */
+	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
+	static void SetUserID(const FString& UserID);
 
 	/** Gets the ID of the current session, or returns an empty string if none is active. */
 	UFUNCTION(BlueprintCallable, Category = "SparkLogs")
@@ -1668,7 +1697,7 @@ public:
 	// Prepares for an analytics event to be generated. Ensures a session is started. Returns false if we should not proceed.
 	virtual bool AutoStartSessionBeforeEvent();
 	// Automatically cleanup any active session, except for server launch configurations where we only send session data if they explicitly use StartSession and EndSession.
-	virtual void AutoCleanupSession();
+	virtual void AutoCleanupSession(const FString &Reason);
 	// Checks if there is a session that was active in a previous instance of the game that wasn't ended properly. If so, mark that session as ended with the appropriate duration.
 	virtual void CheckForStaleSessionAtStartup();
 

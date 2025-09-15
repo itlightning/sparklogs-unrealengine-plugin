@@ -9,6 +9,7 @@
 #include "Misc/OutputDeviceFile.h"
 #include "Misc/OutputDeviceHelper.h"
 #include "Misc/SecureHash.h"
+#include "Misc/Base64.h"
 #include "ISettingsModule.h"
 #include "Interfaces/IPluginManager.h"
 #include "HAL/ThreadManager.h"
@@ -202,6 +203,24 @@ FDateTime ITLParseDateTime(const FString& TimeStr)
 bool ITLIsMobilePlatform()
 {
 #if PLATFORM_IOS || PLATFORM_TVOS || PLATFORM_ANDROID
+	return true;
+#else
+	return false;
+#endif
+}
+
+bool ITLIsConsolePlatform()
+{
+#if PLATFORM_XBOXONE || PLATFORM_PS4 || PLATFORM_LUMIN || PLATFORM_SWITCH || PLATFORM_HOLOLENS
+	return true;
+#else
+	return false;
+#endif
+}
+
+bool ITLIsManagedFileWrapperPlatform()
+{
+#if PLATFORM_USE_PLATFORM_FILE_MANAGED_STORAGE_WRAPPER
 	return true;
 #else
 	return false;
@@ -600,9 +619,9 @@ SPARKLOGS_API FString ITLGenerateRandomAlphaNumID(int Length)
 
 FString ITLGetIndexedStateFileINI(int InstanceIndex)
 {
-	if (InstanceIndex <= 1 && FPlatformProperties::RequiresCookedData())
+	if (InstanceIndex <= 1 && FPlatformProperties::RequiresCookedData() && (ITLIsMobilePlatform() || ITLIsConsolePlatform() || ITLIsManagedFileWrapperPlatform()))
 	{
-		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("ITLGetIndexedStateFileINI|Cooked data is required and this is the primary instance, using game user settings INI for state file..."));
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("ITLGetIndexedStateFileINI|Cooked data is required and this is the primary instance on mobile/console, using game user settings INI for state file..."));
 		return GGameUserSettingsIni;
 	}
 	else
@@ -623,6 +642,31 @@ FString ITLGetIndexedStateFileINI(int InstanceIndex)
 		}
 		return Path;
 	}
+}
+
+class FITLSparkLogsPluginCriticalSectionInitializer
+{
+public:
+	TUniquePtr<FCriticalSection> CS;
+	bool Init()
+	{
+		if (!CS)
+		{
+			CS = MakeUnique<FCriticalSection>();
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
+};
+
+FITLSparkLogsPluginCriticalSectionInitializer& GetITLPluginConfigCriticalSection()
+{
+	static FITLSparkLogsPluginCriticalSectionInitializer Singleton;
+	Singleton.Init();
+	return Singleton;
 }
 
 // =============== FsparklogsSettings ===============================================================================
@@ -697,26 +741,34 @@ FString FsparklogsSettings::GetEffectiveAnalyticsUserID()
 	{
 		return CachedAnalyticsUserID;
 	}
-	
-	FString NewID;
-	switch (AnalyticsUserIDType)
-	{
-	case ITLAnalyticsUserIDType::DeviceID:
-		NewID = FPlatformMisc::GetDeviceId().ToLower();
-		break;
-	}
-	
-	// If another method hasn't given us a valid ID yet, then see if we have already saved a previously generated one, and if not, generate and save a new one.
+
+	// If we have previously calculated an ID (whether custom or auto-generated), reuse that same user ID from the previous game engine instance.
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
+	FString NewID = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, UserIDKey, InstanceSettingsIni);
+	ConfigLock1.Unlock();
+	NewID.TrimStartAndEndInline();
 	if (!IsValidDeviceID(NewID))
 	{
-		constexpr const TCHAR* UserIDKey = TEXT("AnalyticsUserID");
-		NewID = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, UserIDKey, InstanceSettingsIni);
-		NewID.TrimStartAndEndInline();
-		if (NewID.IsEmpty())
+		switch (AnalyticsUserIDType)
 		{
-			NewID = ITLGenerateNewRandomID();
-			GConfig->SetString(ITL_CONFIG_SECTION_NAME, UserIDKey, *NewID, InstanceSettingsIni);
-			GConfig->Flush(false, InstanceSettingsIni);
+		case ITLAnalyticsUserIDType::DeviceID:
+			NewID = FPlatformMisc::GetDeviceId().ToLower();
+			break;
+		}
+	}
+	
+	// If another method hasn't given us a valid ID yet then generate and save a new one.
+	if (!IsValidDeviceID(NewID))
+	{
+		NewID = ITLGenerateNewRandomID();
+		FScopeLock ConfigLock2(GetITLPluginConfigCriticalSection().CS.Get());
+		bool WasDisabled = GConfig->AreFileOperationsDisabled();
+		GConfig->EnableFileOperations();
+		GConfig->SetString(ITL_CONFIG_SECTION_NAME, UserIDKey, *NewID, InstanceSettingsIni);
+		GConfig->Flush(false, InstanceSettingsIni);
+		if (WasDisabled)
+		{
+			GConfig->DisableFileOperations();
 		}
 	}
 	
@@ -762,7 +814,9 @@ FDateTime FsparklogsSettings::GetEffectiveAnalyticsInstallTime()
 		return CachedAnalyticsInstallTime;
 	}
 	constexpr const TCHAR* InstallTimeKey = TEXT("AnalyticsInstallTime");
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get()); 
 	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, InstallTimeKey, InstanceSettingsIni);
+	ConfigLock1.Unlock();
 	TimeStr.TrimStartAndEndInline();
 	FDateTime InstallTime = ITLParseDateTime(TimeStr);
 	if (InstallTime == ITLEmptyDateTime)
@@ -770,8 +824,15 @@ FDateTime FsparklogsSettings::GetEffectiveAnalyticsInstallTime()
 		InstallTime = FDateTime::UtcNow();
 		int64 Ts = InstallTime.GetTicks();
 		TimeStr = FString::Printf(TEXT("%lld"), Ts);
+		FScopeLock ConfigLock2(GetITLPluginConfigCriticalSection().CS.Get()); 
+		bool WasDisabled = GConfig->AreFileOperationsDisabled();
+		GConfig->EnableFileOperations();
 		GConfig->SetString(ITL_CONFIG_SECTION_NAME, InstallTimeKey, *TimeStr, InstanceSettingsIni);
 		GConfig->Flush(false, InstanceSettingsIni);
+		if (WasDisabled)
+		{
+			GConfig->DisableFileOperations();
+		}
 	}
 	
 	CachedAnalyticsInstallTime = InstallTime;
@@ -783,6 +844,15 @@ void FsparklogsSettings::SetUserID(const TCHAR* UserID)
 	FScopeLock WriteLock(&CachedCriticalSection);
 	CachedAnalyticsUserID = UserID;
 	CachedAnalyticsPlayerID.Reset();
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
+	bool WasDisabled = GConfig->AreFileOperationsDisabled();
+	GConfig->EnableFileOperations();
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, UserIDKey, *CachedAnalyticsUserID, InstanceSettingsIni);
+	GConfig->Flush(false, InstanceSettingsIni);
+	if (WasDisabled)
+	{
+		GConfig->DisableFileOperations();
+	}
 }
 
 int FsparklogsSettings::GetSessionNumber(bool Increment)
@@ -792,6 +862,7 @@ int FsparklogsSettings::GetSessionNumber(bool Increment)
 	FScopeLock WriteLock(&CachedCriticalSection);
 	if (CachedAnalyticsSessionNumber <= 0)
 	{
+		FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 		if (!GConfig->GetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsSessionNumber, InstanceSettingsIni) || CachedAnalyticsSessionNumber <= 0)
 		{
 			CachedAnalyticsSessionNumber = 1;
@@ -806,8 +877,15 @@ int FsparklogsSettings::GetSessionNumber(bool Increment)
 	}
 	if (Changed)
 	{
+		FScopeLock ConfigLock2(GetITLPluginConfigCriticalSection().CS.Get());
+		bool WasDisabled = GConfig->AreFileOperationsDisabled();
+		GConfig->EnableFileOperations();
 		GConfig->SetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsSessionNumber, InstanceSettingsIni);
 		GConfig->Flush(false, InstanceSettingsIni);
+		if (WasDisabled)
+		{
+			GConfig->DisableFileOperations();
+		}
 	}
 	return CachedAnalyticsSessionNumber;
 }
@@ -819,6 +897,7 @@ int FsparklogsSettings::GetTransactionNumber(bool Increment)
 	FScopeLock WriteLock(&CachedCriticalSection);
 	if (CachedAnalyticsTransactionNumber <= 0)
 	{
+		FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 		if (!GConfig->GetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsTransactionNumber, InstanceSettingsIni) || CachedAnalyticsTransactionNumber <= 0)
 		{
 			CachedAnalyticsTransactionNumber = 1;
@@ -833,8 +912,15 @@ int FsparklogsSettings::GetTransactionNumber(bool Increment)
 	}
 	if (Changed)
 	{
+		FScopeLock ConfigLock2(GetITLPluginConfigCriticalSection().CS.Get());
+		bool WasDisabled = GConfig->AreFileOperationsDisabled();
+		GConfig->EnableFileOperations();
 		GConfig->SetInt(ITL_CONFIG_SECTION_NAME, Key, CachedAnalyticsTransactionNumber, InstanceSettingsIni);
 		GConfig->Flush(false, InstanceSettingsIni);
+		if (WasDisabled)
+		{
+			GConfig->DisableFileOperations();
+		}
 	}
 	return CachedAnalyticsTransactionNumber;
 }
@@ -846,7 +932,9 @@ FDateTime FsparklogsSettings::GetAnalyticsFirstPurchased()
 	{
 		return CachedAnalyticsFirstPurchased;
 	}
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsFirstPurchasedKey, InstanceSettingsIni);
+	ConfigLock1.Unlock();
 	TimeStr.TrimStartAndEndInline();
 	CachedAnalyticsFirstPurchased = ITLParseDateTime(TimeStr);
 	return CachedAnalyticsFirstPurchased;
@@ -857,8 +945,15 @@ void FsparklogsSettings::SetAnalyticsFirstPurchased(FDateTime T)
 	FScopeLock WriteLock(&CachedCriticalSection);
 	int64 Ts = T.GetTicks();
 	FString TimeStr = FString::Printf(TEXT("%lld"), Ts);
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
+	bool WasDisabled = GConfig->AreFileOperationsDisabled();
+	GConfig->EnableFileOperations();
 	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsFirstPurchasedKey, *TimeStr, InstanceSettingsIni);
 	GConfig->Flush(false, InstanceSettingsIni);
+	if (WasDisabled)
+	{
+		GConfig->DisableFileOperations();
+	}
 	CachedAnalyticsFirstPurchased = T;
 }
 
@@ -872,6 +967,7 @@ int FsparklogsSettings::GetAttemptNumber(const FString& EventID, bool Increment,
 	int* CachedValuePtr = CachedAnalyticsAttemptNumber.Find(MapKey);
 	if (CachedValuePtr == nullptr)
 	{
+		FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 		if (!GConfig->GetInt(ITL_CONFIG_SECTION_NAME, *Key, CachedValue, InstanceSettingsIni) || CachedValue <= 0)
 		{
 			CachedValue = 0;
@@ -888,6 +984,9 @@ int FsparklogsSettings::GetAttemptNumber(const FString& EventID, bool Increment,
 		CachedValue++;
 		Changed = true;
 	}
+	FScopeLock ConfigLock2(GetITLPluginConfigCriticalSection().CS.Get());
+	bool WasDisabled = GConfig->AreFileOperationsDisabled();
+	GConfig->EnableFileOperations();
 	if (DeleteAfter)
 	{
 		CachedAnalyticsAttemptNumber.Remove(MapKey);
@@ -900,16 +999,23 @@ int FsparklogsSettings::GetAttemptNumber(const FString& EventID, bool Increment,
 		GConfig->SetInt(ITL_CONFIG_SECTION_NAME, *Key, CachedValue, InstanceSettingsIni);
 		GConfig->Flush(false, InstanceSettingsIni);
 	}
+	if (WasDisabled)
+	{
+		GConfig->DisableFileOperations();
+	}
 	return CachedValue;
 }
 
 FDateTime FsparklogsSettings::GetEffectiveLastWrittenAnalyticsEvent()
 {
+	FScopeLock WriteLock(&CachedCriticalSection);
 	if (CachedAnalyticsLastEvent != ITLEmptyDateTime)
 	{
 		return CachedAnalyticsLastEvent;
 	}
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, InstanceSettingsIni);
+	ConfigLock1.Unlock();
 	TimeStr.TrimStartAndEndInline();
 	FDateTime LastEvent = ITLParseDateTime(TimeStr);
 	CachedAnalyticsLastEvent = LastEvent;
@@ -918,12 +1024,13 @@ FDateTime FsparklogsSettings::GetEffectiveLastWrittenAnalyticsEvent()
 
 void FsparklogsSettings::MarkLastWrittenAnalyticsEvent()
 {
+	FScopeLock WriteLock(&CachedCriticalSection);
 	FDateTime Now = FDateTime::UtcNow();
 	FDateTime KnownLastEvent = CachedAnalyticsLastEvent;
 	if (KnownLastEvent != ITLEmptyDateTime)
 	{
 		FTimespan Interval = Now - KnownLastEvent;
-		if (FMath::Abs(Interval.GetTotalSeconds()) < 15.0)
+		if (FMath::Abs(Interval.GetTotalSeconds()) < 5.0)
 		{
 			// Only update this timestamp every few seconds for efficiency
 			return;
@@ -932,35 +1039,62 @@ void FsparklogsSettings::MarkLastWrittenAnalyticsEvent()
 	CachedAnalyticsLastEvent = Now;
 	int64 Ts = Now.GetTicks();
 	FString TimeStr = FString::Printf(TEXT("%lld"), Ts);
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
+	bool WasDisabled = GConfig->AreFileOperationsDisabled();
+	GConfig->EnableFileOperations();
 	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, *TimeStr, InstanceSettingsIni);
 	GConfig->Flush(false, InstanceSettingsIni);
+	if (WasDisabled)
+	{
+		GConfig->DisableFileOperations();
+	}
 }
 
 void FsparklogsSettings::MarkEndOfAnalyticsSession()
 {
+	FScopeLock WriteLock(&CachedCriticalSection);
 	CachedAnalyticsLastEvent = ITLEmptyDateTime;
+
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
+	bool WasDisabled = GConfig->AreFileOperationsDisabled();
+	GConfig->EnableFileOperations();
 	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, InstanceSettingsIni);
 	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, InstanceSettingsIni);
 	GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, InstanceSettingsIni);
 	GConfig->Flush(false, InstanceSettingsIni);
+	if (WasDisabled)
+	{
+		GConfig->DisableFileOperations();
+	}
 }
 
 void FsparklogsSettings::MarkStartOfAnalyticsSession(const FString& SessionID, FDateTime SessionStarted)
 {
-	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, *SessionID, InstanceSettingsIni);
+	FScopeLock WriteLock(&CachedCriticalSection);
 	FString SessionStartedStr = FString::Printf(TEXT("%lld"), (int64)SessionStarted.GetTicks());
-	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, *SessionStartedStr, InstanceSettingsIni);
 	FDateTime Now = FDateTime::UtcNow();
 	FString NowStr = FString::Printf(TEXT("%lld"), (int64)Now.GetTicks());
 	CachedAnalyticsLastEvent = Now;
+
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
+	bool WasDisabled = GConfig->AreFileOperationsDisabled();
+	GConfig->EnableFileOperations();
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, *SessionID, InstanceSettingsIni);
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, *SessionStartedStr, InstanceSettingsIni);
 	GConfig->SetString(ITL_CONFIG_SECTION_NAME, AnalyticsLastWrittenKey, *NowStr, InstanceSettingsIni);
 	GConfig->Flush(false, InstanceSettingsIni);
+	if (WasDisabled)
+	{
+		GConfig->DisableFileOperations();
+	}
 }
 
 void FsparklogsSettings::GetLastAnalyticsSessionStartInfo(FString& OutSessionID, FDateTime& OutSessionStarted)
 {
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 	OutSessionID = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionID, InstanceSettingsIni);
 	FString TimeStr = GConfig->GetStr(ITL_CONFIG_SECTION_NAME, AnalyticsLastSessionStarted, InstanceSettingsIni);
+	ConfigLock1.Unlock();
 	TimeStr.TrimStartAndEndInline();
 	OutSessionStarted = ITLParseDateTime(TimeStr);
 }
@@ -969,6 +1103,8 @@ void FsparklogsSettings::LoadSettings()
 {
 	FString Section = ITL_CONFIG_SECTION_NAME;
 	FString SettingPrefix = GetITLINISettingPrefix();
+	
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 	
 	// Settings that are common across any launch configuration
 
@@ -1112,12 +1248,19 @@ void FsparklogsSettings::LoadSettings()
 		StressTestNumEntriesPerTick = 0;
 	}
 
+	ConfigLock1.Unlock();
+
 	EnforceConstraints();
 
 	// Clear out the previously cached values
 	FScopeLock WriteLock(&CachedCriticalSection);
 	CachedAnalyticsUserID.Reset();
 	CachedAnalyticsPlayerID.Reset();
+	CachedAnalyticsInstallTime = ITLEmptyDateTime;
+	CachedAnalyticsSessionNumber = 0;
+	CachedAnalyticsTransactionNumber = 0;
+	CachedAnalyticsFirstPurchased = ITLEmptyDateTime;
+	CachedAnalyticsLastEvent = ITLEmptyDateTime;
 }
 
 void FsparklogsSettings::EnforceConstraints()
@@ -1327,7 +1470,7 @@ bool FsparklogsWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayl
 					// Mark that we've successfully processed the request...
 					RequestSucceeded.AtomicSet(true);
 				}
-				else if (EHttpResponseCodes::TooManyRequests == ResponseCode || ResponseCode >= EHttpResponseCodes::ServerError)
+				else if (EHttpResponseCodes::TooManyRequests == ResponseCode || EHttpResponseCodes::RequestTimeout == ResponseCode || ResponseCode >= EHttpResponseCodes::ServerError)
 				{
 					UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: Retryable HTTP response: status=%d, msg=%s"), (int)ResponseCode, *ResponseBody.TrimStartAndEnd());
 					// Clear any session affinity cookies in case that is part of the issue...
@@ -1335,7 +1478,7 @@ bool FsparklogsWriteHTTPPayloadProcessor::ProcessPayload(TArray<uint8>& JSONPayl
 					RequestSucceeded.AtomicSet(false);
 					RetryableFailure.AtomicSet(true);
 				}
-				else if (EHttpResponseCodes::BadRequest == ResponseCode)
+				else if (EHttpResponseCodes::BadRequest == ResponseCode || EHttpResponseCodes::RequestTooLarge == ResponseCode)
 				{
 					// Something about this input was unable to be processed -- drop this input and pretend success so we can continue, but warn about it
 					UE_LOG(LogPluginSparkLogs, Warning, TEXT("HTTPPayloadProcessor::ProcessPayload: HTTP response indicates input cannot be processed. Will skip this payload! status=%d, msg=%s"), (int)ResponseCode, *ResponseBody.TrimStartAndEnd());
@@ -1578,6 +1721,7 @@ void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMe
 #endif
 		CommonEventJSONData.AddUninitialized(CommonEventJSONLen);
 		FTCHARToUTF8_Convert::Convert((ANSICHAR*)CommonEventJSONData.GetData(), CommonEventJSONLen, *CommonEventJSON, CommonEventJSON.Len());
+		WorkerSerializeCommonEventJSON = true;
 	}
 }
 
@@ -1592,6 +1736,7 @@ FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(int InstanceIndex
 	, WorkerMinNextFlushPlatformTime(0)
 	, WorkerNumConsecutiveFlushFailures(0)
 	, WorkerLastFailedFlushPayloadSize(0)
+	, WorkerSerializeCommonEventJSON(false)
 	, LastFlushPlatformTime(0)
 	, BytesQueuedSinceLastFlush(0)
 {
@@ -1625,8 +1770,13 @@ bool FsparklogsReadAndStreamToCloud::Init()
 uint32 FsparklogsReadAndStreamToCloud::Run()
 {
 	WorkerFullyCleanedUp.AtomicSet(false);
-	ReadProgressMarker(WorkerShippedLogOffset);
-	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Run|BEGIN|WorkerShippedLogOffset=%d"), (int)WorkerShippedLogOffset);
+	ReadProgressMarker(WorkerShippedLogOffset, WorkerLastFailedFlushPayloadSize, WorkerOverrideCommonEventJSONData);
+	if (WorkerLastFailedFlushPayloadSize <= 0)
+	{
+		// If we are not in the middle of a pending request, then do not re-use the last state either.
+		WorkerOverrideCommonEventJSONData.Reset();
+	}
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|Run|BEGIN|WorkerShippedLogOffset=%d|WorkerLastFailedFlushPayloadSize=%d|WorkerOverrideCommonEventJSONDataLen=%d"), (int)WorkerShippedLogOffset, WorkerLastFailedFlushPayloadSize, (int)WorkerOverrideCommonEventJSONData.Num());
 	// A pending flush will be processed before stopping
 	while (StopRequestCounter.GetValue() == 0 || FlushRequestCounter.GetValue() > 0)
 	{
@@ -1697,6 +1847,7 @@ bool FsparklogsReadAndStreamToCloud::AccrueWrittenBytes(int N)
 bool FsparklogsReadAndStreamToCloud::RequestFlush()
 {
 	// Clear any pending retry timer so we retry immediately
+	WorkerLastFlushFailed.AtomicSet(false);
 	FlushClearMinNextPlatformTime.Increment();
 	// If we've already requested a stop, a flush is impossible
 	if (StopRequestCounter.GetValue() > 0)
@@ -1725,8 +1876,8 @@ bool FsparklogsReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer, b
 	{
 		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|FlushAndWait|Clearing retry timer..."));
 		// Clear any pending retry timer so we retry immediately
-		FlushClearMinNextPlatformTime.Increment();
 		WorkerLastFlushFailed.AtomicSet(false);
+		FlushClearMinNextPlatformTime.Increment();
 	}
 
 	for (int i = 0; i < N; i++)
@@ -1795,32 +1946,101 @@ bool FsparklogsReadAndStreamToCloud::FlushAndWait(int N, bool ClearRetryTimer, b
 	return WasSuccessful;
 }
 
-bool FsparklogsReadAndStreamToCloud::ReadProgressMarker(int64& OutMarker)
+bool FsparklogsReadAndStreamToCloud::ReadProgressMarker(int64& OutMarker, int& OutLastReadLen, TArray<uint8>& OutProgressState)
 {
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|ReadProgressMarker|inifile='%s'|BEGIN"), *ProgressMarkerPath);
 	OutMarker = 0;
+	OutLastReadLen = 0;
+	OutProgressState.Reset();
 	double OutDouble = 0.0;
-	bool WasDisabled = GConfig->AreFileOperationsDisabled();
-	GConfig->EnableFileOperations();
-	FString OutStringValue;
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
+	FString OutStringValue, OutLastReadLenStringValue, OutCompressedStateStringValue;
 	bool Result = GConfig->GetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, OutStringValue, ProgressMarkerPath);
-	if (WasDisabled)
-	{
-		GConfig->DisableFileOperations();
-	}
+	GConfig->GetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerLastReadLenValue, OutLastReadLenStringValue, ProgressMarkerPath);
+	GConfig->GetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerStateValue, OutCompressedStateStringValue, ProgressMarkerPath);
+	ConfigLock1.Unlock();
+
+	OutStringValue.TrimStartAndEndInline();
+	OutLastReadLenStringValue.TrimStartAndEndInline();
+	OutCompressedStateStringValue.TrimStartAndEndInline();
 	OutMarker = FCString::Atoi64(*OutStringValue);
-	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|ReadProgressMarker|inifile='%s'|Result=%s|MarkerString=%s|Marker=%ld"), *ProgressMarkerPath, Result ? TEXT("success") : TEXT("failure"), *OutStringValue, OutMarker);
+	OutLastReadLen = FCString::Atoi(*OutLastReadLenStringValue);
+	FString CompressedStateOriginalLenString, CompressedStateEncodedData;
+	if (OutCompressedStateStringValue.Len() > 0 && OutCompressedStateStringValue.Split(TEXT(":"), &CompressedStateOriginalLenString, &CompressedStateEncodedData))
+	{
+		bool DecodedSuccess = false;
+		int StateOriginalLen = FCString::Atoi(*CompressedStateOriginalLenString);
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|ReadProgressMarker|decoding progress state|original_len=%d|base64_len=%d"), StateOriginalLen, CompressedStateEncodedData.Len());
+		TArray<uint8> CompressedState;
+		uint32 DecodedSize = FBase64::GetDecodedDataSize(CompressedStateEncodedData);
+		if (StateOriginalLen > 0 && StateOriginalLen < (1024 * 1024) && DecodedSize > 0 && DecodedSize < (1024 * 1024))
+		{
+			CompressedState.Reserve(DecodedSize);
+			OutProgressState.Reserve(StateOriginalLen);
+			if (FBase64::Decode(CompressedStateEncodedData, CompressedState))
+			{
+				if (ITLDecompressData(ITLCompressionMode::LZ4, CompressedState.GetData(), CompressedState.Num(), StateOriginalLen, OutProgressState))
+				{
+					ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|ReadProgressMarker|decoded progress state|original_len=%d|decompressed_len=%d"), StateOriginalLen, OutProgressState.Num());
+					DecodedSuccess = true;
+				}
+			}
+		}
+		if (!DecodedSuccess)
+		{
+			// It's OK just to use only the new state.
+			UE_LOG(LogPluginSparkLogs, Warning, TEXT("STREAMER: Failed to decode previous progress state (will ignore)."));
+			OutProgressState.Reset();
+		}
+	}
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|ReadProgressMarker|inifile='%s'|Result=%s|MarkerString=%s|Marker=%ld|LastReadLen=%d|ProgressStateLen=%d"), *ProgressMarkerPath, Result ? TEXT("success") : TEXT("failure"), *OutStringValue, OutMarker, OutLastReadLen, (int)OutProgressState.Num());
 	return true;
 }
 
-bool FsparklogsReadAndStreamToCloud::WriteProgressMarker(int64 InMarker)
+bool FsparklogsReadAndStreamToCloud::WriteProgressMarker(int64 InMarker, int LastReadLen, const TArray<uint8>* ProgressState)
 {
-	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WriteProgressMarker|inifile='%s'|Marker=%lld"), *ProgressMarkerPath, InMarker);
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WriteProgressMarker|inifile='%s'|Marker=%lld|LastReadLen=%d"), *ProgressMarkerPath, InMarker, LastReadLen);
 	// TODO: should we use the sqlite plugin instead, maybe it's not as much overhead as writing INI file each time?
 	// Precise to 52+ bits
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 	bool WasDisabled = GConfig->AreFileOperationsDisabled();
 	GConfig->EnableFileOperations();
 	GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, *FString::Printf(TEXT("%ld"), InMarker), ProgressMarkerPath);
+	GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerLastReadLenValue, *FString::Printf(TEXT("%ld"), LastReadLen), ProgressMarkerPath);
+	if (ProgressState != nullptr)
+	{
+		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WriteProgressMarker|starting to save progress state|uncompressed_len=%d"), ProgressState->Num());
+		bool SavedState = false;
+		if (ProgressState->Num() > 0)
+		{
+			// Format is <original_len>:<base_64_encoded_lz4_compressed_state>
+			FString OriginalLenPrefix = FString::Printf(TEXT("%d:"), (int)ProgressState->Num());
+			TArray<uint8> CompressedState;
+			CompressedState.Reserve(ProgressState->Num() + 8);
+			if (ITLCompressData(ITLCompressionMode::LZ4, ProgressState->GetData(), ProgressState->Num(), CompressedState))
+			{
+				ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WriteProgressMarker|saving progress state|compressed_len=%d"), CompressedState.Num());
+				FString Encoded = FBase64::Encode(CompressedState);
+				if (!Encoded.IsEmpty() && Encoded.Len() < (1024 * 64))
+				{
+					FString CombinedState = OriginalLenPrefix + Encoded;
+					ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WriteProgressMarker|saved progress state|value=%s"), *CombinedState);
+					GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerStateValue, *CombinedState, ProgressMarkerPath);
+					SavedState = true;
+				}
+			}
+		}
+		if (!SavedState)
+		{
+			if (ProgressState->Num() > 0)
+			{
+				// Even though we failed to save the state, it's better to clear it out than allow a stale state, so just log a warning.
+				UE_LOG(LogPluginSparkLogs, Warning, TEXT("STREAMER: Failed to save progress state."));
+			}
+			ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WriteProgressMarker|clearing progress state from INI file"));
+			GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerStateValue, TEXT(""), ProgressMarkerPath);
+		}
+	}
 	GConfig->Flush(false, ProgressMarkerPath);
 	if (WasDisabled)
 	{
@@ -1832,17 +2052,31 @@ bool FsparklogsReadAndStreamToCloud::WriteProgressMarker(int64 InMarker)
 void FsparklogsReadAndStreamToCloud::DeleteProgressMarker()
 {
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|DeleteProgressMarker|inifile='%s'"), *ProgressMarkerPath);
+	FScopeLock ConfigLock1(GetITLPluginConfigCriticalSection().CS.Get());
 	bool WasDisabled = GConfig->AreFileOperationsDisabled();
 	GConfig->EnableFileOperations();
 	if (!GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, ProgressMarkerPath))
 	{
 		GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerValue, TEXT("0"), ProgressMarkerPath);
 	}
+	if (!GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, ProgressMarkerStateValue, ProgressMarkerPath))
+	{
+		GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerStateValue, TEXT(""), ProgressMarkerPath);
+	}
+	if (!GConfig->RemoveKey(ITL_CONFIG_SECTION_NAME, ProgressMarkerLastReadLenValue, ProgressMarkerPath))
+	{
+		GConfig->SetString(ITL_CONFIG_SECTION_NAME, ProgressMarkerLastReadLenValue, TEXT(""), ProgressMarkerPath);
+	}
 	GConfig->Flush(false, ProgressMarkerPath);
 	if (WasDisabled)
 	{
 		GConfig->DisableFileOperations();
 	}
+}
+
+void FsparklogsReadAndStreamToCloud::GetCommonEventJSON(TArray<uint8>& OutData)
+{
+	OutData = CommonEventJSONData;
 }
 
 bool FindFirstByte(const uint8* Haystack, uint8 Needle, int MaxToSearch, int& OutIndex)
@@ -1961,6 +2195,7 @@ bool FsparklogsReadAndStreamToCloud::WorkerReadNextPayload(int& OutNumToRead, in
 		OutEffectiveShippedLogOffset = 0;
 		// Don't force a retried read to use the same payload size as last time since the whole file has changed.
 		WorkerLastFailedFlushPayloadSize = 0;
+		WorkerOverrideCommonEventJSONData.Reset();
 	}
 	// Start at the last known shipped position, read as many bytes as possible up to the max buffer size, and capture log lines into a JSON payload
 	WorkerReader->Seek(OutEffectiveShippedLogOffset);
@@ -2087,7 +2322,12 @@ bool FsparklogsReadAndStreamToCloud::WorkerBuildNextPayload(int NumToRead, int& 
 			WorkerNextPayload.Append(",");
 		}
 		WorkerNextPayload.Append("{");
-		if (CommonEventJSONData.Num() > 0)
+		if (WorkerOverrideCommonEventJSONData.Num() > 0)
+		{
+			WorkerNextPayload.Append((const ANSICHAR*)(WorkerOverrideCommonEventJSONData.GetData()), WorkerOverrideCommonEventJSONData.Num());
+			WorkerNextPayload.Append(",");
+		}
+		else if (CommonEventJSONData.Num() > 0)
 		{
 			WorkerNextPayload.Append((const ANSICHAR*)(CommonEventJSONData.GetData()), CommonEventJSONData.Num());
 			WorkerNextPayload.Append(",");
@@ -2174,6 +2414,13 @@ bool FsparklogsReadAndStreamToCloud::WorkerInternalDoFlush(int64& OutNewShippedL
 			UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER: Failed to compress payload: mode=%d"), (int)Settings->CompressionMode);
 			return false;
 		}
+		// Remember that we have a request being attempted (including the size of the read request). This state will be cleared out after a successful request.
+		// We are allowed to write the progress state here if we do not have an overridden state that we are using and we otherwise need to.
+		bool AllowWriteState = WorkerIsAllowedSerializeProgressState() && WorkerOverrideCommonEventJSONData.Num() <= 0;
+		if (WriteProgressMarker(EffectiveShippedLogOffset, NumToRead, AllowWriteState ? &CommonEventJSONData : nullptr) && AllowWriteState)
+		{
+			WorkerSerializeCommonEventJSON = false;
+		}
 		ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerInternalDoFlush|Begin processing payload"));
 		if (!PayloadProcessor->ProcessPayload(WorkerNextEncodedPayload, WorkerNextEncodedPayload.Num(), WorkerNextPayload.Len(), Settings->CompressionMode, WeakThisPtr))
 		{
@@ -2216,7 +2463,9 @@ bool FsparklogsReadAndStreamToCloud::WorkerDoFlush()
 		WorkerNumConsecutiveFlushFailures = 0;
 		WorkerLastFailedFlushPayloadSize = 0;
 		WorkerShippedLogOffset = ShippedNewLogOffset;
-		WriteProgressMarker(ShippedNewLogOffset);
+		WriteProgressMarker(ShippedNewLogOffset, 0, WorkerIsAllowedSerializeProgressState() ? &CommonEventJSONData : nullptr);
+		WorkerSerializeCommonEventJSON = false;
+		WorkerOverrideCommonEventJSONData.Empty();
 		WorkerMinNextFlushPlatformTime = FPlatformTime::Seconds() + Settings->ProcessingIntervalSecs;
 		LastFlushProcessedEverything.AtomicSet(FlushProcessedEverything);
 		FlushSuccessOpCounter.Increment();
@@ -2236,6 +2485,12 @@ double FsparklogsReadAndStreamToCloud::WorkerGetRetrySecs()
 	}
 	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("STREAMER|WorkerGetRetrySecs=%.3lf"), RetrySecs);
 	return RetrySecs;
+}
+
+bool FsparklogsReadAndStreamToCloud::WorkerIsAllowedSerializeProgressState()
+{
+	// NOTE: don't serialize progress state on mobile/console to minimize size of state
+	return WorkerSerializeCommonEventJSON && !ITLIsMobilePlatform() && !ITLIsConsolePlatform();
 }
 
 // =============== FsparklogsIndexedLockFile ===============================================================================
@@ -2449,6 +2704,9 @@ void FsparklogsOutputDeviceFile::InternalAddMessageEvent(FArchive& Output, FStri
 	}
 	FTCHARToUTF8_Convert::Convert(ConvertedEventData.GetData() + ConvertedRawJSONLength + ConvertedEventTagLength + ConvertedMessageLength, ConvertedTerminatorLength, Terminator, TerminatorLength);
 
+	ITL_DBG_UE_LOG(LogPluginSparkLogs, Display, TEXT("OUTPUTDEVICEFILE|InternalAddMessageEvent|RawJSON=%s|Message=%s|EventTag=%s|ConvertedRawJSONLen=%d|ConvertedMessageLen=%d|ConvertedEventTagLen=%d|ConvertedTerminatorLen=%d|Converted[0,1,2,3,4,5]=%d,%d,%d,%d,%d,%d"),
+		*RawJSON, Message, *EventTag, ConvertedRawJSONLength, ConvertedMessageLength, ConvertedEventTagLength, ConvertedTerminatorLength,
+		(int)ConvertedEventData.GetData()[0], (int)ConvertedEventData.GetData()[1], (int)ConvertedEventData.GetData()[2], (int)ConvertedEventData.GetData()[3], (int)ConvertedEventData.GetData()[4], (int)ConvertedEventData.GetData()[5]);
 	Output.Serialize(ConvertedEventData.GetData(), ConvertedEventData.Num() * sizeof(ANSICHAR));
 }
 
@@ -2628,6 +2886,8 @@ bool UsparklogsAnalytics::StartSession() { return FsparklogsModule::GetAnalytics
 bool UsparklogsAnalytics::StartSessionWithReason(const FString& Reason) { return FsparklogsModule::GetAnalyticsProvider()->StartSession(*Reason, TArray<FAnalyticsEventAttribute>()); }
 void UsparklogsAnalytics::EndSession() { FsparklogsModule::GetAnalyticsProvider()->EndSession(); }
 void UsparklogsAnalytics::EndSessionWithReason(const FString& Reason) { FsparklogsModule::GetAnalyticsProvider()->EndSession(*Reason); }
+FString UsparklogsAnalytics::GetUserID() { return FsparklogsModule::GetAnalyticsProvider()->GetUserID(); }
+void UsparklogsAnalytics::SetUserID(const FString& UserID) { return FsparklogsModule::GetAnalyticsProvider()->SetUserID(UserID); }
 FString UsparklogsAnalytics::GetSessionID() { return FsparklogsModule::GetAnalyticsProvider()->GetSessionID(); }
 FSparkLogsAnalyticsSessionDescriptor UsparklogsAnalytics::GetSessionDescriptor() { return FsparklogsModule::GetAnalyticsProvider()->GetSessionDescriptor(); }
 void UsparklogsAnalytics::SetUserTags(const TArray<FString>& UserTags) { FsparklogsModule::GetAnalyticsProvider()->SetUserTags(UserTags); }
@@ -4189,7 +4449,7 @@ bool FsparklogsAnalyticsProvider::SetSessionID(const FString& InSessionID)
 		// no-op
 		return true;
 	}
-	AutoCleanupSession();
+	AutoCleanupSession(TEXT("session ID is explicitly changing"));
 	FScopeLock WriteLock(&DataCriticalSection);
 	CurrentSessionID = InSessionID;
 	return true;
@@ -4212,7 +4472,7 @@ void FsparklogsAnalyticsProvider::SetUserID(const FString& InUserID)
 		// no-op
 		return;
 	}
-	AutoCleanupSession();
+	AutoCleanupSession(TEXT("user ID is explicitly changing"));
 	return Settings->SetUserID(*InUserID);
 }
 
@@ -4516,13 +4776,13 @@ bool FsparklogsAnalyticsProvider::AutoStartSessionBeforeEvent()
 	return StartSession(TEXT("auto started when first analytics event queued"), TArray<FAnalyticsEventAttribute>());
 }
 
-void FsparklogsAnalyticsProvider::AutoCleanupSession()
+void FsparklogsAnalyticsProvider::AutoCleanupSession(const FString& Reason)
 {
 	if (IsRunningDedicatedServer())
 	{
 		return;
 	}
-	EndSession();
+	EndSession(*Reason);
 }
 
 void FsparklogsAnalyticsProvider::CheckForStaleSessionAtStartup()
@@ -5098,10 +5358,12 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 		CloudStreamer->SetWeakThisPtr(CloudStreamer);
 
 		int64 StartingProgressMarker = 0;
-		CloudStreamer->ReadProgressMarker(StartingProgressMarker);
+		int StartingLastReadLen = 0;
+		TArray<uint8> IgnoreProgressState;
+		CloudStreamer->ReadProgressMarker(StartingProgressMarker, StartingLastReadLen, IgnoreProgressState);
 		if (StartingProgressMarker > 0)
 		{
-			UE_LOG(LogPluginSparkLogs, Log, TEXT("Resuming ingestion from progress marker %ld"), StartingProgressMarker);
+			UE_LOG(LogPluginSparkLogs, Log, TEXT("Resuming ingestion. progress_marker=%ld last_read_len=%d"), StartingProgressMarker, StartingLastReadLen);
 		}
 
 		FCoreDelegates::OnEnginePreExit.AddRaw(this, &FsparklogsModule::OnEnginePreExit);
