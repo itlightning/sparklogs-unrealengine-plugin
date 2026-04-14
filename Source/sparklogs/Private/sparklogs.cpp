@@ -4242,6 +4242,10 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventAd(const TCHAR* AdProvider
 	{
 		EventIDParts.Add(AdType);
 	}
+	if (AdAction != nullptr && 0 != *AdAction)
+	{
+		EventIDParts.Add(AdAction);
+	}
 	FString EventId = FlattenEventIDs(EventIDParts);
 
 	TSharedPtr<FJsonObject> Data(new FJsonObject());
