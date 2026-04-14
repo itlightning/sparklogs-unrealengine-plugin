@@ -689,7 +689,7 @@ FsparklogsSettings::FsparklogsSettings(int InInstanceIndex)
 	, DebugLogRequests(DefaultDebugLogRequests)
 	, AutoStart(DefaultAutoStart)
 	, CompressionMode(ITLCompressionMode::Default)
-	, AddRandomGameInstanceID(DefaultAddRandomGameInstanceID)
+	, AddRandomAppInstanceID(DefaultAddRandomAppInstanceID)
 	, StressTestGenerateIntervalSecs(0.0)
 	, StressTestNumEntriesPerTick(0)
 	, InstanceIndex(InInstanceIndex)
@@ -1216,9 +1216,9 @@ void FsparklogsSettings::LoadSettings()
 	{
 		AutoStart = DefaultAutoStart;
 	}
-	if (!GConfig->GetBool(*Section, *(SettingPrefix + TEXT("AddRandomGameInstanceID")), AddRandomGameInstanceID, GEngineIni))
+	if (!GConfig->GetBool(*Section, *(SettingPrefix + TEXT("AddRandomAppInstanceID")), AddRandomAppInstanceID, GEngineIni))
 	{
-		AddRandomGameInstanceID = DefaultAddRandomGameInstanceID;
+		AddRandomAppInstanceID = DefaultAddRandomAppInstanceID;
 	}
 
 	FString CompressionModeStr = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("CompressionMode")), GEngineIni).ToLower();
@@ -1650,7 +1650,7 @@ void FsparklogsStressGenerator::Stop()
 
 // =============== FsparklogsReadAndStreamToCloud ===============================================================================
 
-void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMetadata, const FString& GameInstanceID, int InstanceIndex, const TMap<FString, FString>* AdditionalAttributes)
+void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMetadata, const FString& AppInstanceID, int InstanceIndex, const TMap<FString, FString>* AdditionalAttributes)
 {
 	FString CommonEventJSON;
 
@@ -1674,16 +1674,16 @@ void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMe
 		}
 	}
 
-	if (Settings->AddRandomGameInstanceID && GameInstanceID.Len() > 0)
+	if (Settings->AddRandomAppInstanceID && AppInstanceID.Len() > 0)
 	{
 		if (!CommonEventJSON.IsEmpty())
 		{
 			CommonEventJSON.Append(TEXT(", "));
 		}
-		CommonEventJSON.Appendf(TEXT("\"game_instance_id\": %s"), *EscapeJsonString(GameInstanceID));
+		CommonEventJSON.Appendf(TEXT("\"app_instance_id\": %s"), *EscapeJsonString(AppInstanceID));
 		if (InstanceIndex > 1)
 		{
-			CommonEventJSON.Appendf(TEXT(", \"game_instance_index\": %d"), InstanceIndex);
+			CommonEventJSON.Appendf(TEXT(", \"app_instance_index\": %d"), InstanceIndex);
 		}
 	}
 
@@ -1725,7 +1725,7 @@ void FsparklogsReadAndStreamToCloud::ComputeCommonEventJSON(bool IncludeCommonMe
 	}
 }
 
-FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(int InstanceIndex, const FString& InSourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor, ESPMode::ThreadSafe> InPayloadProcessor, int InMaxLineLength, const FString& InOverrideComputerName, const FString& GameInstanceID, const TMap<FString, FString>* AdditionalAttributes)
+FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(int InstanceIndex, const FString& InSourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor, ESPMode::ThreadSafe> InPayloadProcessor, int InMaxLineLength, const FString& InOverrideComputerName, const FString& AppInstanceID, const TMap<FString, FString>* AdditionalAttributes)
 	: Settings(InSettings)
 	, PayloadProcessor(InPayloadProcessor)
 	, SourceLogFile(InSourceLogFile)
@@ -1741,7 +1741,7 @@ FsparklogsReadAndStreamToCloud::FsparklogsReadAndStreamToCloud(int InstanceIndex
 	, BytesQueuedSinceLastFlush(0)
 {
 	ProgressMarkerPath = ITLGetIndexedStateFileINI(InstanceIndex);
-	ComputeCommonEventJSON(Settings->IncludeCommonMetadata, GameInstanceID, InstanceIndex, AdditionalAttributes);
+	ComputeCommonEventJSON(Settings->IncludeCommonMetadata, AppInstanceID, InstanceIndex, AdditionalAttributes);
 
 	WorkerBuffer.AddUninitialized(Settings->BytesPerRequest);
 	int BufferSize = Settings->BytesPerRequest + 4096 + (Settings->BytesPerRequest / 10);
@@ -4242,6 +4242,10 @@ bool FsparklogsAnalyticsProvider::CreateAnalyticsEventAd(const TCHAR* AdProvider
 	{
 		EventIDParts.Add(AdType);
 	}
+	if (AdAction != nullptr && 0 != *AdAction)
+	{
+		EventIDParts.Add(AdAction);
+	}
 	FString EventId = FlattenEventIDs(EventIDParts);
 
 	TSharedPtr<FJsonObject> Data(new FJsonObject());
@@ -4397,7 +4401,7 @@ void FsparklogsAnalyticsProvider::DoEndSession(const TCHAR* Reason, FDateTime Se
 	Data->SetStringField(SessionEndFieldSessionEnded, ITLGetUTCDateTimeAsRFC3339(SessionEnded));
 	FTimespan SessionDuration = SessionEnded - SessionStarted;
 	double SessionDurationSecs = SessionDuration.GetTotalSeconds();
-	if (SessionDurationSecs > 0.0 || SessionDurationSecs < (60.0 * 60.0 * 24 * 30 * 12))
+	if (SessionDurationSecs > 0.0 && SessionDurationSecs < (60.0 * 60.0 * 24 * 30 * 12))
 	{
 		Data->SetNumberField(SessionEndFieldSessionDurationSecs, SessionDurationSecs);
 	}
@@ -4553,7 +4557,8 @@ void FsparklogsAnalyticsProvider::RecordItemPurchase(const FString& ItemId, int 
 		}
 		else if (0 == A.GetName().Compare(TEXT("currency"), ESearchCase::IgnoreCase)
 			|| 0 == A.GetName().Compare(TEXT("virtual_currency"), ESearchCase::IgnoreCase)
-			|| 0 == A.GetName().Compare(TEXT("game_currency"), ESearchCase::IgnoreCase))
+			|| 0 == A.GetName().Compare(TEXT("game_currency"), ESearchCase::IgnoreCase)
+			|| 0 == A.GetName().Compare(TEXT("app_currency"), ESearchCase::IgnoreCase))
 		{
 			VirtualCurrency = A.GetValue();
 		}
@@ -5072,7 +5077,7 @@ FsparklogsModule::FsparklogsModule()
 	: EngineActive(false)
 	, Settings(new FsparklogsSettings(GetITLPluginIndexedLock().IndexedLockFile->GetLockIndex()))
 {
-	GameInstanceID = ITLGenerateRandomAlphaNumID(24);
+	AppInstanceID = ITLGenerateRandomAlphaNumID(24);
 }
 
 void FsparklogsModule::StartupModule()
@@ -5201,9 +5206,9 @@ bool FsparklogsModule::AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalytics
 	return GetITLInternalGameLog(nullptr).LogDevice->AddRawEventWithJSONObject(OutputJson, LogMessage, true);
 }
 
-FString FsparklogsModule::GetGameInstanceID()
+FString FsparklogsModule::GetAppInstanceID()
 {
-	return GameInstanceID;
+	return AppInstanceID;
 }
 
 bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& options)
@@ -5354,7 +5359,7 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 			AuthorizationHeader = EffectiveHttpAuthorizationHeaderValue;
 		}
 		CloudPayloadProcessor = TSharedPtr<FsparklogsWriteHTTPPayloadProcessor, ESPMode::ThreadSafe>(new FsparklogsWriteHTTPPayloadProcessor(EffectiveHttpEndpointURI, AuthorizationHeader, Settings->RequestTimeoutSecs, Settings->DebugLogRequests, EffectiveTargetCurrency));
-		CloudStreamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(InstanceIndex, SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, options.OverrideComputerName, GameInstanceID, &options.AdditionalAttributes));
+		CloudStreamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(InstanceIndex, SourceLogFile, Settings, CloudPayloadProcessor.ToSharedRef(), GMaxLineLength, options.OverrideComputerName, AppInstanceID, &options.AdditionalAttributes));
 		CloudStreamer->SetWeakThisPtr(CloudStreamer);
 
 		int64 StartingProgressMarker = 0;

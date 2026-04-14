@@ -805,12 +805,12 @@ bool FsparklogsPluginUnitTestClearRetryTimer::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestGameInstanceID, "sparklogs.UnitTests.GameInstanceID", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
-void FsparklogsPluginUnitTestGameInstanceID::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FsparklogsPluginUnitTestAppInstanceID, "sparklogs.UnitTests.AppInstanceID", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+void FsparklogsPluginUnitTestAppInstanceID::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
 {
     SetupCompressionModes(OutBeautifiedNames, OutTestCommands);
 }
-bool FsparklogsPluginUnitTestGameInstanceID::RunTest(const FString& Parameters)
+bool FsparklogsPluginUnitTestAppInstanceID::RunTest(const FString& Parameters)
 {
     int TestInstanceIndex = FMath::RandRange(1000, 10000);
     FITLTestTempDirectory TempDir(ITLGetTestDir(), TestInstanceIndex);
@@ -825,12 +825,12 @@ bool FsparklogsPluginUnitTestGameInstanceID::RunTest(const FString& Parameters)
 
     TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(TestInstanceIndex));
     Settings->IncludeCommonMetadata = false;
-    Settings->AddRandomGameInstanceID = true;
+    Settings->AddRandomAppInstanceID = true;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
     TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(TestInstanceIndex, *TestLogFile, Settings, PayloadProcessor, 16 * 1024, FString(), TEXT("abcd_1234_EFGH"), nullptr));
     Streamer->SetWeakThisPtr(Streamer);
-    ExpectedPayloads.Add(FString::Format(TEXT("[{\"game_instance_id\": \"abcd_1234_EFGH\", \"game_instance_index\": {0},\"message\":\"{1}\"}]"), { TestInstanceIndex, TestPayload1 }));
+    ExpectedPayloads.Add(FString::Format(TEXT("[{\"app_instance_id\": \"abcd_1234_EFGH\", \"app_instance_index\": {0},\"message\":\"{1}\"}]"), { TestInstanceIndex, TestPayload1 }));
     bool FlushedEverything = false;
     TestTrue(TEXT("FlushAndWait[FINAL] should succeed"), Streamer->FlushAndWait(2, false, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor->Payloads, ExpectedPayloads));
@@ -901,7 +901,7 @@ bool FsparklogsPluginUnitTestDedupAfterCrash::RunTest(const FString& Parameters)
     Settings->ProcessingIntervalSecs = TestProcessingIntervalSecs;
     Settings->RetryIntervalSecs = TestRetryIntervalSecs;
     Settings->IncludeCommonMetadata = false;
-    Settings->AddRandomGameInstanceID = true;
+    Settings->AddRandomAppInstanceID = true;
     Settings->CompressionMode = (ITLCompressionMode)FCString::Atoi(*Parameters);
     TSharedRef<FsparklogsStoreInMemPayloadProcessor, ESPMode::ThreadSafe> PayloadProcessor(new FsparklogsStoreInMemPayloadProcessor());
     // Force payload processing to fail
@@ -932,7 +932,7 @@ bool FsparklogsPluginUnitTestDedupAfterCrash::RunTest(const FString& Parameters)
     TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> Streamer2 = TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe>(new FsparklogsReadAndStreamToCloud(TestInstanceIndex, *TestLogFile, Settings, PayloadProcessor2, 16 * 1024, FString(), TEXT("zzzz_yyyy_9876"), nullptr));
     Streamer2->SetWeakThisPtr(Streamer2);
     TArray<FString> ExpectedPayloads2;
-    ExpectedPayloads2.Add(FString::Format(TEXT("[{\"game_instance_id\": \"abcd_1234_EFGH\", \"game_instance_index\": {0},\"message\":\"{1}\"},{\"game_instance_id\": \"abcd_1234_EFGH\", \"game_instance_index\": {0},\"message\":\"{2}\"}]"), { TestInstanceIndex, TEXT("Line 1"), TEXT("Line 2") }));
+    ExpectedPayloads2.Add(FString::Format(TEXT("[{\"app_instance_id\": \"abcd_1234_EFGH\", \"app_instance_index\": {0},\"message\":\"{1}\"},{\"app_instance_id\": \"abcd_1234_EFGH\", \"app_instance_index\": {0},\"message\":\"{2}\"}]"), { TestInstanceIndex, TEXT("Line 1"), TEXT("Line 2") }));
     TestTrue(TEXT("FlushAndWait[2-1] should succeed"), Streamer2->FlushAndWait(2, true, false, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[2-1] payloads should match"), ITLComparePayloads(this, PayloadProcessor2->Payloads, ExpectedPayloads2));
     TestFalse(TEXT("FlushAndWait[2-1] should NOT capture everything"), FlushedEverything);
@@ -948,7 +948,7 @@ bool FsparklogsPluginUnitTestDedupAfterCrash::RunTest(const FString& Parameters)
     // also, make sure that this now uses the NEW progress state in the generated payload
     ITLWriteStringToFile(LogWriter, TEXT("Line 3\r\nLine 4\r\nlast line\r\n"));
     LogWriter->Flush();
-    ExpectedPayloads2.Add(FString::Format(TEXT("[{\"game_instance_id\": \"zzzz_yyyy_9876\", \"game_instance_index\": {0},\"message\":\"{1}\"},{\"game_instance_id\": \"zzzz_yyyy_9876\", \"game_instance_index\": {0},\"message\":\"{2}\"},{\"game_instance_id\": \"zzzz_yyyy_9876\", \"game_instance_index\": {0},\"message\":\"{3}\"}]"), { TestInstanceIndex, TEXT("1234Line 3"), TEXT("Line 4"), TEXT("last line")}));
+    ExpectedPayloads2.Add(FString::Format(TEXT("[{\"app_instance_id\": \"zzzz_yyyy_9876\", \"app_instance_index\": {0},\"message\":\"{1}\"},{\"app_instance_id\": \"zzzz_yyyy_9876\", \"app_instance_index\": {0},\"message\":\"{2}\"},{\"app_instance_id\": \"zzzz_yyyy_9876\", \"app_instance_index\": {0},\"message\":\"{3}\"}]"), { TestInstanceIndex, TEXT("1234Line 3"), TEXT("Line 4"), TEXT("last line")}));
     TestTrue(TEXT("FlushAndWait[2-FINAL] should succeed"), Streamer2->FlushAndWait(2, true, true, false, 10.0, FlushedEverything));
     TestTrue(TEXT("FlushAndWait[2-FINAL] payloads should match"), ITLComparePayloads(this, PayloadProcessor2->Payloads, ExpectedPayloads2));
     TestTrue(TEXT("FlushAndWait[2-FINAL] should capture everything"), FlushedEverything);

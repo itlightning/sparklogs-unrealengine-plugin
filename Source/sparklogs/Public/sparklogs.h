@@ -144,7 +144,7 @@ public:
 	static constexpr bool DefaultIncludeCommonMetadata = true;
 	static constexpr bool DefaultDebugLogRequests = false;
 	static constexpr bool DefaultAutoStart = true;
-	static constexpr bool DefaultAddRandomGameInstanceID = true;
+	static constexpr bool DefaultAddRandomAppInstanceID = true;
 
 	static constexpr double MinServerProcessingIntervalSecs = 0.5;
 	static constexpr double DefaultServerProcessingIntervalSecs = 3.0;
@@ -219,8 +219,8 @@ public:
 	bool AutoStart;
 	/** The type of data compression to use on the log payload. */
 	ITLCompressionMode CompressionMode;
-	/** Whether or not to automatically add a game_instance_id field with a random ID (set once at engine startup) */
-	bool AddRandomGameInstanceID;
+	/** Whether or not to automatically add an app_instance_id field with a random ID (set once at engine startup) */
+	bool AddRandomAppInstanceID;
 
 	/** If non-zero, then will generate fake logs periodically */
 	double StressTestGenerateIntervalSecs;
@@ -412,9 +412,9 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Request Timeout in Seconds")
 	float ServerRequestTimeoutSecs = FsparklogsSettings::DefaultRequestTimeoutSecs;
 
-	// Whether or not to automatically add a random game_instance_id field (ID randomly chosen at engine startup).
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Add Random Game Instance ID")
-	bool ServerAddRandomGameInstanceID = FsparklogsSettings::DefaultAddRandomGameInstanceID;
+	// Whether or not to automatically add a random app_instance_id field (ID randomly chosen at engine startup).
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Add Random App Instance ID")
+	bool ServerAddRandomAppInstanceID = FsparklogsSettings::DefaultAddRandomAppInstanceID;
 
 	// ------------------------------------------ EDITOR LAUNCH CONFIGURATION SETTINGS
 
@@ -458,9 +458,9 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Request Timeout in Seconds")
 	float EditorRequestTimeoutSecs = FsparklogsSettings::DefaultRequestTimeoutSecs;
 
-	// Whether or not to automatically add a random game_instance_id field (ID randomly chosen at engine startup). [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Add Random Game Instance ID")
-	bool EditorAddRandomGameInstanceID = FsparklogsSettings::DefaultAddRandomGameInstanceID;
+	// Whether or not to automatically add a random app_instance_id field (ID randomly chosen at engine startup). [EDITOR RESTART REQUIRED]
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Add Random App Instance ID")
+	bool EditorAddRandomAppInstanceID = FsparklogsSettings::DefaultAddRandomAppInstanceID;
 
 	// ------------------------------------------ CLIENT LAUNCH CONFIGURATION SETTINGS
 
@@ -504,9 +504,9 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Request Timeout in Seconds")
 	float ClientRequestTimeoutSecs = FsparklogsSettings::DefaultRequestTimeoutSecs;
 
-	// Whether or not to automatically add a random game_instance_id field (ID randomly chosen at engine startup).
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Add Random Game Instance ID")
-	bool ClientAddRandomGameInstanceID = FsparklogsSettings::DefaultAddRandomGameInstanceID;
+	// Whether or not to automatically add a random app_instance_id field (ID randomly chosen at engine startup).
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Add Random App Instance ID")
+	bool ClientAddRandomAppInstanceID = FsparklogsSettings::DefaultAddRandomAppInstanceID;
 
 	// ------------------------------------------ SERVER LAUNCH CONFIGURATION ADVANCED SETTINGS
 
@@ -766,11 +766,11 @@ protected:
 	/** The amount of bytes queued up since last flush. */
 	std::atomic<int64> BytesQueuedSinceLastFlush;
 
-	virtual void ComputeCommonEventJSON(bool IncludeCommonMetadata, const FString& GameInstanceID, int InstanceIndex, const TMap<FString, FString>* AdditionalAttributes);
+	virtual void ComputeCommonEventJSON(bool IncludeCommonMetadata, const FString& AppInstanceID, int InstanceIndex, const TMap<FString, FString>* AdditionalAttributes);
 
 public:
 
-	FsparklogsReadAndStreamToCloud(int InstanceIndex, const FString& SourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor, ESPMode::ThreadSafe> InPayloadProcessor, int InMaxLineLength, const FString& InOverrideComputerName, const FString& GameInstanceID, const TMap<FString, FString>* AdditionalAttributes);
+	FsparklogsReadAndStreamToCloud(int InstanceIndex, const FString& SourceLogFile, TSharedRef<FsparklogsSettings> InSettings, TSharedRef<IsparklogsPayloadProcessor, ESPMode::ThreadSafe> InPayloadProcessor, int InMaxLineLength, const FString& InOverrideComputerName, const FString& AppInstanceID, const TMap<FString, FString>* AdditionalAttributes);
 	~FsparklogsReadAndStreamToCloud();
 
 	// After constructing this object you must give it a weak pointer to itself before running it. Needed to pass to payload processor.
@@ -1603,7 +1603,7 @@ public:
 	static constexpr const TCHAR* LogFieldSeverity = TEXT("severity");
 	static constexpr const TCHAR* LogFieldReason = TEXT("reason");
 
-	static constexpr const TCHAR* MessageHeader = TEXT("GAME_ENGINE_ANALYTICS");
+	static constexpr const TCHAR* MessageHeader = TEXT("APP_ANALYTICS");
 	static constexpr const TCHAR* ItemSeparator = TEXT(":");
 
 	static constexpr const TCHAR* RecordEventGenericEventId = TEXT("generic");
@@ -1887,11 +1887,11 @@ public:
 	  * If analytics is not enabled, returns false. Returns true if the data was queued. */
 	virtual bool AddRawAnalyticsEvent(TSharedPtr<FJsonObject> RawAnalyticsData, const TCHAR* LogMessage, TSharedPtr<FJsonObject> CustomRootFields, bool ForceDisableAutoExtract, bool ForceDebugLogEvent);
 
-	/** Returns the random game_instance_id used for this run of the engine.
+	/** Returns the random app_instance_id used for this run of the engine.
 	  * There may be multiple game engine analytics sessions during a single game instance.
 	  * This is available after the module has started (even before the shipping
 	  * engine is started.*/
-	FString GetGameInstanceID();
+	FString GetAppInstanceID();
 
 	/**
 	 * Starts the log/event shipping engine if it has not yet started.
@@ -1923,7 +1923,7 @@ private:
 	/** Singleton analytics provider */
 	static TSharedPtr<FsparklogsAnalyticsProvider> AnalyticsProvider;
 
-	FString GameInstanceID;
+	FString AppInstanceID;
 	bool EngineActive;
 	TSharedRef<FsparklogsSettings> Settings;
 	TSharedPtr<FsparklogsReadAndStreamToCloud, ESPMode::ThreadSafe> CloudStreamer;
