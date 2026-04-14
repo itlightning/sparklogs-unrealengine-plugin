@@ -50,7 +50,7 @@ services:
                     \"message\": { \"type\": \"text\" },
                     \"hostname\": { \"type\": \"keyword\" },
                     \"app\": { \"type\": \"keyword\" },
-                    \"game_instance_id\": { \"type\": \"keyword\" }
+                    \"app_instance_id\": { \"type\": \"keyword\" }
                   },
                   \"dynamic_templates\": [
                     {
