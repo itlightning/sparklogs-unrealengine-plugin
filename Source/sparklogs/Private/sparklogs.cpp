@@ -4401,7 +4401,7 @@ void FsparklogsAnalyticsProvider::DoEndSession(const TCHAR* Reason, FDateTime Se
 	Data->SetStringField(SessionEndFieldSessionEnded, ITLGetUTCDateTimeAsRFC3339(SessionEnded));
 	FTimespan SessionDuration = SessionEnded - SessionStarted;
 	double SessionDurationSecs = SessionDuration.GetTotalSeconds();
-	if (SessionDurationSecs > 0.0 || SessionDurationSecs < (60.0 * 60.0 * 24 * 30 * 12))
+	if (SessionDurationSecs > 0.0 && SessionDurationSecs < (60.0 * 60.0 * 24 * 30 * 12))
 	{
 		Data->SetNumberField(SessionEndFieldSessionDurationSecs, SessionDurationSecs);
 	}
