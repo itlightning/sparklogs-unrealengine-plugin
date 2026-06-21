@@ -1,4 +1,4 @@
-// Copyright (C) 2024-2025 IT Lightning, LLC. All rights reserved.
+// Copyright (C) 2024-2026 IT Lightning, LLC. All rights reserved.
 // Licensed software - see LICENSE
 
 #pragma once
@@ -78,6 +78,9 @@ SPARKLOGS_API FString ITLCalcUniqueFieldName(const TSharedPtr<FJsonObject> Objec
 
 /** Returns a sanitized version of the given string that is safe to use as an INI key name */
 SPARKLOGS_API FString ITLSanitizeINIKeyName(const FString & In);
+
+/** Loads a config string preferring KeyName; falls back to LegacyKeyName when the primary value is empty. */
+SPARKLOGS_API FString ITLLoadConfigStringWithLegacyFallback(const FString& Section, const FString& KeyName, const FString& LegacyKeyName, const FString& ConfigFilename);
 
 /** Tries really hard to delete the given file, or if that fails to rename it. Returns true on success or false otherwise. */
 SPARKLOGS_API bool ITLPurgeFile(const FString & Path);
@@ -191,11 +194,11 @@ public:
 	FString HttpEndpointURI;
 	/** Request timeout in seconds */
 	double RequestTimeoutSecs;
-	/** ID of the agent when pushing logs to the cloud */
-	FString AgentID;
-	/** Auth token associated with the agent when pushing logs to the cloud */
-	FString AgentAuthToken;
-	/** Overrides the HTTP Authorization header value directly (if specified, the AgentID and AgentAuthToken values will be ignored). Useful if you specify your own HTTP endpoint. */
+	/** Ingest Key ID when pushing logs to the cloud */
+	FString IngestKeyID;
+	/** Ingest Key auth token when pushing logs to the cloud */
+	FString IngestKeyAuthToken;
+	/** Overrides the HTTP Authorization header value directly (if specified, the IngestKeyID and IngestKeyAuthToken values will be ignored). Useful if you specify your own HTTP endpoint. */
 	FString HttpAuthorizationHeaderValue;
 	/** What percent of the time to activate this plugin (whether started automatically or manually). 0.0 to 100.0. Defaults to 100%. Useful for incrementally rolling out the plugin. */
 	double ActivationPercentage;
@@ -384,19 +387,19 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "SparkLogs Cloud Region", meta = (GetOptions = "GetSparkLogsCloudRegionOptions"))
 	FString ServerCloudRegion;
 
-	// For authentication: ID of the cloud agent that will receive the ingested log data.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "SparkLogs Agent ID")
-	FString ServerAgentID;
+	// For authentication: Ingest Key ID that will receive the ingested log data.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "SparkLogs Ingest Key ID")
+	FString ServerIngestKeyID;
 
-	// For authentication: Auth token associated with the cloud agent receiving the log data.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "SparkLogs Agent Auth Token")
-	FString ServerAgentAuthToken;
+	// For authentication: Ingest Key auth token associated with the ingest key receiving the log data.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "SparkLogs Ingest Key Auth Token")
+	FString ServerIngestKeyAuthToken;
 
 	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., http://localhost:9880/ or https://ingestlogs.myservice.com/ingest/v1
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Custom HTTP Endpoint URI")
 	FString ServerHTTPEndpointURI;
 
-	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue
+	// Normally leave blank and set IngestKeyID and IngestKeyAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Server Launch Configuration", DisplayName = "Custom HTTP Authorization Header Value")
 	FString ServerHTTPAuthorizationHeaderValue;
 
@@ -430,19 +433,19 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true, GetOptions = "GetSparkLogsCloudRegionOptions"), DisplayName = "SparkLogs Cloud Region")
 	FString EditorCloudRegion;
 
-	// For authentication: ID of the cloud agent that will receive the ingested log data. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName="SparkLogs Agent ID")
-	FString EditorAgentID;
+	// For authentication: Ingest Key ID that will receive the ingested log data. [EDITOR RESTART REQUIRED]
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName="SparkLogs Ingest Key ID")
+	FString EditorIngestKeyID;
 
-	// For authentication: Auth token associated with the cloud agent receiving the log data. [EDITOR RESTART REQUIRED]
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName="SparkLogs Agent Auth Token")
-	FString EditorAgentAuthToken;
+	// For authentication: Ingest Key auth token associated with the ingest key receiving the log data. [EDITOR RESTART REQUIRED]
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName="SparkLogs Ingest Key Auth Token")
+	FString EditorIngestKeyAuthToken;
 
 	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., http://localhost:9880/ or https://ingestlogs.myservice.com/ingest/v1 [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Custom HTTP Endpoint URI")
 	FString EditorHTTPEndpointURI;
 
-	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue [EDITOR RESTART REQUIRED]
+	// Normally leave blank and set IngestKeyID and IngestKeyAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue [EDITOR RESTART REQUIRED]
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Editor Launch Configuration", Meta = (ConfigRestartRequired = true), DisplayName = "Custom HTTP Authorization Header Value")
 	FString EditorHTTPAuthorizationHeaderValue;
 
@@ -476,19 +479,19 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "SparkLogs Cloud Region", meta = (GetOptions = "GetSparkLogsCloudRegionOptions"))
 	FString ClientCloudRegion;
 
-	// For authentication: ID of the cloud agent that will receive the ingested log data.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "SparkLogs Agent ID")
-	FString ClientAgentID;
+	// For authentication: Ingest Key ID that will receive the ingested log data.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "SparkLogs Ingest Key ID")
+	FString ClientIngestKeyID;
 
-	// For authentication: Auth token associated with the cloud agent receiving the log data.
-	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "SparkLogs Agent Auth Token")
-	FString ClientAgentAuthToken;
+	// For authentication: Ingest Key auth token associated with the ingest key receiving the log data.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "SparkLogs Ingest Key Auth Token")
+	FString ClientIngestKeyAuthToken;
 
 	// Normally leave blank and set CloudRegion. Overrides the URI of the endpoint to push log payloads to, e.g., http://localhost:9880/ or https://ingestlogs.myservice.com/ingest/v1
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Custom HTTP Endpoint URI")
 	FString ClientHTTPEndpointURI;
 
-	// Normally leave blank and set AgentID and AgentAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue
+	// Normally leave blank and set IngestKeyID and IngestKeyAuthToken. Overrides the HTTP Authorization header value directly. Useful if you specify your own HTTP endpoint. For example: Bearer mybearertokenvalue
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Settings In Client Launch Configuration", DisplayName = "Custom HTTP Authorization Header Value")
 	FString ClientHTTPAuthorizationHeaderValue;
 
@@ -1804,11 +1807,11 @@ public:
 	/** Override the target currency for automatic currency conversion (one of AUD, CAD, CHF, CNY, EUR, GBP, INR, JPY, and USD) */
 	FString OverrideAnalyticsTargetCurrency;
 	
-	/** If not empty, will override the config setting for the agent ID used to authenticate with the SparkLogs cloud. */
-	FString OverrideAgentID;
+	/** If not empty, will override the config setting for the Ingest Key ID used to authenticate with the SparkLogs cloud. */
+	FString OverrideIngestKeyID;
 	
-	/** If not empty, will override the config setting for the agent auth token used to authenticate with the SparkLogs cloud. */
-	FString OverrideAgentAuthToken;
+	/** If not empty, will override the config setting for the Ingest Key auth token used to authenticate with the SparkLogs cloud. */
+	FString OverrideIngestKeyAuthToken;
 	
 	/** If not empty, will override the config setting for the HTTP token authorization header. For example to specify custom token auth use something like "Bearer my_token_value" */
 	FString OverrideHttpAuthorizationHeaderValue;
