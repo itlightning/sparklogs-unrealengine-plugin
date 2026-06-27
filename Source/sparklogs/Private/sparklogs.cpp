@@ -1,4 +1,4 @@
-// Copyright (C) 2024-2025 IT Lightning, LLC. All rights reserved.
+// Copyright (C) 2024-2026 IT Lightning, LLC. All rights reserved.
 // Licensed software - see LICENSE
 
 #include "sparklogs.h"
@@ -1099,6 +1099,170 @@ void FsparklogsSettings::GetLastAnalyticsSessionStartInfo(FString& OutSessionID,
 	OutSessionStarted = ITLParseDateTime(TimeStr);
 }
 
+static constexpr const TCHAR* ITLIngestKeyIDSuffix = TEXT("IngestKeyID");
+static constexpr const TCHAR* ITLIngestKeyAuthTokenSuffix = TEXT("IngestKeyAuthToken");
+static constexpr const TCHAR* ITLLegacyIngestKeyIDSuffix = TEXT("AgentID");
+static constexpr const TCHAR* ITLLegacyIngestKeyAuthTokenSuffix = TEXT("AgentAuthToken");
+
+FString ITLLoadConfigStringWithLegacyFallback(const FString& Section, const FString& KeyName, const FString& LegacyKeyName, const FString& ConfigFilename)
+{
+	FString Value = GConfig->GetStr(*Section, *KeyName, *ConfigFilename);
+	Value.TrimStartAndEndInline();
+	if (Value.IsEmpty())
+	{
+		Value = GConfig->GetStr(*Section, *LegacyKeyName, *ConfigFilename);
+		Value.TrimStartAndEndInline();
+	}
+	return Value;
+}
+
+static FString ITLReadTrimmedConfigString(const FString& Section, const FString& KeyName, const FString& ConfigFilename)
+{
+	FString Value = GConfig->GetStr(*Section, *KeyName, *ConfigFilename);
+	Value.TrimStartAndEndInline();
+	return Value;
+}
+
+struct FITLIngestKeyCredentialMigration
+{
+	FString LegacyIDKey;
+	FString NewIDKey;
+	FString LegacyTokenKey;
+	FString NewTokenKey;
+	FString ExpectedID;
+	FString ExpectedToken;
+	bool bMigrateID = false;
+	bool bMigrateToken = false;
+};
+
+static void ITLMigrateLegacyAgentConfigKeysInEditor(FsparklogsSettings* Settings)
+{
+	if (!GIsEditor || !UObjectInitialized())
+	{
+		return;
+	}
+
+	const FString Section = ITL_CONFIG_SECTION_NAME;
+	const FString DefaultEngineIniPath = FPaths::ProjectConfigDir() + TEXT("DefaultEngine.ini");
+	if (!FPaths::FileExists(DefaultEngineIniPath))
+	{
+		return;
+	}
+
+	static const TCHAR* Prefixes[] = {
+		INISectionForServer,
+		INISectionForEditor,
+		INISectionForClient,
+		INISectionForCommandlet,
+	};
+
+	TArray<FITLIngestKeyCredentialMigration> Migrations;
+	bool bAnyMigration = false;
+
+	for (const TCHAR* Prefix : Prefixes)
+	{
+		const FString PrefixStr(Prefix);
+		const FString LegacyIDKey = PrefixStr + ITLLegacyIngestKeyIDSuffix;
+		const FString NewIDKey = PrefixStr + ITLIngestKeyIDSuffix;
+		const FString LegacyTokenKey = PrefixStr + ITLLegacyIngestKeyAuthTokenSuffix;
+		const FString NewTokenKey = PrefixStr + ITLIngestKeyAuthTokenSuffix;
+
+		const FString LegacyID = ITLReadTrimmedConfigString(Section, LegacyIDKey, GEngineIni);
+		const FString NewID = ITLReadTrimmedConfigString(Section, NewIDKey, GEngineIni);
+		const FString LegacyToken = ITLReadTrimmedConfigString(Section, LegacyTokenKey, GEngineIni);
+		const FString NewToken = ITLReadTrimmedConfigString(Section, NewTokenKey, GEngineIni);
+
+		FITLIngestKeyCredentialMigration Entry;
+		Entry.LegacyIDKey = LegacyIDKey;
+		Entry.NewIDKey = NewIDKey;
+		Entry.LegacyTokenKey = LegacyTokenKey;
+		Entry.NewTokenKey = NewTokenKey;
+
+		if (!LegacyID.IsEmpty() && !NewID.IsEmpty() && LegacyID != NewID)
+		{
+			UE_LOG(LogPluginSparkLogs, Warning, TEXT("SparkLogs ingest key config: %s has both legacy and new ID values that differ; keeping new value."), *NewIDKey);
+		}
+		if (!LegacyToken.IsEmpty() && !NewToken.IsEmpty() && LegacyToken != NewToken)
+		{
+			UE_LOG(LogPluginSparkLogs, Warning, TEXT("SparkLogs ingest key config: %s has both legacy and new auth token values that differ; keeping new value."), *NewTokenKey);
+		}
+
+		if (!LegacyID.IsEmpty() && NewID.IsEmpty())
+		{
+			Entry.bMigrateID = true;
+			Entry.ExpectedID = LegacyID;
+			// Write only the migrated keys; do not use UObject::SaveConfig (would rewrite unrelated settings from CDO defaults).
+			GConfig->SetString(*Section, *NewIDKey, *LegacyID, DefaultEngineIniPath);
+			bAnyMigration = true;
+		}
+		if (!LegacyToken.IsEmpty() && NewToken.IsEmpty())
+		{
+			Entry.bMigrateToken = true;
+			Entry.ExpectedToken = LegacyToken;
+			GConfig->SetString(*Section, *NewTokenKey, *LegacyToken, DefaultEngineIniPath);
+			bAnyMigration = true;
+		}
+
+		if (Entry.bMigrateID || Entry.bMigrateToken)
+		{
+			Migrations.Add(Entry);
+		}
+	}
+
+	if (!bAnyMigration)
+	{
+		return;
+	}
+
+	GConfig->Flush(true, DefaultEngineIniPath);
+
+	bool bAllVerified = true;
+	for (const FITLIngestKeyCredentialMigration& Entry : Migrations)
+	{
+		if (Entry.bMigrateID)
+		{
+			const FString Verified = ITLReadTrimmedConfigString(Section, Entry.NewIDKey, DefaultEngineIniPath);
+			if (Verified != Entry.ExpectedID)
+			{
+				UE_LOG(LogPluginSparkLogs, Warning, TEXT("SparkLogs ingest key config: failed to verify migrated value for %s; leaving legacy keys unchanged."), *Entry.NewIDKey);
+				bAllVerified = false;
+			}
+		}
+		if (Entry.bMigrateToken)
+		{
+			const FString Verified = ITLReadTrimmedConfigString(Section, Entry.NewTokenKey, DefaultEngineIniPath);
+			if (Verified != Entry.ExpectedToken)
+			{
+				UE_LOG(LogPluginSparkLogs, Warning, TEXT("SparkLogs ingest key config: failed to verify migrated value for %s; leaving legacy keys unchanged."), *Entry.NewTokenKey);
+				bAllVerified = false;
+			}
+		}
+	}
+
+	if (bAllVerified)
+	{
+		for (const FITLIngestKeyCredentialMigration& Entry : Migrations)
+		{
+			if (Entry.bMigrateID)
+			{
+				GConfig->RemoveKey(*Section, *Entry.LegacyIDKey, DefaultEngineIniPath);
+			}
+			if (Entry.bMigrateToken)
+			{
+				GConfig->RemoveKey(*Section, *Entry.LegacyTokenKey, DefaultEngineIniPath);
+			}
+		}
+		GConfig->Flush(true, DefaultEngineIniPath);
+	}
+
+	// NOTE: even if verification failed, new keys may be on disk so still refresh UObject from INI
+	GetMutableDefault<USparkLogsRuntimeSettings>()->ReloadConfig(CPF_Config, *DefaultEngineIniPath);
+	if (Settings != nullptr)
+	{
+		Settings->LoadSettings();
+	}
+}
+
 void FsparklogsSettings::LoadSettings()
 {
 	FString Section = ITL_CONFIG_SECTION_NAME;
@@ -1159,8 +1323,8 @@ void FsparklogsSettings::LoadSettings()
 		RequestTimeoutSecs = DefaultRequestTimeoutSecs;
 	}
 
-	AgentID = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("AgentID")), GEngineIni);
-	AgentAuthToken = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("AgentAuthToken")), GEngineIni);
+	IngestKeyID = ITLLoadConfigStringWithLegacyFallback(Section, SettingPrefix + ITLIngestKeyIDSuffix, SettingPrefix + ITLLegacyIngestKeyIDSuffix, GEngineIni);
+	IngestKeyAuthToken = ITLLoadConfigStringWithLegacyFallback(Section, SettingPrefix + ITLIngestKeyAuthTokenSuffix, SettingPrefix + ITLLegacyIngestKeyAuthTokenSuffix, GEngineIni);
 	HttpAuthorizationHeaderValue = GConfig->GetStr(*Section, *(SettingPrefix + TEXT("HTTPAuthorizationHeaderValue")), GEngineIni);
 	
 	FString StringActivationPercentage;
@@ -1265,8 +1429,8 @@ void FsparklogsSettings::LoadSettings()
 
 void FsparklogsSettings::EnforceConstraints()
 {
-	AgentID.TrimStartAndEndInline();
-	AgentAuthToken.TrimStartAndEndInline();
+	IngestKeyID.TrimStartAndEndInline();
+	IngestKeyAuthToken.TrimStartAndEndInline();
 
 	if (RequestTimeoutSecs < MinRequestTimeoutSecs)
 	{
@@ -5262,16 +5426,16 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 		Settings->CollectAnalytics = EffectiveCollectAnalytics;
 	}
 
-	FString EffectiveAgentID = Settings->AgentID;
-	FString EffectiveAgentAuthToken = Settings->AgentAuthToken;
+	FString EffectiveIngestKeyID = Settings->IngestKeyID;
+	FString EffectiveIngestKeyAuthToken = Settings->IngestKeyAuthToken;
 	FString EffectiveHttpAuthorizationHeaderValue = Settings->HttpAuthorizationHeaderValue;
-	if (options.OverrideAgentID.Len() > 0)
+	if (options.OverrideIngestKeyID.Len() > 0)
 	{
-		EffectiveAgentID = options.OverrideAgentID;
+		EffectiveIngestKeyID = options.OverrideIngestKeyID;
 	}
-	if (options.OverrideAgentAuthToken.Len() > 0)
+	if (options.OverrideIngestKeyAuthToken.Len() > 0)
 	{
-		EffectiveAgentAuthToken = options.OverrideAgentAuthToken;
+		EffectiveIngestKeyAuthToken = options.OverrideIngestKeyAuthToken;
 	}
 	if (options.OverrideHttpAuthorizationHeaderValue.Len() > 0)
 	{
@@ -5285,7 +5449,7 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Not yet configured for this launch configuration. In plugin settings for %s launch configuration, configure CloudRegion to 'us' or 'eu' for your SparkLogs cloud region (or if you are sending data to your own HTTP service, configure HttpEndpointURI to the appropriate endpoint, such as http://localhost:9880/ or https://ingestlogs.myservice.com/ingest/v1)"), *GetITLINISettingPrefix());
 		return false;
 	}
-	if (UsingSparkLogsCloud && (EffectiveAgentID.IsEmpty() || EffectiveAgentAuthToken.IsEmpty()))
+	if (UsingSparkLogsCloud && (EffectiveIngestKeyID.IsEmpty() || EffectiveIngestKeyAuthToken.IsEmpty()))
 	{
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Not yet configured for this launch configuration. In plugin settings for %s launch configuration, configure authentication credentials to enable. Consider using credentials for Editor vs Client vs Server."), *GetITLINISettingPrefix());
 		return false;
@@ -5294,7 +5458,7 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 	// If we're sending data to the SparkLogs cloud then use lz4 compression by default, otherwise use none as lz4 support is nonstandard.
 	if (Settings->CompressionMode == ITLCompressionMode::Default)
 	{
-		if (UsingSparkLogsCloud || (!EffectiveAgentID.IsEmpty() && !EffectiveAgentAuthToken.IsEmpty()))
+		if (UsingSparkLogsCloud || (!EffectiveIngestKeyID.IsEmpty() && !EffectiveIngestKeyAuthToken.IsEmpty()))
 		{
 			UE_LOG(LogPluginSparkLogs, Log, TEXT("Sending data to SparkLogs cloud, so using lz4 as default compression mode."));
 			Settings->CompressionMode = ITLCompressionMode::LZ4;
@@ -5327,7 +5491,7 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 		}
 	}
 
-	UE_LOG(LogPluginSparkLogs, Log, TEXT("Starting up: LaunchConfiguration=%s, HttpEndpointURI=%s, AgentID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s, CollectLogs=%s, CollectAnalytics=%s"), GetITLLaunchConfiguration(true), *EffectiveHttpEndpointURI, *EffectiveAgentID, Settings->ActivationPercentage, DiceRoll, EngineActive ? TEXT("yes") : TEXT("no"), EffectiveCollectLogs ? TEXT("yes") : TEXT("no"), EffectiveCollectAnalytics ? TEXT("yes") : TEXT("no"));
+	UE_LOG(LogPluginSparkLogs, Log, TEXT("Starting up: LaunchConfiguration=%s, HttpEndpointURI=%s, IngestKeyID=%s, ActivationPercentage=%lf, DiceRoll=%f, Activated=%s, CollectLogs=%s, CollectAnalytics=%s"), GetITLLaunchConfiguration(true), *EffectiveHttpEndpointURI, *EffectiveIngestKeyID, Settings->ActivationPercentage, DiceRoll, EngineActive ? TEXT("yes") : TEXT("no"), EffectiveCollectLogs ? TEXT("yes") : TEXT("no"), EffectiveCollectAnalytics ? TEXT("yes") : TEXT("no"));
 	if (!EffectiveCollectLogs && !EffectiveCollectAnalytics)
 	{
 		UE_LOG(LogPluginSparkLogs, Log, TEXT("Log collection and analytics collection are both disabled. No reason to start engine."));
@@ -5352,7 +5516,7 @@ bool FsparklogsModule::StartShippingEngine(const FSparkLogsEngineOptions& option
 		FString AuthorizationHeader;
 		if (EffectiveHttpAuthorizationHeaderValue.IsEmpty())
 		{
-			AuthorizationHeader = FString::Format(TEXT("Bearer {0}:{1}"), { *EffectiveAgentID, *EffectiveAgentAuthToken });
+			AuthorizationHeader = FString::Format(TEXT("Bearer {0}:{1}"), { *EffectiveIngestKeyID, *EffectiveIngestKeyAuthToken });
 		}
 		else
 		{
@@ -5485,6 +5649,7 @@ void FsparklogsModule::OnPostEngineInit()
 {
 	if (UObjectInitialized())
 	{
+		ITLMigrateLegacyAgentConfigKeysInEditor(&Settings.Get());
 		// Allow the user to edit settings in the project settings editor
 		RegisterSettings();
 	}

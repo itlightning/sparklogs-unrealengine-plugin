@@ -1,4 +1,4 @@
-﻿// Copyright (C) 2024-2025 IT Lightning, LLC. All rights reserved.
+﻿// Copyright (C) 2024-2026 IT Lightning, LLC. All rights reserved.
 // Licensed software - see LICENSE
 
 #include "Misc/AutomationTest.h"
@@ -1261,5 +1261,80 @@ bool FsparklogsPluginIntegrationTestAutoFlushRawEvent::RunTest(const FString& Pa
     TestTrue(TEXT("FlushAndWait[FINAL] should capture everything"), FlushedEverything);
 
     Streamer.Reset();
+    return true;
+}
+
+class FITLTestTempIniFile
+{
+public:
+    explicit FITLTestTempIniFile(const FString& InPath) : Path(InPath)
+    {
+        IFileManager::Get().Delete(*Path, false, true, true);
+    }
+
+    ~FITLTestTempIniFile()
+    {
+        GConfig->Remove(Path);
+        IFileManager::Get().Delete(*Path, false, true, true);
+    }
+
+    FString Path;
+};
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FsparklogsPluginUnitTestIngestKeyConfigFallback, "sparklogs.UnitTests.IngestKeyConfigFallback", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+bool FsparklogsPluginUnitTestIngestKeyConfigFallback::RunTest(const FString& Parameters)
+{
+    const FString Section = ITL_CONFIG_SECTION_NAME;
+    const FString TempIni = FPaths::CreateTempFilename(*FPaths::ProjectIntermediateDir(), TEXT("itl-ingestkey-test-"), TEXT(".ini"));
+    FITLTestTempIniFile TempIniGuard(TempIni);
+
+    GConfig->SetString(*Section, TEXT("ServerIngestKeyID"), TEXT("new-id"), TempIni);
+    TestEqual(TEXT("New key wins"), ITLLoadConfigStringWithLegacyFallback(Section, TEXT("ServerIngestKeyID"), TEXT("ServerAgentID"), TempIni), FString(TEXT("new-id")));
+
+    GConfig->EmptySection(*Section, TempIni);
+    GConfig->SetString(*Section, TEXT("ServerAgentID"), TEXT("legacy-id"), TempIni);
+    TestEqual(TEXT("Legacy fallback"), ITLLoadConfigStringWithLegacyFallback(Section, TEXT("ServerIngestKeyID"), TEXT("ServerAgentID"), TempIni), FString(TEXT("legacy-id")));
+
+    GConfig->SetString(*Section, TEXT("ServerIngestKeyID"), TEXT("new-id"), TempIni);
+    TestEqual(TEXT("Both set prefers new"), ITLLoadConfigStringWithLegacyFallback(Section, TEXT("ServerIngestKeyID"), TEXT("ServerAgentID"), TempIni), FString(TEXT("new-id")));
+
+    GConfig->EmptySection(*Section, TempIni);
+    GConfig->SetString(*Section, TEXT("CommandletAgentAuthToken"), TEXT("legacy-commandlet-token"), TempIni);
+    TestEqual(TEXT("Commandlet legacy token fallback"), ITLLoadConfigStringWithLegacyFallback(Section, TEXT("CommandletIngestKeyAuthToken"), TEXT("CommandletAgentAuthToken"), TempIni), FString(TEXT("legacy-commandlet-token")));
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FsparklogsPluginUnitTestLoadSettingsIngestKeyLegacy, "sparklogs.UnitTests.LoadSettingsIngestKeyLegacy", EAutomationTestFlags::EditorContext | EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::EngineFilter)
+bool FsparklogsPluginUnitTestLoadSettingsIngestKeyLegacy::RunTest(const FString& Parameters)
+{
+    const FString Section = ITL_CONFIG_SECTION_NAME;
+    const FString Prefix = TEXT("Editor");
+    const FString LegacyIDKey = Prefix + TEXT("AgentID");
+    const FString LegacyTokenKey = Prefix + TEXT("AgentAuthToken");
+    const FString NewIDKey = Prefix + TEXT("IngestKeyID");
+    const FString NewTokenKey = Prefix + TEXT("IngestKeyAuthToken");
+
+    GConfig->SetString(*Section, *LegacyIDKey, TEXT("legacy-editor-id"), GEngineIni);
+    GConfig->SetString(*Section, *LegacyTokenKey, TEXT("legacy-editor-token"), GEngineIni);
+    GConfig->RemoveKey(*Section, *NewIDKey, GEngineIni);
+    GConfig->RemoveKey(*Section, *NewTokenKey, GEngineIni);
+
+    TSharedRef<FsparklogsSettings> Settings(new FsparklogsSettings(1));
+    Settings->LoadSettings();
+
+    TestEqual(TEXT("LoadSettings legacy ID"), Settings->IngestKeyID, FString(TEXT("legacy-editor-id")));
+    TestEqual(TEXT("LoadSettings legacy token"), Settings->IngestKeyAuthToken, FString(TEXT("legacy-editor-token")));
+
+    GConfig->SetString(*Section, *NewIDKey, TEXT("new-editor-id"), GEngineIni);
+    GConfig->SetString(*Section, *NewTokenKey, TEXT("new-editor-token"), GEngineIni);
+    Settings->LoadSettings();
+    TestEqual(TEXT("LoadSettings new ID wins"), Settings->IngestKeyID, FString(TEXT("new-editor-id")));
+    TestEqual(TEXT("LoadSettings new token wins"), Settings->IngestKeyAuthToken, FString(TEXT("new-editor-token")));
+
+    GConfig->RemoveKey(*Section, *LegacyIDKey, GEngineIni);
+    GConfig->RemoveKey(*Section, *LegacyTokenKey, GEngineIni);
+    GConfig->RemoveKey(*Section, *NewIDKey, GEngineIni);
+    GConfig->RemoveKey(*Section, *NewTokenKey, GEngineIni);
     return true;
 }

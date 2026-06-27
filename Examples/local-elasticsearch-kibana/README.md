@@ -9,7 +9,7 @@ Kibana with a data view for visualizing the log data ingested into the Elasticse
 If you want to easily collaborate over logs with your entire team, consider using the
 plugin with the [SparkLogs Cloud](https://sparklogs.com/). Configuration is easy,
 just specify the cloud region for your account in the plugin settings, as well as the
-agent ID and auth token from your account. Logs will then flow to your cloud account.
+ingest key ID and access token from your account. Logs will then flow to your cloud account.
 
 ## Prerequisites
 
