@@ -1256,7 +1256,7 @@ static void ITLMigrateLegacyAgentConfigKeysInEditor(FsparklogsSettings* Settings
 	}
 
 	// NOTE: even if verification failed, new keys may be on disk so still refresh UObject from INI
-	GetMutableDefault<USparkLogsRuntimeSettings>()->ReloadConfig(CPF_Config, *DefaultEngineIniPath);
+	GetMutableDefault<USparkLogsRuntimeSettings>()->ReloadConfig(USparkLogsRuntimeSettings::StaticClass(), *DefaultEngineIniPath);
 	if (Settings != nullptr)
 	{
 		Settings->LoadSettings();
